@@ -1,0 +1,15 @@
+{
+  "listen": ":8080",
+  "admin_listen": ":8081",
+  "target_url": "https://your-provider.com",
+  "keys": [
+    "sk-your-key-1",
+    "sk-your-key-2",
+    "sk-your-key-3"
+  ],
+  "cooling_seconds": 60,
+  "max_retries": 3,
+  "request_timeout_seconds": 120,
+  "log_level": "info",
+  "log_format": "text"
+}

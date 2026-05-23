@@ -1,0 +1,7 @@
+config.json
+key.txt
+*.log
+*.exe
+*.exe~
+claude-key-proxy
+claude-key-proxy-*
