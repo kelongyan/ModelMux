@@ -42,6 +42,31 @@ function Get-AdminBaseUrl {
     return "http://$hostName`:$port"
 }
 
+# 从 Invoke-WebRequest 的异常中安全提取 HTTP 状态码；连接失败等异常没有 Response 属性。
+function Get-ErrorHttpStatusCode {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+
+    $exception = $ErrorRecord.Exception
+    if ($null -eq $exception) {
+        return $null
+    }
+
+    $responseProperty = $exception.PSObject.Properties["Response"]
+    if ($null -ne $responseProperty -and $null -ne $responseProperty.Value) {
+        $statusProperty = $responseProperty.Value.PSObject.Properties["StatusCode"]
+        if ($null -ne $statusProperty -and $null -ne $statusProperty.Value) {
+            return [int]$statusProperty.Value
+        }
+    }
+
+    $statusCodeProperty = $exception.PSObject.Properties["StatusCode"]
+    if ($null -ne $statusCodeProperty -and $null -ne $statusCodeProperty.Value) {
+        return [int]$statusCodeProperty.Value
+    }
+
+    return $null
+}
+
 # 只要 admin health 端点有 HTTP 响应，就认为服务已经在运行，避免重复启动。
 function Test-AdminResponding {
     param([string]$BaseUrl)
@@ -50,8 +75,9 @@ function Test-AdminResponding {
         $resp = Invoke-WebRequest -Uri "$BaseUrl/admin/health" -UseBasicParsing -TimeoutSec 2
         return [pscustomobject]@{ Responding = $true; StatusCode = [int]$resp.StatusCode }
     } catch {
-        if ($_.Exception.Response) {
-            return [pscustomobject]@{ Responding = $true; StatusCode = [int]$_.Exception.Response.StatusCode }
+        $statusCode = Get-ErrorHttpStatusCode -ErrorRecord $_
+        if ($null -ne $statusCode) {
+            return [pscustomobject]@{ Responding = $true; StatusCode = $statusCode }
         }
         return [pscustomobject]@{ Responding = $false; StatusCode = 0 }
     }
