@@ -26,7 +26,7 @@
   "log_level": "info",
   "log_format": "text",
   "log_output": "both",
-  "log_file": "logs/claude-key-proxy.log",
+  "log_file": "logs/modelmux.log",
   "log_max_size_mb": 20,
   "log_max_backups": 5,
   "log_max_age_days": 30,

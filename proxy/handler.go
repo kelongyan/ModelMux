@@ -16,16 +16,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/claude-key-proxy/config"
-	"github.com/claude-key-proxy/logx"
-	"github.com/claude-key-proxy/pool"
+	"github.com/kelongyan/ModelMux/config"
+	"github.com/kelongyan/ModelMux/logx"
+	"github.com/kelongyan/ModelMux/pool"
 )
 
 var (
 	errClientCanceled      = errors.New("client canceled request")
 	errStreamFailed        = errors.New("stream failed")
 	errRequestBodyTooLarge = errors.New("request body too large")
+	errKeyQuotaExhausted   = errors.New("key quota exhausted")
 )
+
+const quotaErrorInspectBytes int64 = 64 * 1024
 
 type Handler struct {
 	pools           *pool.ProviderPools
@@ -274,6 +277,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"provider_id", rt.providerID,
 				"key_id", logx.MaskSecret(key.Value),
 			)...)
+		case http.StatusForbidden:
+			if !errors.Is(err, errKeyQuotaExhausted) {
+				slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
+					"status", status,
+					"provider_id", rt.providerID,
+					"err", err,
+				)...)
+				return
+			}
+			key.MarkInvalid()
+			h.notifyStateChanged(true)
+			slog.Warn("key quota exhausted, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyQuotaExhausted,
+				"attempt", attempt+1,
+				"provider_id", rt.providerID,
+				"key_id", logx.MaskSecret(key.Value),
+			)...)
 		default:
 			// 非重试错误已经在 forward 中写出响应，这里只记录分类日志。
 			slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
@@ -293,7 +312,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
-// 成功时返回状态码和 nil；429/401 返回可重试错误；其他错误会在本函数内写出响应。
+// 成功时返回状态码和 nil；429、401 和余额不足类 403 返回可重试错误；其他错误会在本函数内写出响应。
 func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, error) {
 	outReq, err := buildRequest(rt, r, key, body)
 	if err != nil {
@@ -327,11 +346,24 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		return resp.StatusCode, 0, fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 
+	responseBody := io.Reader(resp.Body)
+	if resp.StatusCode == http.StatusForbidden {
+		prefix, replayBody, err := readResponsePrefix(resp.Body, quotaErrorInspectBytes)
+		if err != nil {
+			writeProxyError(w, http.StatusBadGateway, "failed to read upstream error body")
+			return http.StatusBadGateway, 0, err
+		}
+		if isQuotaExhaustedBody(prefix) {
+			return resp.StatusCode, 0, fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
+		}
+		responseBody = replayBody
+	}
+
 	key.RecordLatency(time.Since(upstreamStart))
 
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	if err := streamBody(w, resp.Body); err != nil {
+	if err := streamBody(w, responseBody); err != nil {
 		slog.Warn("stream failed", logx.Fields(logx.CategoryStream, logx.EventStreamFailed,
 			"path", r.URL.Path,
 			"status", resp.StatusCode,
@@ -342,6 +374,52 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		return resp.StatusCode, 0, fmt.Errorf("%w: %v", errStreamFailed, err)
 	}
 	return resp.StatusCode, 0, nil
+}
+
+// readResponsePrefix 读取响应体前缀用于错误分类，并返回可重放完整响应体的 reader。
+func readResponsePrefix(body io.Reader, limit int64) ([]byte, io.Reader, error) {
+	if body == nil {
+		return nil, http.NoBody, nil
+	}
+	if limit <= 0 {
+		return nil, body, nil
+	}
+
+	var prefix bytes.Buffer
+	if _, err := io.Copy(&prefix, io.LimitReader(body, limit)); err != nil {
+		return nil, nil, err
+	}
+	prefixBytes := prefix.Bytes()
+	return prefixBytes, io.MultiReader(bytes.NewReader(prefixBytes), body), nil
+}
+
+// quotaExhaustedIndicators 覆盖常见中英文余额、额度和信用不足错误文案。
+var quotaExhaustedIndicators = []string{
+	"预扣费额度失败",
+	"用户剩余额度",
+	"余额不足",
+	"额度不足",
+	"insufficient_quota",
+	"insufficient quota",
+	"quota_exceeded",
+	"quota exceeded",
+	"insufficient credit",
+	"insufficient credits",
+	"insufficient balance",
+	"not enough credit",
+	"not enough credits",
+	"balance not enough",
+}
+
+// isQuotaExhaustedBody 判断 403 响应是否属于 key 级余额或额度不足。
+func isQuotaExhaustedBody(body []byte) bool {
+	normalized := strings.ToLower(string(body))
+	for _, indicator := range quotaExhaustedIndicators {
+		if strings.Contains(normalized, indicator) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildRequest 基于原请求构造上游请求，并覆盖认证头为当前选中的 key。
@@ -444,7 +522,7 @@ func streamBody(w http.ResponseWriter, body io.Reader) error {
 	}
 }
 
-// writeProxyError 输出 Anthropic 兼容风格的 JSON 错误，使用编码器保证消息被正确转义。
+// writeProxyError 输出统一代理 JSON 错误，使用编码器保证消息被正确转义。
 func writeProxyError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

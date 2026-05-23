@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claude-key-proxy/logx"
 	"github.com/fsnotify/fsnotify"
+	"github.com/kelongyan/ModelMux/logx"
 )
 
 const defaultWatchDebounce = 300 * time.Millisecond

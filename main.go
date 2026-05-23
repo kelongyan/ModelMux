@@ -14,12 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/claude-key-proxy/admin"
-	"github.com/claude-key-proxy/config"
-	"github.com/claude-key-proxy/logx"
-	"github.com/claude-key-proxy/pool"
-	"github.com/claude-key-proxy/proxy"
-	"github.com/claude-key-proxy/state"
+	"github.com/kelongyan/ModelMux/admin"
+	"github.com/kelongyan/ModelMux/config"
+	"github.com/kelongyan/ModelMux/logx"
+	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/proxy"
+	"github.com/kelongyan/ModelMux/state"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 

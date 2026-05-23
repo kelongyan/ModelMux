@@ -26,6 +26,7 @@ const (
 	EventKeyPoolInitialized  = "lifecycle.key_pool_initialized"
 	EventKeyCooling          = "retry.key_cooling"
 	EventKeyInvalid          = "retry.key_invalid"
+	EventKeyQuotaExhausted   = "retry.key_quota_exhausted"
 	EventNoAvailableKey      = "proxy.no_available_key"
 	EventProxyListening      = "lifecycle.proxy_listening"
 	EventProxySuccess        = "proxy.success"

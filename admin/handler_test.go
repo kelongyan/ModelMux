@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/claude-key-proxy/pool"
+	"github.com/kelongyan/ModelMux/pool"
 )
 
 func TestStatusIncludesProviderSummary(t *testing.T) {

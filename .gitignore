@@ -9,3 +9,6 @@ logs/
 *.exe~
 claude-key-proxy
 claude-key-proxy-*
+modelmux
+modelmux.exe
+modelmux-*

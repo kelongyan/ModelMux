@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/claude-key-proxy/config"
-	"github.com/claude-key-proxy/pool"
+	"github.com/kelongyan/ModelMux/config"
+	"github.com/kelongyan/ModelMux/pool"
 )
 
 func mustHandler(t *testing.T, cfg *config.Config) (*Handler, *pool.ProviderPools) {
@@ -37,7 +37,7 @@ func mustHandler(t *testing.T, cfg *config.Config) (*Handler, *pool.ProviderPool
 	return h, pools
 }
 
-func TestBuildRequestRewritesAnthropicAuthHeaders(t *testing.T) {
+func TestBuildRequestRewritesUpstreamAuthHeaders(t *testing.T) {
 	cfg := &config.Config{
 		TargetURL:             "https://example.com",
 		Keys:                  []string{"rotated-key"},
@@ -159,6 +159,222 @@ func TestServeHTTPRetriesUnauthorizedWithOriginalBody(t *testing.T) {
 	}
 	if attempts.Load() != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts.Load())
+	}
+}
+
+func TestServeHTTPRetriesQuotaExhaustedForbiddenWithOriginalBody(t *testing.T) {
+	var attempts atomic.Int32
+	var firstBody string
+	var secondBody string
+	var mu sync.Mutex
+	var serverErr error
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			mu.Lock()
+			serverErr = fmt.Errorf("ReadAll() error: %w", err)
+			mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		switch attempts.Add(1) {
+		case 1:
+			firstBody = string(body)
+			if got := r.Header.Get("X-Api-Key"); got != "k1" {
+				mu.Lock()
+				serverErr = fmt.Errorf("first X-Api-Key = %q, want %q", got, "k1")
+				mu.Unlock()
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"message":"预扣费额度失败, 用户剩余额度: 灵石0.288604, 需要预扣费额度: 灵石0.315356"}}`))
+		case 2:
+			secondBody = string(body)
+			if got := r.Header.Get("X-Api-Key"); got != "k2" {
+				mu.Lock()
+				serverErr = fmt.Errorf("second X-Api-Key = %q, want %q", got, "k2")
+				mu.Unlock()
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			mu.Lock()
+			serverErr = fmt.Errorf("unexpected attempt %d", attempts.Load())
+			mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:             upstream.URL,
+		Keys:                  []string{"k1", "k2"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	var sawImmediate atomic.Bool
+	var hookCalls atomic.Int32
+	h.SetStateChangeHook(func(now bool) {
+		if now {
+			sawImmediate.Store(true)
+		}
+		hookCalls.Add(1)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/messages", strings.NewReader(`{"prompt":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	h.ServeHTTP(rr, req)
+
+	mu.Lock()
+	err := serverErr
+	mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if firstBody != `{"prompt":"hi"}` {
+		t.Fatalf("first body = %q", firstBody)
+	}
+	if secondBody != `{"prompt":"hi"}` {
+		t.Fatalf("second body = %q", secondBody)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts.Load())
+	}
+	if hookCalls.Load() == 0 {
+		t.Fatal("state hook was not called")
+	}
+	if !sawImmediate.Load() {
+		t.Fatal("state hook never received immediate = true for quota exhausted key")
+	}
+
+	activeStatus, err := pools.ActiveStatus()
+	if err != nil {
+		t.Fatalf("ActiveStatus() error = %v", err)
+	}
+	if got := activeStatus.InvalidKeys; got != 1 {
+		t.Fatalf("invalid keys = %d, want 1", got)
+	}
+	if got := activeStatus.ActiveKeys; got != 1 {
+		t.Fatalf("active keys = %d, want 1", got)
+	}
+}
+
+func TestServeHTTPPassesThroughNonQuotaForbidden(t *testing.T) {
+	var calls atomic.Int32
+	const upstreamBody = `{"error":{"message":"model access denied"}}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("X-Upstream-Error", "permission")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(upstreamBody))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:             upstream.URL,
+		Keys:                  []string{"k1", "k2"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            3,
+		CoolingSeconds:        1,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	var hookCalls atomic.Int32
+	h.SetStateChangeHook(func(bool) {
+		hookCalls.Add(1)
+	})
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+	if got := rr.Body.String(); got != upstreamBody {
+		t.Fatalf("body = %q, want %q", got, upstreamBody)
+	}
+	if got := rr.Header().Get("X-Upstream-Error"); got != "permission" {
+		t.Fatalf("X-Upstream-Error = %q, want permission", got)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("upstream calls = %d, want 1", calls.Load())
+	}
+	if hookCalls.Load() != 1 {
+		t.Fatalf("state hook calls = %d, want 1 for forwarded response stats", hookCalls.Load())
+	}
+
+	activeStatus, err := pools.ActiveStatus()
+	if err != nil {
+		t.Fatalf("ActiveStatus() error = %v", err)
+	}
+	if got := activeStatus.InvalidKeys; got != 0 {
+		t.Fatalf("invalid keys = %d, want 0", got)
+	}
+	if got := activeStatus.ActiveKeys; got != 2 {
+		t.Fatalf("active keys = %d, want 2", got)
+	}
+}
+
+func TestIsQuotaExhaustedBody(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "chinese prepaid quota",
+			body: "预扣费额度失败, 用户剩余额度: 灵石0.288604, 需要预扣费额度: 灵石0.315356",
+			want: true,
+		},
+		{
+			name: "english quota code",
+			body: `{"type":"insufficient_quota","message":"quota exceeded"}`,
+			want: true,
+		},
+		{
+			name: "ordinary permission denied",
+			body: `{"message":"model access denied"}`,
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isQuotaExhaustedBody([]byte(tc.body)); got != tc.want {
+				t.Fatalf("isQuotaExhaustedBody() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadResponsePrefixReplaysFullBody(t *testing.T) {
+	prefix, replayBody, err := readResponsePrefix(strings.NewReader("abcdef"), 3)
+	if err != nil {
+		t.Fatalf("readResponsePrefix() error = %v", err)
+	}
+	if string(prefix) != "abc" {
+		t.Fatalf("prefix = %q, want abc", string(prefix))
+	}
+	replayed, err := io.ReadAll(replayBody)
+	if err != nil {
+		t.Fatalf("ReadAll(replayBody) error = %v", err)
+	}
+	if string(replayed) != "abcdef" {
+		t.Fatalf("replayed body = %q, want abcdef", string(replayed))
 	}
 }
 

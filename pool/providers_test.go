@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claude-key-proxy/state"
+	"github.com/kelongyan/ModelMux/state"
 )
 
 func TestProviderPoolsActiveProviderOnly(t *testing.T) {

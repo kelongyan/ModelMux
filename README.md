@@ -1,32 +1,29 @@
 # ModelMux
 
-面向 Claude / Anthropic-compatible API 的本地反向代理。它把多个 provider 的上游地址和 API Key 池收口成一个本地入口，运行时只使用当前选中的 `active_provider`，并在该 provider 内部做 key 轮换、限速冷却、失效摘除、配置热重载和日志轮转。
+ModelMux 是一个本地模型提供商管理与请求路由工具。它把多个模型服务提供商、上游地址和 API Key 池集中到一个本地入口，通过 `active_provider` 选择当前使用的提供商，并在该提供商内部完成 key 轮询、错误摘除、限速冷却、热重载、状态持久化和结构化日志。
 
-> 仓库已更名为 `github.com/kelongyan/ModelMux`。为避免引入运行风险，当前 Go module、import path、二进制名和脚本中的可执行文件名仍保留 `claude-key-proxy`。
+它适合个人或小型本地环境统一管理多组模型服务凭据：客户端只需要连接本地代理地址，真实上游地址和 key 由 ModelMux 维护。
 
-适合个人在本机给 Claude Code 或其他兼容客户端使用：客户端只连 `http://127.0.0.1:8080`，真正的上游地址和 key 池由代理维护。
+## 功能特性
 
-## 特性
-
-- 支持在配置文件中保存多个 provider，并用 `active_provider` 选择当前使用的 provider
-- 每个 provider 拥有独立 key 池，默认 round-robin；不会在多个 provider 之间自动轮询或 fallback
-- 上游返回 `429` 时自动冷却当前 key，并切换下一个 key 重试
-- 上游返回 `401` 时自动标记当前 key 失效，避免继续使用
-- 支持 `Retry-After`，优先使用上游建议冷却时间
-- SSE / 流式响应透传，每个响应块写出后立即 flush
-- 自动监听配置文件变化并热重载运行时配置
-- 管理接口查看健康状态、key 状态和手动 reload
-- key 池运行状态持久化，按 provider 分组保存，状态文件不包含完整 API Key
-- 结构化日志，支持按 category / event 分类
-- 支持控制台、文件、控制台+文件双写
-- 支持日志文件自动轮转、压缩和保留策略
-- 单二进制部署，默认本机使用
+- 多提供商集中配置，通过 `active_provider` 控制当前路由目标
+- 每个提供商拥有独立 key 池，key 状态和统计互不影响
+- 当前提供商内部按 round-robin 选择可用 key
+- `429` 自动进入 cooling 状态，并支持 `Retry-After`
+- `401` 自动标记 key 为 invalid
+- 余额或额度不足类 `403` 自动标记 key 为 invalid，并换 key 重试
+- 请求体大小限制，避免异常请求占用过多内存
+- 流式响应按块透传，降低代理侧缓冲影响
+- 配置文件热重载，支持手动 reload
+- 管理接口查看健康状态、提供商状态和 key 状态
+- key 池状态持久化，状态文件只保存 key 哈希标识
+- 结构化日志，支持控制台、文件、控制台加文件双写
+- 日志文件支持轮转、压缩和保留策略
+- 单二进制部署，默认只监听本机管理端口
 
 ## 快速开始
 
-### 1. 准备配置
-
-复制示例配置：
+### 准备配置
 
 ```powershell
 Copy-Item config.example.json config.json
@@ -63,70 +60,52 @@ Copy-Item config.example.json config.json
   "log_level": "info",
   "log_format": "text",
   "log_output": "both",
-  "log_file": "logs/claude-key-proxy.log",
+  "log_file": "logs/modelmux.log",
   "log_max_size_mb": 20,
   "log_max_backups": 5,
   "log_max_age_days": 30,
-  "log_compress": true
+  "log_compress": true,
+  "persist_state": true,
+  "state_file": "state.json",
+  "invalid_ttl_hours": 24
 }
 ```
 
-### 2. 构建
+### 构建
 
 ```powershell
-make build
+go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 ```
 
-没有 `make` 时可以直接运行：
+### 启动
 
 ```powershell
-go build -trimpath -ldflags="-s -w" -o claude-key-proxy.exe .
+.\modelmux.exe -config config.json
 ```
 
-### 3. 启动
-
-```powershell
-.\claude-key-proxy.exe -config config.json
-```
-
-默认代理地址是：
+默认地址：
 
 ```text
-http://127.0.0.1:8080
+代理入口: http://127.0.0.1:8080
+管理入口: http://127.0.0.1:8081
 ```
 
-默认管理地址是：
+客户端应把本地代理入口作为模型服务 base URL，并提供任意非空客户端侧 API Key。转发到上游时，ModelMux 会使用当前提供商 key 池中选出的真实 key 覆盖认证头。
 
-```text
-http://127.0.0.1:8081
-```
-
-## 配置 Claude Code
-
-PowerShell：
-
-```powershell
-$env:ANTHROPIC_BASE_URL='http://127.0.0.1:8080'
-$env:ANTHROPIC_API_KEY='dummy'
-claude
-```
-
-`ANTHROPIC_API_KEY` 这里只需要是任意非空值，真正发给上游的 key 会由代理从当前 `active_provider` 的 `keys` 列表中选择。
-
-## 配置项
+## 配置说明
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `listen` | `:8080` | 代理服务监听地址 |
-| `admin_listen` | `127.0.0.1:8081` | 管理服务监听地址，默认只监听本机 |
-| `active_provider` | 第一个 provider | 当前使用的 provider ID |
-| `providers` | 无 | provider 列表，至少一个 |
-| `providers[].id` | 无 | provider 稳定 ID，不能重复 |
-| `providers[].target_url` | 无 | 当前 provider 的上游 Claude 兼容 API 地址 |
-| `providers[].keys` | 无 | 当前 provider 的 API Key 列表，至少一个 |
-| `cooling_seconds` | `60` | 429 后默认冷却秒数 |
-| `max_retries` | `3` | 401/429 后最大重试次数 |
-| `request_timeout_seconds` | `120` | 上游请求超时 |
+| `listen` | `:8080` | 本地代理服务监听地址 |
+| `admin_listen` | `127.0.0.1:8081` | 管理服务监听地址 |
+| `active_provider` | 第一个 provider | 当前使用的提供商 ID |
+| `providers` | 无 | 提供商列表，至少一个 |
+| `providers[].id` | 无 | 提供商稳定 ID，不能重复 |
+| `providers[].target_url` | 无 | 提供商上游服务地址 |
+| `providers[].keys` | 无 | 提供商 API Key 列表，至少一个 |
+| `cooling_seconds` | `60` | 未提供 `Retry-After` 时的 429 冷却秒数 |
+| `max_retries` | `3` | 可换 key 错误的最大重试次数 |
+| `request_timeout_seconds` | `120` | 上游请求超时时间 |
 | `max_body_bytes` | `33554432` | 请求体最大字节数，默认 32MB |
 | `log_level` | `info` | `debug` / `info` / `warn` / `error` |
 | `log_format` | `text` | `text` / `json` |
@@ -140,13 +119,13 @@ claude
 | `state_file` | `state.json` | key 池状态文件路径 |
 | `invalid_ttl_hours` | `24` | invalid 状态保留小时数，超时后下次启动恢复 active |
 
-旧版 `target_url` + `keys` 单 provider 配置仍然兼容，会被自动视为 ID 为 `default` 的 provider。如果设置了 `log_file` 但没有设置 `log_output`，程序会默认使用 `both`，也就是控制台和文件双写。
+旧版 `target_url` 加 `keys` 的单提供商配置仍可使用，会被自动转换为 ID 为 `default` 的提供商。
 
 ## 热重载
 
-程序会自动监听配置文件所在目录。保存 `config.json` 后，命中的配置会自动热重载。
+ModelMux 会监听配置文件所在目录。保存配置文件后，可热更新字段会自动生效。
 
-会热生效：
+热生效字段：
 
 - `active_provider`
 - `providers`
@@ -157,7 +136,7 @@ claude
 - `request_timeout_seconds`
 - `max_body_bytes`
 
-需要重启才生效：
+需要重启才生效的字段：
 
 - `listen`
 - `admin_listen`
@@ -170,19 +149,19 @@ claude
 - `log_max_age_days`
 - `log_compress`
 
-也可以手动触发 reload：
+手动触发 reload：
 
 ```powershell
 Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
 ```
 
-热重载失败时，旧的运行时配置会继续保留，不会把代理切到半坏状态。
+热重载失败时，旧运行时配置会继续保留。
 
-## Admin API
+## 管理接口
 
 ### `GET /admin/health`
 
-查看代理是否还有可用 key。
+查看当前提供商是否还有可用 key。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8081/admin/health
@@ -201,20 +180,20 @@ Invoke-RestMethod http://127.0.0.1:8081/admin/health
 
 ### `GET /admin/status`
 
-查看所有 key 的状态和统计信息。
+查看所有提供商和 key 的运行状态。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8081/admin/status
 ```
 
-响应字段：
+主要字段：
 
-- `active_keys`: 当前可用 key 数量
-- `cooling_keys`: 正在冷却的 key 数量
-- `invalid_keys`: 已失效 key 数量
-- `active_provider`: 当前选中的 provider ID
-- `providers`: 所有 provider 的 key 状态汇总
-- `keys`: 当前 active provider 内每个 key 的状态、请求数、错误数、平均延迟、冷却结束时间
+- `active_provider`: 当前提供商 ID
+- `active_keys`: 当前提供商可用 key 数量
+- `cooling_keys`: 当前提供商 cooling key 数量
+- `invalid_keys`: 当前提供商 invalid key 数量
+- `providers`: 所有提供商的状态列表
+- `keys`: 当前提供商 key 状态、请求数、错误数、平均延迟和冷却结束时间
 
 ### `POST /admin/reload`
 
@@ -224,45 +203,45 @@ Invoke-RestMethod http://127.0.0.1:8081/admin/status
 Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
 ```
 
-## Key 状态机
+## Key 状态
 
 ```text
 active --429--> cooling --冷却到期--> active
 active --401--> invalid
+active --余额或额度不足类 403--> invalid
 ```
 
-状态说明：
+- `active`: 可用 key
+- `cooling`: 因限速暂时冷却
+- `invalid`: 因认证失败或余额不足被摘除
 
-- `active`: 可用
-- `cooling`: 因 429 暂时冷却
-- `invalid`: 因 401 被摘除
+`cooling` 到期后会自动恢复。`invalid` 在进程运行期间不会自动恢复；启用状态持久化后，超过 `invalid_ttl_hours` 的 invalid key 会在下次启动时恢复为 active。也可以通过更新配置中的 key 列表重新启用。
 
-`cooling` 到期后会自动恢复。`invalid` 在进程运行期间不会自动恢复；启用状态持久化后，超过 `invalid_ttl_hours` 的 invalid key 会在下次启动时恢复为 active，也可以通过更新配置中的 key 列表重新启用。
-
-启用状态持久化后，`cooling`、`invalid` 和请求统计会写入 `state_file`。状态按 provider ID 分组保存，并只保存 key 的 SHA-256 标识，不保存完整 API Key。启动时会恢复仍在 TTL 内的 `invalid` 状态；超过 `invalid_ttl_hours` 的 invalid key 会恢复为 active。
+状态持久化文件按 provider ID 分组保存，只保存 key 的 SHA-256 标识，不保存完整 API Key。
 
 ## 请求处理策略
 
-代理处理一次请求时：
+一次请求的处理流程：
 
 1. 读取请求体，并检查 `max_body_bytes`
-2. 从 key 池选择一个可用 key
-3. 覆盖请求中的 `Authorization` 和 `X-Api-Key`
-4. 转发到当前 `active_provider` 的 `target_url`
-5. 上游返回 `429` 时冷却当前 key，换 key 重试
-6. 上游返回 `401` 时标记当前 key invalid，换 key 重试
-7. 不会因为某个 provider 的 key 耗尽而自动切换到其他 provider；需要修改 `active_provider` 并热重载
-8. 其他状态码直接透传给客户端
-9. 响应体按 4KB 块流式转发，并在每次写入后 flush
+2. 获取当前 `active_provider` 的 key 池
+3. 从 key 池按 round-robin 选择一个可用 key
+4. 覆盖上游请求的 `Authorization` 和 `X-Api-Key`
+5. 转发到当前提供商的 `target_url`
+6. `429`：当前 key 进入 cooling，换 key 重试
+7. `401`：当前 key 标记 invalid，换 key 重试
+8. 余额或额度不足类 `403`：当前 key 标记 invalid，换 key 重试
+9. 其他状态码：原样透传给客户端
+10. 响应体按 4KB 块转发，并在每次写入后 flush
 
-为了支持重试，请求体会在代理内完整读入内存。因此建议保持 `max_body_bytes` 为合理值。
+ModelMux 不会在一个提供商耗尽时自动切换到另一个提供商。提供商切换由 `active_provider` 控制，修改后热重载即可生效。
 
 ## 日志
 
-日志使用 `log/slog` 输出，并统一带有：
+日志使用 `log/slog`，统一包含：
 
 - `category`: 日志分类
-- `event`: 具体事件
+- `event`: 事件名称
 
 常见分类：
 
@@ -273,13 +252,14 @@ active --401--> invalid
 - `retry`
 - `upstream`
 - `stream`
+- `state`
 
-文件轮转由 `lumberjack` 处理。示例配置：
+示例配置：
 
 ```json
 {
   "log_output": "both",
-  "log_file": "logs/claude-key-proxy.log",
+  "log_file": "logs/modelmux.log",
   "log_max_size_mb": 20,
   "log_max_backups": 5,
   "log_max_age_days": 30,
@@ -287,7 +267,7 @@ active --401--> invalid
 }
 ```
 
-如果想让日志更适合机器解析，可以设置：
+如果需要机器解析日志，可以设置：
 
 ```json
 {
@@ -297,113 +277,72 @@ active --401--> invalid
 
 ## 构建与测试
 
-常用命令：
-
-```powershell
-make build
-make run
-make test
-```
-
-直接使用 Go：
-
 ```powershell
 go test ./...
 go vet ./...
 go test -race ./...
-go build -trimpath -ldflags="-s -w" -o claude-key-proxy.exe .
-```
-
-跨平台构建：
-
-```powershell
-make build-linux
-make build-windows
-make build-mac
+go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 ```
 
 ## 目录结构
 
 ```text
 ModelMux/
-├── admin/              # 管理 API
-├── config/             # 配置加载、校验、文件监听
-├── logx/               # 日志分类和脱敏工具
-├── pool/               # key 池、状态机、轮询
-├── proxy/              # 反向代理、重试、流式响应
+├── admin/              # 管理接口
+├── config/             # 配置加载、校验和文件监听
+├── logx/               # 日志字段和脱敏工具
+├── pool/               # provider 池、key 池和状态机
+├── proxy/              # 请求转发、重试和流式响应
+├── state/              # key 池状态持久化
 ├── config.example.json # 示例配置
 ├── go.mod
 ├── Makefile
 └── README.md
 ```
 
-## 依赖
-
-项目主要逻辑仍基于 Go 标准库实现，当前引入的第三方依赖用于稳定性和易用性：
-
-- `github.com/fsnotify/fsnotify`: 监听配置文件变化并自动热重载
-- `gopkg.in/natefinch/lumberjack.v2`: 日志文件轮转
-
 ## 故障排查
 
-### Claude Code 连接不上
-
-先检查代理是否启动：
+### 服务是否可用
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8081/admin/health
 ```
 
-再确认客户端环境变量：
+如果 `ok` 为 `false`，说明当前提供商没有可用 key。
 
-```powershell
-$env:ANTHROPIC_BASE_URL
-$env:ANTHROPIC_API_KEY
-```
+### 请求返回 503
 
-### 一直返回 503
-
-通常表示没有可用 key。查看状态：
+查看 key 状态：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8081/admin/status
 ```
 
-可能原因：
+常见原因：
 
-- 所有 key 都被 429 冷却
-- 所有 key 都因 401 被标记 invalid
-- 配置文件里 key 列表为空或错误
+- 所有 key 都在 cooling
+- 所有 key 都被标记 invalid
+- 当前 `active_provider` 配置错误
+- key 列表为空或上游地址不可用
 
-### 修改配置后没生效
+### 配置修改未生效
 
-确认修改的是启动时传入的配置文件：
-
-```powershell
-.\claude-key-proxy.exe -config config.json
-```
-
-可以手动 reload：
+确认修改的是启动时传入的配置文件，并手动 reload：
 
 ```powershell
 Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
 ```
 
-端口和日志输出配置需要重启后生效。
+监听地址和日志输出配置需要重启后生效。
 
-### 日志文件没有生成
+### 余额不足类错误反复出现
 
-检查：
-
-- `log_output` 是否为 `file` 或 `both`
-- `log_file` 是否非空
-- 当前进程是否有权限创建日志目录
-- 如果日志级别是 `warn` 或 `error`，普通请求成功日志不会输出
+如果上游返回余额或额度不足类 `403`，ModelMux 会将命中的 key 标记为 invalid 并换 key 重试。若仍持续失败，通常表示当前提供商下所有可用 key 都不足以完成请求，或者这些 key 共享同一个账户余额。
 
 ## 安全建议
 
-- `admin_listen` 默认保持 `127.0.0.1:8081`
-- 不要把 admin 端口暴露到公网
-- 不要把完整 API Key 写入日志或截图
-- `config.json` 建议加入 `.gitignore`
-- 如果必须远程访问，请放在可信网络或额外加鉴权层
+- 管理端口默认保持 `127.0.0.1:8081`
+- 不要把管理端口暴露到公网
+- 不要提交 `config.json`、`state.json` 或日志文件
+- 不要在日志、截图或 issue 中暴露完整 API Key
+- 远程访问时应额外增加网络隔离或鉴权层

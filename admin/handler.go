@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/claude-key-proxy/logx"
-	"github.com/claude-key-proxy/pool"
+	"github.com/kelongyan/ModelMux/logx"
+	"github.com/kelongyan/ModelMux/pool"
 )
 
 type Handler struct {

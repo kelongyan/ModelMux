@@ -1,4 +1,4 @@
-module github.com/claude-key-proxy
+module github.com/kelongyan/ModelMux
 
 go 1.26.3
 

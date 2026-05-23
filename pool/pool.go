@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/claude-key-proxy/state"
+	"github.com/kelongyan/ModelMux/state"
 )
 
 var ErrNoAvailableKey = errors.New("no available keys in pool")

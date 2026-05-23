@@ -1,4 +1,4 @@
-BINARY  = claude-key-proxy
+BINARY  = modelmux.exe
 CONFIG  = config.json
 GOFLAGS = -trimpath -ldflags="-s -w"
 
@@ -21,7 +21,7 @@ build-linux:
 	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -o $(BINARY)-linux-amd64 .
 
 build-windows:
-	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -o $(BINARY)-windows-amd64.exe .
+	GOOS=windows GOARCH=amd64 go build $(GOFLAGS) -o modelmux-windows-amd64.exe .
 
 build-mac:
 	GOOS=darwin GOARCH=arm64 go build $(GOFLAGS) -o $(BINARY)-darwin-arm64 .

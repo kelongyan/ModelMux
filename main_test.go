@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claude-key-proxy/config"
-	"github.com/claude-key-proxy/state"
+	"github.com/kelongyan/ModelMux/config"
+	"github.com/kelongyan/ModelMux/state"
 )
 
 func TestLoggerWriterStdout(t *testing.T) {

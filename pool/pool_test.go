@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claude-key-proxy/state"
+	"github.com/kelongyan/ModelMux/state"
 )
 
 func TestRoundRobin(t *testing.T) {

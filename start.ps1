@@ -2,17 +2,17 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$ExePath = Join-Path $ScriptDir "claude-key-proxy.exe"
+$ExePath = Join-Path $ScriptDir "modelmux.exe"
 $ConfigPath = Join-Path $ScriptDir "config.json"
 $LogDir = Join-Path $ScriptDir "logs"
 $StdoutLog = Join-Path $LogDir "startup.stdout.log"
 $StderrLog = Join-Path $LogDir "startup.stderr.log"
-$PidFile = Join-Path $LogDir "claude-key-proxy.pid"
+$PidFile = Join-Path $LogDir "modelmux.pid"
 
 # 输出统一前缀，方便从双击窗口或命令行快速判断启动结果。
 function Write-StartupInfo {
     param([string]$Message)
-    Write-Host "[claude-key-proxy] $Message"
+    Write-Host "[modelmux] $Message"
 }
 
 # 从 config.json 解析 admin 服务地址；未配置时使用程序默认值。
@@ -92,7 +92,7 @@ function Ensure-Binary {
         throw "Missing $ExePath and go command is not available for auto build."
     }
 
-    Write-StartupInfo "claude-key-proxy.exe not found, building..."
+    Write-StartupInfo "modelmux.exe not found, building..."
     Push-Location $ScriptDir
     try {
         & go build -trimpath -ldflags="-s -w" -o $ExePath .
