@@ -2,7 +2,11 @@
 
 ## Project
 
-Go reverse proxy that stores multiple Anthropic-compatible providers and uses the selected `active_provider` at runtime. Each provider has an independent key pool; the proxy rotates keys only inside the active provider, not across providers. Single binary for local personal use. Module: `github.com/claude-key-proxy`.
+ModelMux is a Go reverse proxy that stores multiple Anthropic-compatible providers and uses the selected `active_provider` at runtime. Each provider has an independent key pool; the proxy rotates keys only inside the active provider, not across providers. Single binary for local personal use.
+
+Repository: `github.com/kelongyan/ModelMux`.
+
+Current module path remains `github.com/claude-key-proxy`, and current binary/script names remain `claude-key-proxy` to avoid runtime changes. Do not rename module/import/binary paths unless the user explicitly asks for a code-level rename.
 
 ## Commands
 

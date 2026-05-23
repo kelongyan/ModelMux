@@ -1,6 +1,8 @@
-# claude-key-proxy
+# ModelMux
 
 面向 Claude / Anthropic-compatible API 的本地反向代理。它把多个 provider 的上游地址和 API Key 池收口成一个本地入口，运行时只使用当前选中的 `active_provider`，并在该 provider 内部做 key 轮换、限速冷却、失效摘除、配置热重载和日志轮转。
+
+> 仓库已更名为 `github.com/kelongyan/ModelMux`。为避免引入运行风险，当前 Go module、import path、二进制名和脚本中的可执行文件名仍保留 `claude-key-proxy`。
 
 适合个人在本机给 Claude Code 或其他兼容客户端使用：客户端只连 `http://127.0.0.1:8080`，真正的上游地址和 key 池由代理维护。
 
@@ -323,7 +325,7 @@ make build-mac
 ## 目录结构
 
 ```text
-claude-key-proxy/
+ModelMux/
 ├── admin/              # 管理 API
 ├── config/             # 配置加载、校验、文件监听
 ├── logx/               # 日志分类和脱敏工具

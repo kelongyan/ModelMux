@@ -2,6 +2,8 @@ config.json
 key.txt
 state.json
 state.json.tmp
+logs/
+.claude/
 *.log
 *.exe
 *.exe~
