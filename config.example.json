@@ -1,15 +1,37 @@
 {
   "listen": ":8080",
-  "admin_listen": ":8081",
-  "target_url": "https://your-provider.com",
-  "keys": [
-    "sk-your-key-1",
-    "sk-your-key-2",
-    "sk-your-key-3"
+  "admin_listen": "127.0.0.1:8081",
+  "active_provider": "primary",
+  "providers": [
+    {
+      "id": "primary",
+      "target_url": "https://your-provider.com",
+      "keys": [
+        "sk-your-primary-key-1",
+        "sk-your-primary-key-2"
+      ]
+    },
+    {
+      "id": "backup",
+      "target_url": "https://backup-provider.com",
+      "keys": [
+        "sk-your-backup-key-1"
+      ]
+    }
   ],
   "cooling_seconds": 60,
   "max_retries": 3,
   "request_timeout_seconds": 120,
+  "max_body_bytes": 33554432,
   "log_level": "info",
-  "log_format": "text"
+  "log_format": "text",
+  "log_output": "both",
+  "log_file": "logs/claude-key-proxy.log",
+  "log_max_size_mb": 20,
+  "log_max_backups": 5,
+  "log_max_age_days": 30,
+  "log_compress": true,
+  "persist_state": true,
+  "state_file": "state.json",
+  "invalid_ttl_hours": 24
 }

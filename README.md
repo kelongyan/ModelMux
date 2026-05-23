@@ -1,95 +1,24 @@
 # claude-key-proxy
 
-一个面向 Claude 兼容 API 的本地反向代理。它把多个上游 API Key 统一收口成一个本地入口，对客户端透明地做 key 轮换、限速冷却和失效摘除。
+面向 Claude / Anthropic-compatible API 的本地反向代理。它把多个 provider 的上游地址和 API Key 池收口成一个本地入口，运行时只使用当前选中的 `active_provider`，并在该 provider 内部做 key 轮换、限速冷却、失效摘除、配置热重载和日志轮转。
 
-项目目标很简单：
-
-- 让 Claude Code 或其他 Anthropic-compatible 客户端只连接一个本地地址
-- 自动在多个 key 之间轮询
-- 遇到 `429` 自动切换 key 并冷却当前 key
-- 遇到 `401` 自动标记 key 失效，避免继续使用
-- 保持纯标准库实现，无第三方依赖
+适合个人在本机给 Claude Code 或其他兼容客户端使用：客户端只连 `http://127.0.0.1:8080`，真正的上游地址和 key 池由代理维护。
 
 ## 特性
 
-- 纯 Go 标准库实现，无外部依赖
-- 单二进制运行
-- 双 HTTP 服务
-  - 代理服务，默认 `:8080`
-  - 管理服务，默认 `:8081`
-- Round-robin key 轮换
-- key 状态机
-  - `active`
-  - `cooling`
-  - `invalid`
-- 支持 `Retry-After`
-- SSE 流式响应透传，不做缓冲聚合
-- JSON 配置文件
-- 支持热重载 key 列表
-- 结构化日志，支持 `text` 和 `json`
-
-## 适用场景
-
-- 你有多个 Claude 兼容提供商 key，希望均匀消耗
-- 你只想在本地改一个 `ANTHROPIC_BASE_URL`
-- 你需要让 Claude Code 继续使用兼容接口，但不希望自己管理 key 故障切换
-
-## 非目标
-
-- 不做多上游路由
-- 不做请求内容改写
-- 不做持久化状态存储
-- 不做 Web UI
-- 不做外部依赖接入
-
-## 工作原理
-
-客户端始终请求本地代理。
-
-代理对每个请求执行以下流程：
-
-1. 从内存 key 池中选出下一个可用 key
-2. 构造发往上游的请求
-3. 重写认证头
-   - `Authorization: Bearer <key>`
-   - `X-Api-Key: <key>`
-4. 转发到上游 `target_url`
-5. 根据上游响应做处理
-   - `200-399`：直接回传
-   - `429`：当前 key 进入冷却并换下一个 key 重试
-   - `401`：当前 key 标记失效并换下一个 key 重试
-   - 其他错误：直接返回给客户端
-
-请求体会在进入重试流程前读入内存，以保证 `401/429` 后重试仍然携带完整 body。
-
-## 目录结构
-
-```text
-claude-key-proxy/
-├── admin/
-│   └── handler.go
-├── config/
-│   └── config.go
-├── pool/
-│   ├── key.go
-│   ├── pool.go
-│   └── pool_test.go
-├── proxy/
-│   ├── handler.go
-│   └── handler_test.go
-├── main.go
-├── config.example.json
-├── config.json
-├── DESIGN.md
-├── Makefile
-└── README.md
-```
-
-## 环境要求
-
-- Go 1.26.3 或兼容版本
-- 一个可用的 Claude 兼容上游地址
-- 至少一个可用 key
+- 支持在配置文件中保存多个 provider，并用 `active_provider` 选择当前使用的 provider
+- 每个 provider 拥有独立 key 池，默认 round-robin；不会在多个 provider 之间自动轮询或 fallback
+- 上游返回 `429` 时自动冷却当前 key，并切换下一个 key 重试
+- 上游返回 `401` 时自动标记当前 key 失效，避免继续使用
+- 支持 `Retry-After`，优先使用上游建议冷却时间
+- SSE / 流式响应透传，每个响应块写出后立即 flush
+- 自动监听配置文件变化并热重载运行时配置
+- 管理接口查看健康状态、key 状态和手动 reload
+- key 池运行状态持久化，按 provider 分组保存，状态文件不包含完整 API Key
+- 结构化日志，支持按 category / event 分类
+- 支持控制台、文件、控制台+文件双写
+- 支持日志文件自动轮转、压缩和保留策略
+- 单二进制部署，默认本机使用
 
 ## 快速开始
 
@@ -97,8 +26,8 @@ claude-key-proxy/
 
 复制示例配置：
 
-```bash
-cp config.example.json config.json
+```powershell
+Copy-Item config.example.json config.json
 ```
 
 编辑 `config.json`：
@@ -106,68 +35,73 @@ cp config.example.json config.json
 ```json
 {
   "listen": ":8080",
-  "admin_listen": ":8081",
-  "target_url": "https://your-provider.com",
-  "keys": [
-    "sk-your-key-1",
-    "sk-your-key-2",
-    "sk-your-key-3"
+  "admin_listen": "127.0.0.1:8081",
+  "active_provider": "primary",
+  "providers": [
+    {
+      "id": "primary",
+      "target_url": "https://your-provider.com",
+      "keys": [
+        "sk-your-primary-key-1",
+        "sk-your-primary-key-2"
+      ]
+    },
+    {
+      "id": "backup",
+      "target_url": "https://backup-provider.com",
+      "keys": [
+        "sk-your-backup-key-1"
+      ]
+    }
   ],
   "cooling_seconds": 60,
   "max_retries": 3,
   "request_timeout_seconds": 120,
+  "max_body_bytes": 33554432,
   "log_level": "info",
-  "log_format": "text"
+  "log_format": "text",
+  "log_output": "both",
+  "log_file": "logs/claude-key-proxy.log",
+  "log_max_size_mb": 20,
+  "log_max_backups": 5,
+  "log_max_age_days": 30,
+  "log_compress": true
 }
 ```
 
-### 2. 编译
+### 2. 构建
 
-```bash
+```powershell
 make build
 ```
 
-或者直接：
+没有 `make` 时可以直接运行：
 
-```bash
-go build -trimpath -ldflags="-s -w" -o claude-key-proxy .
+```powershell
+go build -trimpath -ldflags="-s -w" -o claude-key-proxy.exe .
 ```
 
-### 3. 运行
+### 3. 启动
 
-```bash
-make run
+```powershell
+.\claude-key-proxy.exe -config config.json
 ```
 
-或者：
+默认代理地址是：
 
-```bash
-./claude-key-proxy -config config.json
+```text
+http://127.0.0.1:8080
 ```
 
-启动后你会看到两类日志：
+默认管理地址是：
 
-- 代理服务监听地址
-- 管理服务监听地址
+```text
+http://127.0.0.1:8081
+```
 
 ## 配置 Claude Code
 
-如果你使用 Claude Code，只需要把请求地址改到本地代理。
-
-示例：
-
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
-export ANTHROPIC_API_KEY=dummy
-claude
-```
-
-说明：
-
-- 本地代理会忽略客户端传入的占位 key，并替换成池中的真实 key
-- `ANTHROPIC_API_KEY` 这里只需要是任意非空值，便于客户端完成自身校验
-
-Windows PowerShell 示例：
+PowerShell：
 
 ```powershell
 $env:ANTHROPIC_BASE_URL='http://127.0.0.1:8080'
@@ -175,349 +109,299 @@ $env:ANTHROPIC_API_KEY='dummy'
 claude
 ```
 
-## 配置项说明
+`ANTHROPIC_API_KEY` 这里只需要是任意非空值，真正发给上游的 key 会由代理从当前 `active_provider` 的 `keys` 列表中选择。
 
-| 字段 | 是否必填 | 默认值 | 说明 |
-|------|----------|--------|------|
-| `listen` | 否 | `:8080` | 代理服务监听地址 |
-| `admin_listen` | 否 | `:8081` | 管理服务监听地址 |
-| `target_url` | 是 | 无 | 上游 Claude 兼容服务地址 |
-| `keys` | 是 | 无 | key 列表，至少 1 个 |
-| `cooling_seconds` | 否 | `60` | 上游返回 `429` 且未提供 `Retry-After` 时的冷却秒数 |
-| `max_retries` | 否 | `3` | 单次请求最大重试次数 |
-| `request_timeout_seconds` | 否 | `120` | 上游请求超时秒数 |
-| `log_level` | 否 | `info` | `debug` / `info` / `warn` / `error` |
-| `log_format` | 否 | `text` | `text` 或 `json` |
+## 配置项
 
-### 默认值行为
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `listen` | `:8080` | 代理服务监听地址 |
+| `admin_listen` | `127.0.0.1:8081` | 管理服务监听地址，默认只监听本机 |
+| `active_provider` | 第一个 provider | 当前使用的 provider ID |
+| `providers` | 无 | provider 列表，至少一个 |
+| `providers[].id` | 无 | provider 稳定 ID，不能重复 |
+| `providers[].target_url` | 无 | 当前 provider 的上游 Claude 兼容 API 地址 |
+| `providers[].keys` | 无 | 当前 provider 的 API Key 列表，至少一个 |
+| `cooling_seconds` | `60` | 429 后默认冷却秒数 |
+| `max_retries` | `3` | 401/429 后最大重试次数 |
+| `request_timeout_seconds` | `120` | 上游请求超时 |
+| `max_body_bytes` | `33554432` | 请求体最大字节数，默认 32MB |
+| `log_level` | `info` | `debug` / `info` / `warn` / `error` |
+| `log_format` | `text` | `text` / `json` |
+| `log_output` | `stdout` | `stdout` / `file` / `both` |
+| `log_file` | 空 | 日志文件路径 |
+| `log_max_size_mb` | `20` | 单个日志文件最大 MB |
+| `log_max_backups` | `5` | 保留旧日志文件数量 |
+| `log_max_age_days` | `30` | 保留旧日志天数 |
+| `log_compress` | `false` | 是否压缩旧日志 |
+| `persist_state` | `true` | 是否保存 key 池运行状态 |
+| `state_file` | `state.json` | key 池状态文件路径 |
+| `invalid_ttl_hours` | `24` | invalid 状态保留小时数，超时后下次启动恢复 active |
 
-配置加载时会自动补齐以下默认值：
+旧版 `target_url` + `keys` 单 provider 配置仍然兼容，会被自动视为 ID 为 `default` 的 provider。如果设置了 `log_file` 但没有设置 `log_output`，程序会默认使用 `both`，也就是控制台和文件双写。
 
-- `listen = :8080`
-- `admin_listen = :8081`
-- `cooling_seconds = 60`
-- `max_retries = 3`
-- `request_timeout_seconds = 120`
-- `log_level = info`
-- `log_format = text`
+## 热重载
+
+程序会自动监听配置文件所在目录。保存 `config.json` 后，命中的配置会自动热重载。
+
+会热生效：
+
+- `active_provider`
+- `providers`
+- `providers[].keys`
+- `providers[].target_url`
+- `cooling_seconds`
+- `max_retries`
+- `request_timeout_seconds`
+- `max_body_bytes`
+
+需要重启才生效：
+
+- `listen`
+- `admin_listen`
+- `log_level`
+- `log_format`
+- `log_output`
+- `log_file`
+- `log_max_size_mb`
+- `log_max_backups`
+- `log_max_age_days`
+- `log_compress`
+
+也可以手动触发 reload：
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
+```
+
+热重载失败时，旧的运行时配置会继续保留，不会把代理切到半坏状态。
 
 ## Admin API
 
-管理接口运行在单独端口，默认 `:8081`。
-
 ### `GET /admin/health`
 
-返回当前 key 池健康情况。
+查看代理是否还有可用 key。
 
-可用 key 数量大于 0 时返回 `200`，否则返回 `503`。
-
-示例：
-
-```bash
-curl http://127.0.0.1:8081/admin/health
+```powershell
+Invoke-RestMethod http://127.0.0.1:8081/admin/health
 ```
 
 响应示例：
 
 ```json
 {
-  "active_keys": 3,
-  "total_keys": 5,
+  "active_provider": "primary",
+  "active_keys": 2,
+  "total_keys": 3,
   "ok": true
 }
 ```
 
 ### `GET /admin/status`
 
-返回所有 key 的状态和统计信息。
+查看所有 key 的状态和统计信息。
 
-示例：
-
-```bash
-curl http://127.0.0.1:8081/admin/status
+```powershell
+Invoke-RestMethod http://127.0.0.1:8081/admin/status
 ```
 
-响应示例：
+响应字段：
 
-```json
-{
-  "total_keys": 3,
-  "active_keys": 2,
-  "cooling_keys": 1,
-  "invalid_keys": 0,
-  "keys": [
-    {
-      "index": 0,
-      "state": "active",
-      "req_count": 142,
-      "err_count": 0,
-      "avg_latency_ms": 318.2,
-      "cool_until": "0001-01-01T00:00:00Z"
-    },
-    {
-      "index": 1,
-      "state": "cooling",
-      "req_count": 98,
-      "err_count": 3,
-      "avg_latency_ms": 401.7,
-      "cool_until": "2026-05-23T10:15:00Z"
-    }
-  ]
-}
-```
-
-字段说明：
-
-- `state`
-  - `active`：可正常使用
-  - `cooling`：因 `429` 暂时冷却
-  - `invalid`：因 `401` 被永久摘除，直到进程重启或 key 列表更新
-- `req_count`：该 key 被选中请求的次数
-- `err_count`：该 key 被标记冷却或失效的次数
-- `avg_latency_ms`：平均上游耗时，按已成功记录的请求统计
-- `cool_until`：冷却结束时间
+- `active_keys`: 当前可用 key 数量
+- `cooling_keys`: 正在冷却的 key 数量
+- `invalid_keys`: 已失效 key 数量
+- `active_provider`: 当前选中的 provider ID
+- `providers`: 所有 provider 的 key 状态汇总
+- `keys`: 当前 active provider 内每个 key 的状态、请求数、错误数、平均延迟、冷却结束时间
 
 ### `POST /admin/reload`
 
-重新读取配置文件并更新 key 列表。
+手动重读配置文件。
 
-示例：
-
-```bash
-curl -X POST http://127.0.0.1:8081/admin/reload
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
 ```
 
-成功响应：
+## Key 状态机
+
+```text
+active --429--> cooling --冷却到期--> active
+active --401--> invalid
+```
+
+状态说明：
+
+- `active`: 可用
+- `cooling`: 因 429 暂时冷却
+- `invalid`: 因 401 被摘除
+
+`cooling` 到期后会自动恢复。`invalid` 在进程运行期间不会自动恢复；启用状态持久化后，超过 `invalid_ttl_hours` 的 invalid key 会在下次启动时恢复为 active，也可以通过更新配置中的 key 列表重新启用。
+
+启用状态持久化后，`cooling`、`invalid` 和请求统计会写入 `state_file`。状态按 provider ID 分组保存，并只保存 key 的 SHA-256 标识，不保存完整 API Key。启动时会恢复仍在 TTL 内的 `invalid` 状态；超过 `invalid_ttl_hours` 的 invalid key 会恢复为 active。
+
+## 请求处理策略
+
+代理处理一次请求时：
+
+1. 读取请求体，并检查 `max_body_bytes`
+2. 从 key 池选择一个可用 key
+3. 覆盖请求中的 `Authorization` 和 `X-Api-Key`
+4. 转发到当前 `active_provider` 的 `target_url`
+5. 上游返回 `429` 时冷却当前 key，换 key 重试
+6. 上游返回 `401` 时标记当前 key invalid，换 key 重试
+7. 不会因为某个 provider 的 key 耗尽而自动切换到其他 provider；需要修改 `active_provider` 并热重载
+8. 其他状态码直接透传给客户端
+9. 响应体按 4KB 块流式转发，并在每次写入后 flush
+
+为了支持重试，请求体会在代理内完整读入内存。因此建议保持 `max_body_bytes` 为合理值。
+
+## 日志
+
+日志使用 `log/slog` 输出，并统一带有：
+
+- `category`: 日志分类
+- `event`: 具体事件
+
+常见分类：
+
+- `lifecycle`
+- `config`
+- `admin`
+- `proxy`
+- `retry`
+- `upstream`
+- `stream`
+
+文件轮转由 `lumberjack` 处理。示例配置：
 
 ```json
 {
-  "ok": true
+  "log_output": "both",
+  "log_file": "logs/claude-key-proxy.log",
+  "log_max_size_mb": 20,
+  "log_max_backups": 5,
+  "log_max_age_days": 30,
+  "log_compress": true
 }
 ```
 
-重要说明：
+如果想让日志更适合机器解析，可以设置：
 
-- 当前实现里，热重载只会更新 key 池内容
-- 已存在且仍在新配置中的 key 会保留原有状态和统计信息
-- 被删除的 key 会被移出池
-- 新增 key 会以 `active` 状态加入
-- 当前实现不会在热重载时重建代理 handler
-
-这意味着以下配置项修改后不会立即生效，仍需要重启进程：
-
-- `target_url`
-- `request_timeout_seconds`
-- `max_retries`
-- `log_level`
-- `log_format`
-- `listen`
-- `admin_listen`
+```json
+{
+  "log_format": "json"
+}
+```
 
 ## 构建与测试
 
-### 常用命令
+常用命令：
 
-```bash
+```powershell
 make build
 make run
 make test
 ```
 
-### 单独运行 pool 测试
+直接使用 Go：
 
-```bash
-go test ./pool/ -run TestRoundRobin -v
+```powershell
+go test ./...
+go vet ./...
+go test -race ./...
+go build -trimpath -ldflags="-s -w" -o claude-key-proxy.exe .
 ```
 
-### 跨平台编译
+跨平台构建：
 
-```bash
+```powershell
 make build-linux
 make build-windows
 make build-mac
 ```
 
-## 日志
-
-日志通过 `log/slog` 输出到标准输出。
-
-支持两种格式：
-
-- `text`
-- `json`
-
-常见日志事件：
-
-- 启动监听
-- 请求代理成功
-- key 进入冷却
-- key 被标记失效
-- 请求被客户端取消
-- 所有 key 不可用
-
-示例：
+## 目录结构
 
 ```text
-time=2026-05-23T15:12:20.253+08:00 level=INFO msg="proxy listening" addr=:8080 target=https://iaigc.fun
-time=2026-05-23T15:12:43.240+08:00 level=INFO msg=proxied path=/v1/messages status=200 attempt=1 latency_ms=2323
-time=2026-05-23T15:12:43.782+08:00 level=INFO msg="request canceled" path=/v1/messages attempt=1
+claude-key-proxy/
+├── admin/              # 管理 API
+├── config/             # 配置加载、校验、文件监听
+├── logx/               # 日志分类和脱敏工具
+├── pool/               # key 池、状态机、轮询
+├── proxy/              # 反向代理、重试、流式响应
+├── config.example.json # 示例配置
+├── go.mod
+├── Makefile
+└── README.md
 ```
 
-## 状态机说明
+## 依赖
 
-每个 key 有三种状态：
+项目主要逻辑仍基于 Go 标准库实现，当前引入的第三方依赖用于稳定性和易用性：
 
-- `active`
-- `cooling`
-- `invalid`
-
-状态流转：
-
-```text
-active --429--> cooling --cooldown expires--> active
-active --401--> invalid
-cooling --401--> invalid
-```
-
-行为说明：
-
-- `cooling` key 不会被选中
-- 冷却时间到达后，key 会在下次被检查时自动恢复为 `active`
-- `invalid` key 不会自动恢复
-
-## 错误处理策略
-
-当前实现的重试策略如下：
-
-- `429 Too Many Requests`
-  - 标记当前 key 为 `cooling`
-  - 优先使用上游 `Retry-After`
-  - 然后切换下一个 key 重试
-- `401 Unauthorized`
-  - 标记当前 key 为 `invalid`
-  - 切换下一个 key 重试
-- 其他上游状态码
-  - 直接透传给客户端
-- 上游不可达
-  - 返回 `502`
-- 无可用 key
-  - 返回 `503`
-
-注意：
-
-- 当前实现不会对一般网络错误做同 key 重试
-- 这是当前代码的真实行为，不是设计文档中的预期行为
-
-## SSE 和流式响应
-
-代理对上游响应体按 4KB chunk 读取，并在每次写入后调用 `Flush()`。
-
-这意味着：
-
-- 不会把整个响应缓存完再返回
-- 适合 Claude 流式输出
-- 不应在这个代理层再引入额外缓冲逻辑
-
-## 已知限制
-
-### 1. 热重载范围有限
-
-`/admin/reload` 目前只更新 key 池，不会热更新代理客户端和监听配置。
-
-### 2. 请求体会完整读入内存
-
-为了支持重试，代理会在处理请求前把 body 读入内存。对 Claude 常见请求通常可接受，但这意味着超大请求体会增加内存占用。
-
-### 3. 仅支持单一上游
-
-当前只支持一个 `target_url`。
-
-### 4. 无持久化
-
-key 状态和统计都在内存中，进程重启后重置。
-
-### 5. 测试覆盖仍偏薄
-
-当前已有：
-
-- `pool` 的并发和状态测试
-- `proxy` 的认证头和重试 body 测试
-
-当前还没有：
-
-- 端到端集成测试
-- admin handler 测试
-- 真正的 SSE 行为测试
+- `github.com/fsnotify/fsnotify`: 监听配置文件变化并自动热重载
+- `gopkg.in/natefinch/lumberjack.v2`: 日志文件轮转
 
 ## 故障排查
 
-### Claude Code 连接不上代理
+### Claude Code 连接不上
 
-检查：
+先检查代理是否启动：
 
-```bash
-curl http://127.0.0.1:8081/admin/health
+```powershell
+Invoke-RestMethod http://127.0.0.1:8081/admin/health
 ```
 
-如果管理接口不通，先确认进程是否启动、监听端口是否正确。
+再确认客户端环境变量：
 
-### 请求一直返回 `503`
-
-查看：
-
-```bash
-curl http://127.0.0.1:8081/admin/status
+```powershell
+$env:ANTHROPIC_BASE_URL
+$env:ANTHROPIC_API_KEY
 ```
 
-如果所有 key 都是 `invalid`：
+### 一直返回 503
 
-- 上游大概率返回了 `401`
-- 检查 key 是否真实可用
-- 检查 `target_url` 是否是正确的 Claude 兼容接口
+通常表示没有可用 key。查看状态：
 
-如果所有 key 都是 `cooling`：
+```powershell
+Invoke-RestMethod http://127.0.0.1:8081/admin/status
+```
 
-- 上游可能在持续限流
-- 等待冷却结束或增加 key 数量
+可能原因：
+
+- 所有 key 都被 429 冷却
+- 所有 key 都因 401 被标记 invalid
+- 配置文件里 key 列表为空或错误
 
 ### 修改配置后没生效
 
-如果你改的是 key 列表，可以：
+确认修改的是启动时传入的配置文件：
 
-```bash
-curl -X POST http://127.0.0.1:8081/admin/reload
+```powershell
+.\claude-key-proxy.exe -config config.json
 ```
 
-如果你改的是以下内容，需要直接重启进程：
+可以手动 reload：
 
-- `target_url`
-- 超时
-- 重试次数
-- 日志级别
-- 监听地址
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
+```
 
-### 上游流式响应中断
+端口和日志输出配置需要重启后生效。
 
-先看代理日志是否出现：
+### 日志文件没有生成
 
-- `request canceled`
-- `upstream unreachable`
-- `key rate-limited, cooling`
+检查：
 
-如果客户端主动取消，代理会记录 `request canceled`，这不是服务端故障。
-
-## 设计文档
-
-项目设计说明见 [DESIGN.md](./DESIGN.md)。
-
-`DESIGN.md` 是设计意图说明；实际行为请以代码和本 README 为准。
+- `log_output` 是否为 `file` 或 `both`
+- `log_file` 是否非空
+- 当前进程是否有权限创建日志目录
+- 如果日志级别是 `warn` 或 `error`，普通请求成功日志不会输出
 
 ## 安全建议
 
-- 不要把真实 key 提交到版本库
-- 不要把带明文 key 的 `config.json` 发到公共环境
-- 如果需要共享配置，使用 `config.example.json` 作为模板
-
-## License
-
-仓库当前未声明 License。如需开源分发，请补充明确的许可证文件。
+- `admin_listen` 默认保持 `127.0.0.1:8081`
+- 不要把 admin 端口暴露到公网
+- 不要把完整 API Key 写入日志或截图
+- `config.json` 建议加入 `.gitignore`
+- 如果必须远程访问，请放在可信网络或额外加鉴权层

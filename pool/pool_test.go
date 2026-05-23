@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/claude-key-proxy/state"
 )
 
 func TestRoundRobin(t *testing.T) {
@@ -170,5 +172,89 @@ func TestConcurrentNext(t *testing.T) {
 	}
 	if total != goroutines*callsEach {
 		t.Errorf("expected %d total requests, got %d", goroutines*callsEach, total)
+	}
+}
+
+func TestSnapshotDoesNotExposeRawKeys(t *testing.T) {
+	p := New([]string{"sk-secret"})
+	k, err := p.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	k.RecordLatency(10 * time.Millisecond)
+
+	snapshots := p.Snapshot()
+	if len(snapshots) != 1 {
+		t.Fatalf("len(Snapshot()) = %d, want 1", len(snapshots))
+	}
+	if snapshots[0].KeyID == "sk-secret" {
+		t.Fatal("Snapshot() exposed raw key")
+	}
+	if snapshots[0].KeyID != state.KeyID("sk-secret") {
+		t.Fatalf("KeyID = %q, want %q", snapshots[0].KeyID, state.KeyID("sk-secret"))
+	}
+	if snapshots[0].ReqCount != 1 {
+		t.Fatalf("ReqCount = %d, want 1", snapshots[0].ReqCount)
+	}
+	if snapshots[0].TotalLatencyMs != 10 {
+		t.Fatalf("TotalLatencyMs = %d, want 10", snapshots[0].TotalLatencyMs)
+	}
+}
+
+func TestRestoreCoolingState(t *testing.T) {
+	p := New([]string{"k1"})
+	coolUntil := time.Now().Add(time.Hour)
+
+	p.Restore([]state.KeyRecord{{
+		KeyID:     state.KeyID("k1"),
+		State:     "cooling",
+		CoolUntil: coolUntil,
+		ReqCount:  5,
+		ErrCount:  1,
+	}}, 24*time.Hour)
+
+	if p.keys[0].State() != StateCooling {
+		t.Fatalf("State = %v, want StateCooling", p.keys[0].State())
+	}
+	if p.keys[0].ReqCount.Load() != 5 {
+		t.Fatalf("ReqCount = %d, want 5", p.keys[0].ReqCount.Load())
+	}
+}
+
+func TestRestoreExpiredCoolingAsActive(t *testing.T) {
+	p := New([]string{"k1"})
+
+	p.Restore([]state.KeyRecord{{
+		KeyID:     state.KeyID("k1"),
+		State:     "cooling",
+		CoolUntil: time.Now().Add(-time.Hour),
+	}}, 24*time.Hour)
+
+	if p.keys[0].State() != StateActive {
+		t.Fatalf("State = %v, want StateActive", p.keys[0].State())
+	}
+}
+
+func TestRestoreInvalidOnlyWithinTTL(t *testing.T) {
+	p := New([]string{"k1", "k2"})
+
+	p.Restore([]state.KeyRecord{
+		{
+			KeyID:     state.KeyID("k1"),
+			State:     "invalid",
+			Last401At: time.Now().Add(-time.Hour),
+		},
+		{
+			KeyID:     state.KeyID("k2"),
+			State:     "invalid",
+			Last401At: time.Now().Add(-48 * time.Hour),
+		},
+	}, 24*time.Hour)
+
+	if p.keys[0].State() != StateInvalid {
+		t.Fatalf("k1 State = %v, want StateInvalid", p.keys[0].State())
+	}
+	if p.keys[1].State() != StateActive {
+		t.Fatalf("k2 State = %v, want StateActive", p.keys[1].State())
 	}
 }

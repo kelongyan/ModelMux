@@ -1,5 +1,7 @@
 config.json
 key.txt
+state.json
+state.json.tmp
 *.log
 *.exe
 *.exe~

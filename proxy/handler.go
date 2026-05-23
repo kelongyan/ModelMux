@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,83 +13,240 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/claude-key-proxy/config"
+	"github.com/claude-key-proxy/logx"
 	"github.com/claude-key-proxy/pool"
 )
 
-var errClientCanceled = errors.New("client canceled request")
+var (
+	errClientCanceled      = errors.New("client canceled request")
+	errStreamFailed        = errors.New("stream failed")
+	errRequestBodyTooLarge = errors.New("request body too large")
+)
 
 type Handler struct {
-	pool      *pool.Pool
-	targetURL *url.URL
-	client    *http.Client
-	cfg       *config.Config
+	pools           *pool.ProviderPools
+	runtime         atomic.Value
+	stateChangeHook atomic.Value
 }
 
-func NewHandler(p *pool.Pool, cfg *config.Config) (*Handler, error) {
-	target, err := url.Parse(cfg.TargetURL)
+type stateChangeHook func(immediate bool)
+
+type runtimeConfig struct {
+	providerID     string
+	targetURL      *url.URL
+	keyPool        *pool.Pool
+	client         *http.Client
+	transport      *http.Transport
+	coolingSeconds int
+	maxRetries     int
+	maxBodyBytes   int64
+}
+
+// NewHandler 创建代理处理器，并初始化带超时的上游 HTTP client。
+func NewHandler(pools *pool.ProviderPools, cfg *config.Config) (*Handler, error) {
+	h := &Handler{pools: pools}
+	if err := h.UpdateConfig(cfg); err != nil {
+		return nil, err
+	}
+	return h, nil
+}
+
+// SetStateChangeHook 设置 key 池状态变化回调，用于触发状态持久化。
+func (h *Handler) SetStateChangeHook(fn func(immediate bool)) {
+	if fn == nil {
+		fn = func(bool) {}
+	}
+	h.stateChangeHook.Store(stateChangeHook(fn))
+}
+
+// notifyStateChanged 通知外部保存 key 池状态；immediate 表示需要尽快落盘。
+func (h *Handler) notifyStateChanged(immediate bool) {
+	hook, _ := h.stateChangeHook.Load().(stateChangeHook)
+	if hook != nil {
+		hook(immediate)
+	}
+}
+
+// UpdateConfig 原子替换代理运行时配置，新请求会使用新快照，已有请求继续使用旧快照。
+func (h *Handler) UpdateConfig(cfg *config.Config) error {
+	provider, ok := cfg.ActiveProviderConfig()
+	if !ok {
+		return fmt.Errorf("active provider %q not found", cfg.ActiveProvider)
+	}
+	keyPool, err := h.pools.Get(provider.ID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid target_url: %w", err)
+		return err
+	}
+	next, err := newRuntimeConfig(cfg, provider, keyPool)
+	if err != nil {
+		return err
 	}
 
+	old, _ := h.runtime.Load().(*runtimeConfig)
+	h.runtime.Store(next)
+	if old != nil && old.transport != nil {
+		old.transport.CloseIdleConnections()
+	}
+	return nil
+}
+
+// ValidateConfig 校验代理运行时需要的 active provider 与上游 URL，供热重载提交前预检查。
+func ValidateConfig(cfg *config.Config) error {
+	provider, ok := cfg.ActiveProviderConfig()
+	if !ok {
+		return fmt.Errorf("active provider %q not found", cfg.ActiveProvider)
+	}
+	if _, err := parseTargetURL(provider.TargetURL); err != nil {
+		return err
+	}
+	return nil
+}
+
+// snapshot 读取当前运行时配置快照。
+func (h *Handler) snapshot() *runtimeConfig {
+	rt, _ := h.runtime.Load().(*runtimeConfig)
+	return rt
+}
+
+// newRuntimeConfig 从配置构造不可变运行时快照。
+func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPool *pool.Pool) (*runtimeConfig, error) {
+	target, err := parseTargetURL(provider.TargetURL)
+	if err != nil {
+		return nil, err
+	}
+
+	requestTimeoutSeconds := effectiveInt(cfg.RequestTimeoutSeconds, config.DefaultRequestTimeoutSeconds)
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: time.Duration(requestTimeoutSeconds) * time.Second,
+	}
 	client := &http.Client{
-		Timeout: time.Duration(cfg.RequestTimeoutSeconds) * time.Second,
+		Timeout: time.Duration(requestTimeoutSeconds) * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   10 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: time.Duration(cfg.RequestTimeoutSeconds) * time.Second,
-		},
+		Transport: transport,
 	}
 
-	return &Handler{
-		pool:      p,
-		targetURL: target,
-		client:    client,
-		cfg:       cfg,
+	return &runtimeConfig{
+		providerID:     provider.ID,
+		targetURL:      target,
+		keyPool:        keyPool,
+		client:         client,
+		transport:      transport,
+		coolingSeconds: effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
+		maxRetries:     effectiveInt(cfg.MaxRetries, config.DefaultMaxRetries),
+		maxBodyBytes:   effectiveInt64(cfg.MaxBodyBytes, config.DefaultMaxBodyBytes),
 	}, nil
 }
 
+// parseTargetURL 解析并校验上游 URL 必须带 scheme 和 host。
+func parseTargetURL(rawURL string) (*url.URL, error) {
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid target_url: %w", err)
+	}
+	if target.Scheme == "" || target.Host == "" {
+		return nil, fmt.Errorf("invalid target_url: absolute URL with scheme and host is required")
+	}
+	return target, nil
+}
+
+// effectiveInt 在测试或手写配置未填时补齐运行时默认整数值。
+func effectiveInt(value, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+// effectiveInt64 在测试或手写配置未填时补齐运行时默认整数值。
+func effectiveInt64(value, fallback int64) int64 {
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+// ServeHTTP 读取请求体后执行带 key 轮换的上游转发。
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	body, err := readRequestBody(r)
+	rt := h.snapshot()
+	if rt == nil {
+		slog.Error("proxy runtime config is not ready", logx.Fields(logx.CategoryProxy, logx.EventRuntimeNotReady)...)
+		writeProxyError(w, http.StatusServiceUnavailable, "proxy runtime config is not ready")
+		return
+	}
+	slog.Debug("proxy request start", logx.Fields(logx.CategoryProxy, logx.EventRequestStart,
+		"method", r.Method,
+		"path", r.URL.Path,
+		"provider_id", rt.providerID,
+	)...)
+
+	body, err := readRequestBody(r, rt.maxBodyBytes)
 	if err != nil {
-		slog.Error("failed to read request body", "path", r.URL.Path, "err", err)
+		if errors.Is(err, errRequestBodyTooLarge) {
+			slog.Warn("request body too large", logx.Fields(logx.CategoryProxy, logx.EventBodyTooLarge,
+				"path", r.URL.Path,
+				"max_body_bytes", rt.maxBodyBytes,
+			)...)
+			writeProxyError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		slog.Error("failed to read request body", logx.Fields(logx.CategoryProxy, logx.EventBodyReadFailed,
+			"path", r.URL.Path,
+			"err", err,
+		)...)
 		writeProxyError(w, http.StatusBadRequest, "failed to read request body")
 		return
 	}
 
 	var lastStatus int
 
-	for attempt := 0; attempt <= h.cfg.MaxRetries; attempt++ {
-		key, err := h.pool.Next()
+	for attempt := 0; attempt <= rt.maxRetries; attempt++ {
+		key, err := rt.keyPool.Next()
 		if err != nil {
-			slog.Error("no available keys", "path", r.URL.Path)
+			slog.Error("no available keys", logx.Fields(logx.CategoryProxy, logx.EventNoAvailableKey,
+				"path", r.URL.Path,
+				"provider_id", rt.providerID,
+			)...)
 			writeProxyError(w, http.StatusServiceUnavailable, "no available API keys")
 			return
 		}
 
-		status, retryAfter, err := h.forward(w, r, key, body)
+		status, retryAfter, err := h.forward(w, r, rt, key, body)
 		if err == nil {
-			slog.Info("proxied",
+			slog.Info("proxied", logx.Fields(logx.CategoryProxy, logx.EventProxySuccess,
 				"path", r.URL.Path,
 				"status", status,
 				"attempt", attempt+1,
+				"provider_id", rt.providerID,
+				"key_id", logx.MaskSecret(key.Value),
 				"latency_ms", time.Since(start).Milliseconds(),
-			)
+			)...)
+			h.notifyStateChanged(false)
 			return
 		}
 		if errors.Is(err, errClientCanceled) {
-			slog.Info("request canceled", "path", r.URL.Path, "attempt", attempt+1)
+			slog.Info("request canceled", logx.Fields(logx.CategoryProxy, logx.EventClientCanceled,
+				"path", r.URL.Path,
+				"attempt", attempt+1,
+				"provider_id", rt.providerID,
+				"key_id", logx.MaskSecret(key.Value),
+			)...)
+			return
+		}
+		if errors.Is(err, errStreamFailed) {
 			return
 		}
 
@@ -96,52 +254,71 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch status {
 		case http.StatusTooManyRequests:
-			cooling := h.pool.CoolingDuration(h.cfg.CoolingSeconds)
+			cooling := rt.keyPool.CoolingDuration(rt.coolingSeconds)
 			if retryAfter > 0 {
 				cooling = retryAfter
 			}
 			key.MarkCooling(cooling)
-			slog.Warn("key rate-limited, cooling",
+			h.notifyStateChanged(true)
+			slog.Warn("key rate-limited, cooling", logx.Fields(logx.CategoryRetry, logx.EventKeyCooling,
 				"attempt", attempt+1,
+				"provider_id", rt.providerID,
+				"key_id", logx.MaskSecret(key.Value),
 				"cooling_s", cooling.Seconds(),
-			)
+			)...)
 		case http.StatusUnauthorized:
 			key.MarkInvalid()
-			slog.Warn("key invalid, marking dead", "attempt", attempt+1)
+			h.notifyStateChanged(true)
+			slog.Warn("key invalid, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyInvalid,
+				"attempt", attempt+1,
+				"provider_id", rt.providerID,
+				"key_id", logx.MaskSecret(key.Value),
+			)...)
 		default:
-			// Non-retryable — already written to w inside forward().
-			slog.Error("upstream error", "status", status, "err", err)
+			// 非重试错误已经在 forward 中写出响应，这里只记录分类日志。
+			slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
+				"status", status,
+				"provider_id", rt.providerID,
+				"err", err,
+			)...)
 			return
 		}
 	}
 
-	slog.Error("all retries exhausted", "last_status", lastStatus)
+	slog.Error("all retries exhausted", logx.Fields(logx.CategoryRetry, logx.EventRetryExhausted,
+		"last_status", lastStatus,
+		"provider_id", rt.providerID,
+	)...)
 	writeProxyError(w, http.StatusServiceUnavailable, "all keys exhausted after retries")
 }
 
-// forward sends the request upstream with the given key and streams the response back.
-// Returns (0, 0, nil) on success.
-// Returns (statusCode, retryAfter, err) for retryable errors (429/401).
-// Returns (statusCode, 0, err) for non-retryable errors (already written to w).
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, key *pool.Key, body []byte) (int, time.Duration, error) {
-	outReq, err := h.buildRequest(r, key, body)
+// forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
+// 成功时返回状态码和 nil；429/401 返回可重试错误；其他错误会在本函数内写出响应。
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, error) {
+	outReq, err := buildRequest(rt, r, key, body)
 	if err != nil {
 		writeProxyError(w, http.StatusInternalServerError, "failed to build request")
 		return http.StatusInternalServerError, 0, err
 	}
 
 	upstreamStart := time.Now()
-	resp, err := h.client.Do(outReq)
+	resp, err := rt.client.Do(outReq)
 	if err != nil {
 		if errors.Is(r.Context().Err(), context.Canceled) {
 			return 0, 0, errClientCanceled
 		}
+		slog.Error("upstream unreachable", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnreachable,
+			"path", r.URL.Path,
+			"provider_id", rt.providerID,
+			"key_id", logx.MaskSecret(key.Value),
+			"err", err,
+		)...)
 		writeProxyError(w, http.StatusBadGateway, fmt.Sprintf("upstream unreachable: %s", err))
 		return http.StatusBadGateway, 0, err
 	}
 	defer resp.Body.Close()
 
-	// Retryable: extract Retry-After before returning without writing to w.
+	// 429/401 需要换 key 重试，因此不能提前向客户端写响应头。
 	if resp.StatusCode == http.StatusTooManyRequests {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 		return resp.StatusCode, retryAfter, fmt.Errorf("upstream returned %d", resp.StatusCode)
@@ -154,13 +331,32 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, key *pool.Key,
 
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	streamBody(w, resp.Body)
+	if err := streamBody(w, resp.Body); err != nil {
+		slog.Warn("stream failed", logx.Fields(logx.CategoryStream, logx.EventStreamFailed,
+			"path", r.URL.Path,
+			"status", resp.StatusCode,
+			"provider_id", rt.providerID,
+			"key_id", logx.MaskSecret(key.Value),
+			"err", err,
+		)...)
+		return resp.StatusCode, 0, fmt.Errorf("%w: %v", errStreamFailed, err)
+	}
 	return resp.StatusCode, 0, nil
 }
 
+// buildRequest 基于原请求构造上游请求，并覆盖认证头为当前选中的 key。
 func (h *Handler) buildRequest(r *http.Request, key *pool.Key, body []byte) (*http.Request, error) {
-	outURL := *h.targetURL
-	outURL.Path = singleJoiningSlash(h.targetURL.Path, r.URL.Path)
+	return buildRequest(h.snapshot(), r, key, body)
+}
+
+// buildRequest 基于指定运行时快照构造上游请求，并覆盖认证头为当前选中的 key。
+func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte) (*http.Request, error) {
+	if rt == nil || rt.targetURL == nil {
+		return nil, errors.New("proxy runtime config is not ready")
+	}
+
+	outURL := *rt.targetURL
+	outURL.Path = singleJoiningSlash(rt.targetURL.Path, r.URL.Path)
 	outURL.RawQuery = r.URL.RawQuery
 
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(body))
@@ -173,20 +369,31 @@ func (h *Handler) buildRequest(r *http.Request, key *pool.Key, body []byte) (*ht
 	outReq.Header.Set("X-Api-Key", key.Value)
 	outReq.Header.Del("X-Forwarded-For")
 	outReq.Header.Del("X-Real-Ip")
-	outReq.Host = h.targetURL.Host
+	outReq.Host = rt.targetURL.Host
 
 	return outReq, nil
 }
 
-func readRequestBody(r *http.Request) ([]byte, error) {
+// readRequestBody 在支持重试的前提下读取请求体，并限制最大内存占用。
+func readRequestBody(r *http.Request, maxBodyBytes int64) ([]byte, error) {
 	if r.Body == nil || r.Body == http.NoBody {
 		return nil, nil
 	}
 	defer r.Body.Close()
-	return io.ReadAll(r.Body)
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = config.DefaultMaxBodyBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBodyBytes {
+		return nil, errRequestBodyTooLarge
+	}
+	return body, nil
 }
 
-// parseRetryAfter parses the Retry-After header value (seconds integer or HTTP-date).
+// parseRetryAfter 解析 Retry-After 头，支持秒数和 HTTP-date 两种格式。
 func parseRetryAfter(header string) time.Duration {
 	if header == "" {
 		return 0
@@ -202,6 +409,7 @@ func parseRetryAfter(header string) time.Duration {
 	return 0
 }
 
+// copyHeaders 复制普通 HTTP 头，并跳过逐跳头，避免代理协议层头泄漏。
 func copyHeaders(dst, src http.Header) {
 	for k, vv := range src {
 		if isHopByHop(k) {
@@ -213,27 +421,40 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
-func streamBody(w http.ResponseWriter, body io.Reader) {
+// streamBody 按小块转发响应体并在每次写入后刷新，保证 SSE 不被代理缓冲。
+func streamBody(w http.ResponseWriter, body io.Reader) error {
 	flusher, canFlush := w.(http.Flusher)
 	buf := make([]byte, 4096)
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
-			_, _ = w.Write(buf[:n])
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
 			if canFlush {
 				flusher.Flush()
 			}
 		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
 		if err != nil {
-			break
+			return err
 		}
 	}
 }
 
+// writeProxyError 输出 Anthropic 兼容风格的 JSON 错误，使用编码器保证消息被正确转义。
 func writeProxyError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	fmt.Fprintf(w, `{"error":{"message":"proxy: %s","type":"proxy_error"}}`, msg)
+	resp := map[string]any{
+		"error": map[string]string{
+			"message": "proxy: " + msg,
+			"type":    "proxy_error",
+		},
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 var hopByHopHeaders = map[string]bool{
@@ -247,10 +468,12 @@ var hopByHopHeaders = map[string]bool{
 	"Upgrade":             true,
 }
 
+// isHopByHop 判断 HTTP 头是否属于逐跳头，这类头不能透传给上游或客户端。
 func isHopByHop(h string) bool {
 	return hopByHopHeaders[http.CanonicalHeaderKey(h)]
 }
 
+// singleJoiningSlash 拼接上游基础路径和客户端请求路径，避免多斜杠或缺斜杠。
 func singleJoiningSlash(a, b string) string {
 	aSlash := strings.HasSuffix(a, "/")
 	bSlash := strings.HasPrefix(b, "/")

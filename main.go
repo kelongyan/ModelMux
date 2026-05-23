@@ -3,79 +3,185 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/claude-key-proxy/admin"
 	"github.com/claude-key-proxy/config"
+	"github.com/claude-key-proxy/logx"
 	"github.com/claude-key-proxy/pool"
 	"github.com/claude-key-proxy/proxy"
+	"github.com/claude-key-proxy/state"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+// main 加载配置并启动代理服务与管理服务。
 func main() {
 	configPath := flag.String("config", "config.json", "path to config file")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		slog.Error("failed to load config", "err", err)
+		slog.Error("failed to load config", logx.Fields(logx.CategoryConfig, logx.EventConfigLoadFailed,
+			"err", err,
+		)...)
 		os.Exit(1)
 	}
 
-	setupLogger(cfg.LogLevel, cfg.LogFormat)
+	if err := setupLogger(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to setup logger: %v\n", err)
+		os.Exit(1)
+	}
 
-	keyPool := pool.New(cfg.Keys)
-	slog.Info("key pool initialized", "total", keyPool.TotalCount())
-
-	proxyHandler, err := proxy.NewHandler(keyPool, cfg)
+	providerPools, err := pool.NewProviderPools(providerSpecsFromConfig(cfg.ProviderConfigs()), cfg.ActiveProvider)
 	if err != nil {
-		slog.Error("failed to create proxy handler", "err", err)
+		slog.Error("failed to create provider pools", logx.Fields(logx.CategoryLifecycle, logx.EventKeyPoolInitialized,
+			"err", err,
+		)...)
 		os.Exit(1)
 	}
+	slog.Info("provider pools initialized", logx.Fields(logx.CategoryLifecycle, logx.EventKeyPoolInitialized,
+		"providers", providerPools.ProviderCount(),
+		"active_provider", providerPools.ActiveID(),
+		"active_keys", cfg.TotalKeys(),
+		"total_keys", cfg.TotalProviderKeys(),
+	)...)
 
-	// Proxy server
+	var saver *stateSaver
+	if cfg.StatePersistenceEnabled() {
+		store := state.NewStore(cfg.StateFile)
+		stateFile, err := store.Load()
+		if err != nil {
+			slog.Warn("state load failed", logx.Fields(logx.CategoryState, logx.EventStateLoadFailed,
+				"path", cfg.StateFile,
+				"err", err,
+			)...)
+		} else {
+			records := stateFile.VersionedProviderRecords(cfg.ActiveProvider)
+			providerPools.Restore(records, time.Duration(cfg.InvalidTTLHours)*time.Hour)
+			slog.Info("state restored", logx.Fields(logx.CategoryState, logx.EventStateRestored,
+				"path", cfg.StateFile,
+				"providers", len(records),
+				"invalid_ttl_hours", cfg.InvalidTTLHours,
+			)...)
+		}
+		saver = newStateSaver(store, providerPools.Snapshot, 2*time.Second, func(err error) {
+			slog.Warn("state save failed", logx.Fields(logx.CategoryState, logx.EventStateSaveFailed,
+				"path", cfg.StateFile,
+				"err", err,
+			)...)
+		})
+	}
+
+	proxyHandler, err := proxy.NewHandler(providerPools, cfg)
+	if err != nil {
+		slog.Error("failed to create proxy handler", logx.Fields(logx.CategoryLifecycle, logx.EventHandlerCreateFailed,
+			"err", err,
+		)...)
+		os.Exit(1)
+	}
+	if saver != nil {
+		proxyHandler.SetStateChangeHook(saver.Trigger)
+	}
+
+	// 代理服务允许长时间流式输出，因此只设置读头和空闲超时，不设置固定写超时。
 	proxyMux := http.NewServeMux()
 	proxyMux.Handle("/", proxyHandler)
 
 	proxySrv := &http.Server{
-		Addr:    cfg.Listen,
-		Handler: proxyMux,
+		Addr:              cfg.Listen,
+		Handler:           proxyMux,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
-	// Admin server (separate port)
+	// 管理服务是本地控制面，设置更保守的读头和空闲超时即可。
 	adminMux := http.NewServeMux()
-	adminHandler := admin.NewHandler(keyPool, *configPath, func(path string) error {
+	reloadConfig := func(path string) error {
 		newCfg, err := config.Reload(path)
 		if err != nil {
 			return err
 		}
-		keyPool.Update(newCfg.Keys)
-		slog.Info("config reloaded", "keys", newCfg.TotalKeys())
+		if err := proxy.ValidateConfig(newCfg); err != nil {
+			return err
+		}
+		if err := providerPools.Update(providerSpecsFromConfig(newCfg.ProviderConfigs()), newCfg.ActiveProvider); err != nil {
+			return err
+		}
+		if err := proxyHandler.UpdateConfig(newCfg); err != nil {
+			return err
+		}
+		if saver != nil {
+			saver.Trigger(true)
+		}
+		slog.Info("config reloaded", logx.Fields(logx.CategoryConfig, logx.EventConfigReloaded,
+			"providers", len(newCfg.Providers),
+			"active_provider", newCfg.ActiveProvider,
+			"active_keys", newCfg.TotalKeys(),
+			"total_keys", newCfg.TotalProviderKeys(),
+			"target", newCfg.TargetURL,
+			"cooling_seconds", newCfg.CoolingSeconds,
+			"max_retries", newCfg.MaxRetries,
+			"request_timeout_seconds", newCfg.RequestTimeoutSeconds,
+			"max_body_bytes", newCfg.MaxBodyBytes,
+		)...)
 		return nil
-	})
+	}
+	adminHandler := admin.NewHandler(providerPools, *configPath, reloadConfig)
 	adminHandler.Register(adminMux)
 
+	var configWatcher *config.Watcher
+	if watcher, err := config.Watch(*configPath, reloadConfig); err != nil {
+		slog.Warn("config watch failed", logx.Fields(logx.CategoryConfig, logx.EventConfigWatchFailed,
+			"path", *configPath,
+			"err", err,
+		)...)
+	} else {
+		configWatcher = watcher
+		slog.Info("config watch started", logx.Fields(logx.CategoryConfig, logx.EventConfigWatchStarted,
+			"path", *configPath,
+		)...)
+	}
+
 	adminSrv := &http.Server{
-		Addr:    cfg.AdminListen,
-		Handler: adminMux,
+		Addr:              cfg.AdminListen,
+		Handler:           adminMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {
-		slog.Info("proxy listening", "addr", cfg.Listen, "target", cfg.TargetURL)
+		slog.Info("proxy listening", logx.Fields(logx.CategoryLifecycle, logx.EventProxyListening,
+			"addr", cfg.Listen,
+			"active_provider", cfg.ActiveProvider,
+			"target", cfg.TargetURL,
+		)...)
 		if err := proxySrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("proxy server error", "err", err)
+			slog.Error("proxy server error", logx.Fields(logx.CategoryLifecycle, logx.EventServerError,
+				"server", "proxy",
+				"err", err,
+			)...)
 			os.Exit(1)
 		}
 	}()
 
 	go func() {
-		slog.Info("admin listening", "addr", cfg.AdminListen)
+		slog.Info("admin listening", logx.Fields(logx.CategoryLifecycle, logx.EventAdminListening,
+			"addr", cfg.AdminListen,
+		)...)
 		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("admin server error", "err", err)
+			slog.Error("admin server error", logx.Fields(logx.CategoryLifecycle, logx.EventServerError,
+				"server", "admin",
+				"err", err,
+			)...)
 		}
 	}()
 
@@ -83,18 +189,42 @@ func main() {
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
 	<-quit
 
-	slog.Info("shutting down...")
+	slog.Info("shutting down", logx.Fields(logx.CategoryLifecycle, logx.EventShutdownStart)...)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	_ = proxySrv.Shutdown(ctx)
 	_ = adminSrv.Shutdown(ctx)
-	slog.Info("stopped")
+	if configWatcher != nil {
+		_ = configWatcher.Close()
+	}
+	if saver != nil {
+		if err := saver.Close(); err != nil {
+			slog.Warn("state save failed", logx.Fields(logx.CategoryState, logx.EventStateSaveFailed,
+				"path", cfg.StateFile,
+				"err", err,
+			)...)
+		}
+	}
+	slog.Info("stopped", logx.Fields(logx.CategoryLifecycle, logx.EventShutdownComplete)...)
 }
 
-func setupLogger(level, format string) {
+// providerSpecsFromConfig 提取 provider 的 ID 和 key 列表，用于创建或更新独立 key 池。
+func providerSpecsFromConfig(providers []config.ProviderConfig) []pool.ProviderSpec {
+	specs := make([]pool.ProviderSpec, 0, len(providers))
+	for _, provider := range providers {
+		specs = append(specs, pool.ProviderSpec{
+			ID:   provider.ID,
+			Keys: append([]string(nil), provider.Keys...),
+		})
+	}
+	return specs
+}
+
+// setupLogger 根据配置初始化 slog 文本或 JSON 日志输出，并按需启用日志轮转。
+func setupLogger(cfg *config.Config) error {
 	var l slog.Level
-	switch level {
+	switch cfg.LogLevel {
 	case "debug":
 		l = slog.LevelDebug
 	case "warn":
@@ -105,12 +235,122 @@ func setupLogger(level, format string) {
 		l = slog.LevelInfo
 	}
 
-	opts := &slog.HandlerOptions{Level: l}
+	writer, err := loggerWriter(cfg)
+	if err != nil {
+		return err
+	}
+
+	opts := &slog.HandlerOptions{
+		Level:     l,
+		AddSource: l == slog.LevelDebug,
+	}
 	var handler slog.Handler
-	if format == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+	if cfg.LogFormat == "json" {
+		handler = slog.NewJSONHandler(writer, opts)
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		handler = slog.NewTextHandler(writer, opts)
 	}
 	slog.SetDefault(slog.New(handler))
+	return nil
+}
+
+// loggerWriter 根据 log_output 构造日志写入目标；文件目标使用 lumberjack 自动轮转。
+func loggerWriter(cfg *config.Config) (io.Writer, error) {
+	switch cfg.LogOutput {
+	case "stdout", "":
+		return os.Stdout, nil
+	case "file":
+		return newRollingLogWriter(cfg)
+	case "both":
+		fileWriter, err := newRollingLogWriter(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return io.MultiWriter(os.Stdout, fileWriter), nil
+	default:
+		return nil, fmt.Errorf("unsupported log_output %q", cfg.LogOutput)
+	}
+}
+
+// newRollingLogWriter 创建按大小、数量和天数轮转的日志文件写入器。
+func newRollingLogWriter(cfg *config.Config) (io.Writer, error) {
+	if cfg.LogFile == "" {
+		return nil, fmt.Errorf("log_file is required for file logging")
+	}
+	if dir := filepath.Dir(cfg.LogFile); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("create log directory: %w", err)
+		}
+	}
+	return &lumberjack.Logger{
+		Filename:   cfg.LogFile,
+		MaxSize:    cfg.LogMaxSizeMB,
+		MaxBackups: cfg.LogMaxBackups,
+		MaxAge:     cfg.LogMaxAgeDays,
+		Compress:   cfg.LogCompress,
+	}, nil
+}
+
+type stateSaver struct {
+	store    *state.Store
+	snapshot func() []state.ProviderRecord
+	delay    time.Duration
+	onError  func(error)
+	mu       sync.Mutex
+	saveMu   sync.Mutex
+	timer    *time.Timer
+	closed   bool
+}
+
+// newStateSaver 创建防抖状态保存器，避免每次成功请求都同步写磁盘。
+func newStateSaver(store *state.Store, snapshot func() []state.ProviderRecord, delay time.Duration, onError func(error)) *stateSaver {
+	return &stateSaver{
+		store:    store,
+		snapshot: snapshot,
+		delay:    delay,
+		onError:  onError,
+	}
+}
+
+// Trigger 根据 immediate 决定立即保存或防抖保存。
+func (s *stateSaver) Trigger(immediate bool) {
+	if immediate {
+		if err := s.SaveNow(); err != nil && s.onError != nil {
+			s.onError(err)
+		}
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	if s.timer == nil {
+		s.timer = time.AfterFunc(s.delay, func() {
+			if err := s.SaveNow(); err != nil && s.onError != nil {
+				s.onError(err)
+			}
+		})
+		return
+	}
+	s.timer.Reset(s.delay)
+}
+
+// SaveNow 立即保存当前 key 池快照。
+func (s *stateSaver) SaveNow() error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	return s.store.Save(s.snapshot())
+}
+
+// Close 停止防抖定时器并保存最后一次状态。
+func (s *stateSaver) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	if s.timer != nil {
+		s.timer.Stop()
+	}
+	s.mu.Unlock()
+	return s.SaveNow()
 }
