@@ -54,6 +54,11 @@ func main() {
 		"active_keys", cfg.TotalKeys(),
 		"total_keys", cfg.TotalProviderKeys(),
 	)...)
+	eventBuffer := admin.NewEventBuffer(300)
+	eventBuffer.Add("info", logx.CategoryLifecycle, logx.EventKeyPoolInitialized, "provider pools initialized", map[string]any{
+		"providers":       providerPools.ProviderCount(),
+		"active_provider": providerPools.ActiveID(),
+	})
 
 	var saver *stateSaver
 	if cfg.StatePersistenceEnabled() {
@@ -64,6 +69,10 @@ func main() {
 				"path", cfg.StateFile,
 				"err", err,
 			)...)
+			eventBuffer.Add("warn", logx.CategoryState, logx.EventStateLoadFailed, "state load failed", map[string]any{
+				"path":  cfg.StateFile,
+				"error": err.Error(),
+			})
 		} else {
 			records := stateFile.VersionedProviderRecords(cfg.ActiveProvider)
 			providerPools.Restore(records, time.Duration(cfg.InvalidTTLHours)*time.Hour)
@@ -72,6 +81,9 @@ func main() {
 				"providers", len(records),
 				"invalid_ttl_hours", cfg.InvalidTTLHours,
 			)...)
+			eventBuffer.Add("info", logx.CategoryState, logx.EventStateRestored, "state restored", map[string]any{
+				"path": cfg.StateFile,
+			})
 		}
 		saver = newStateSaver(store, providerPools.Snapshot, 2*time.Second, func(err error) {
 			slog.Warn("state save failed", logx.Fields(logx.CategoryState, logx.EventStateSaveFailed,
@@ -106,19 +118,36 @@ func main() {
 	// 管理服务是本地控制面，设置更保守的读头和空闲超时即可。
 	adminMux := http.NewServeMux()
 	reloadConfig := func(path string) error {
-		newCfg, err := config.Reload(path)
+		newCfg, err := config.Read(path)
 		if err != nil {
+			eventBuffer.Add("error", logx.CategoryConfig, logx.EventConfigReloadFailed, "config reload failed", map[string]any{
+				"path":  path,
+				"error": err.Error(),
+			})
 			return err
 		}
 		if err := proxy.ValidateConfig(newCfg); err != nil {
+			eventBuffer.Add("error", logx.CategoryConfig, logx.EventConfigReloadFailed, "config reload failed", map[string]any{
+				"path":  path,
+				"error": err.Error(),
+			})
 			return err
 		}
 		if err := providerPools.Update(providerSpecsFromConfig(newCfg.ProviderConfigs()), newCfg.ActiveProvider); err != nil {
+			eventBuffer.Add("error", logx.CategoryConfig, logx.EventConfigReloadFailed, "config reload failed", map[string]any{
+				"path":  path,
+				"error": err.Error(),
+			})
 			return err
 		}
 		if err := proxyHandler.UpdateConfig(newCfg); err != nil {
+			eventBuffer.Add("error", logx.CategoryConfig, logx.EventConfigReloadFailed, "config reload failed", map[string]any{
+				"path":  path,
+				"error": err.Error(),
+			})
 			return err
 		}
+		config.SetCurrent(newCfg)
 		if saver != nil {
 			saver.Trigger(true)
 		}
@@ -133,9 +162,18 @@ func main() {
 			"request_timeout_seconds", newCfg.RequestTimeoutSeconds,
 			"max_body_bytes", newCfg.MaxBodyBytes,
 		)...)
+		eventBuffer.Add("info", logx.CategoryConfig, logx.EventConfigReloaded, "config reloaded", map[string]any{
+			"active_provider": newCfg.ActiveProvider,
+			"providers":       len(newCfg.Providers),
+		})
 		return nil
 	}
-	adminHandler := admin.NewHandler(providerPools, *configPath, reloadConfig)
+	configManager := config.NewManager(*configPath, reloadConfig)
+	var adminStateChanged func(bool)
+	if saver != nil {
+		adminStateChanged = saver.Trigger
+	}
+	adminHandler := admin.NewHandler(providerPools, configManager, reloadConfig, eventBuffer, adminStateChanged)
 	adminHandler.Register(adminMux)
 
 	var configWatcher *config.Watcher
@@ -144,11 +182,18 @@ func main() {
 			"path", *configPath,
 			"err", err,
 		)...)
+		eventBuffer.Add("warn", logx.CategoryConfig, logx.EventConfigWatchFailed, "config watch failed", map[string]any{
+			"path":  *configPath,
+			"error": err.Error(),
+		})
 	} else {
 		configWatcher = watcher
 		slog.Info("config watch started", logx.Fields(logx.CategoryConfig, logx.EventConfigWatchStarted,
 			"path", *configPath,
 		)...)
+		eventBuffer.Add("info", logx.CategoryConfig, logx.EventConfigWatchStarted, "config watch started", map[string]any{
+			"path": *configPath,
+		})
 	}
 
 	adminSrv := &http.Server{
@@ -164,6 +209,10 @@ func main() {
 			"active_provider", cfg.ActiveProvider,
 			"target", cfg.TargetURL,
 		)...)
+		eventBuffer.Add("info", logx.CategoryLifecycle, logx.EventProxyListening, "proxy listening", map[string]any{
+			"addr":            cfg.Listen,
+			"active_provider": cfg.ActiveProvider,
+		})
 		if err := proxySrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("proxy server error", logx.Fields(logx.CategoryLifecycle, logx.EventServerError,
 				"server", "proxy",
@@ -177,6 +226,9 @@ func main() {
 		slog.Info("admin listening", logx.Fields(logx.CategoryLifecycle, logx.EventAdminListening,
 			"addr", cfg.AdminListen,
 		)...)
+		eventBuffer.Add("info", logx.CategoryLifecycle, logx.EventAdminListening, "admin listening", map[string]any{
+			"addr": cfg.AdminListen,
+		})
 		if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("admin server error", logx.Fields(logx.CategoryLifecycle, logx.EventServerError,
 				"server", "admin",

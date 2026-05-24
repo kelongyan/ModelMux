@@ -67,6 +67,24 @@ function Get-ErrorHttpStatusCode {
     return $null
 }
 
+# 把 admin 基址转换成控制台入口，统一打开前端管理台。
+function Get-ConsoleUrl {
+    param([string]$BaseUrl)
+
+    return ($BaseUrl.TrimEnd('/') + "/console/")
+}
+
+# 尝试在默认浏览器中打开控制台；失败时不影响服务启动。
+function Open-Console {
+    param([string]$ConsoleUrl)
+
+    try {
+        Start-Process -FilePath $ConsoleUrl | Out-Null
+    } catch {
+        Write-StartupInfo "could not open browser automatically, please visit: $ConsoleUrl"
+    }
+}
+
 # 只要 admin health 端点有 HTTP 响应，就认为服务已经在运行，避免重复启动。
 function Test-AdminResponding {
     param([string]$BaseUrl)
@@ -120,9 +138,11 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 }
 
 $adminBaseUrl = Get-AdminBaseUrl -Path $ConfigPath
+$consoleUrl = Get-ConsoleUrl -BaseUrl $adminBaseUrl
 $existing = Test-AdminResponding -BaseUrl $adminBaseUrl
 if ($existing.Responding) {
     Write-StartupInfo "service is already running: $adminBaseUrl, health status $($existing.StatusCode)."
+    Open-Console -ConsoleUrl $consoleUrl
     exit 0
 }
 
@@ -140,6 +160,7 @@ for ($i = 0; $i -lt 20; $i++) {
     $health = Test-AdminResponding -BaseUrl $adminBaseUrl
     if ($health.Responding) {
         Write-StartupInfo "ready: $adminBaseUrl, health status $($health.StatusCode). You can close this terminal."
+        Open-Console -ConsoleUrl $consoleUrl
         exit 0
     }
 }

@@ -6,10 +6,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kelongyan/ModelMux/logx"
 	"github.com/kelongyan/ModelMux/state"
 )
 
 var ErrNoAvailableKey = errors.New("no available keys in pool")
+var ErrKeyNotFound = errors.New("key not found in pool")
 
 type Pool struct {
 	keys   []*Key
@@ -76,6 +78,22 @@ func (p *Pool) Update(newValues []string) {
 
 	p.keys = newKeys
 	p.cursor.Store(0)
+}
+
+// ResetKeyByID 按 key 哈希标识恢复对应 key 为 active，便于管理台手动解除摘除状态。
+func (p *Pool) ResetKeyByID(keyID string) error {
+	p.mu.RLock()
+	keys := append([]*Key(nil), p.keys...)
+	p.mu.RUnlock()
+
+	for _, key := range keys {
+		if state.KeyID(key.Value) != keyID {
+			continue
+		}
+		key.ResetActive()
+		return nil
+	}
+	return ErrKeyNotFound
 }
 
 // Snapshot 返回当前 key 池可持久化快照，使用 key hash 标识而不暴露完整 key。
@@ -167,11 +185,14 @@ func timeToUnixNano(t time.Time) int64 {
 
 type KeyStatus struct {
 	Index        int       `json:"index"`
+	KeyID        string    `json:"key_id"`
+	MaskedKey    string    `json:"masked_key"`
 	State        string    `json:"state"`
 	ReqCount     int64     `json:"req_count"`
 	ErrCount     int64     `json:"err_count"`
 	AvgLatencyMs float64   `json:"avg_latency_ms"`
 	CoolUntil    time.Time `json:"cool_until,omitempty"`
+	Last401At    time.Time `json:"last_401_at,omitempty"`
 }
 
 func (p *Pool) Status() []KeyStatus {
@@ -183,9 +204,12 @@ func (p *Pool) Status() []KeyStatus {
 	for i, k := range keys {
 		s := KeyStatus{
 			Index:        i,
+			KeyID:        state.KeyID(k.Value),
+			MaskedKey:    logx.MaskSecret(k.Value),
 			ReqCount:     k.ReqCount.Load(),
 			ErrCount:     k.ErrCount.Load(),
 			AvgLatencyMs: k.AvgLatencyMs(),
+			Last401At:    k.Last401At(),
 		}
 		switch k.State() {
 		case StateActive:

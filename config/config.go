@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"reflect"
 	"sync"
 )
 
@@ -70,34 +71,17 @@ var (
 
 // Load 读取 JSON 配置、校验必填项并补齐默认值。
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-
-	cfg := &Config{}
-	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-	cfg.applyDefaults()
-	if err := cfg.validateAfterDefaults(); err != nil {
-		return nil, err
-	}
-
-	mu.Lock()
-	current = cfg
-	mu.Unlock()
-
-	return cfg, nil
+	return load(path, true)
 }
 
 // Reload 重新读取配置文件，当前实现复用 Load 的校验和默认值逻辑。
 func Reload(path string) (*Config, error) {
-	return Load(path)
+	return load(path, true)
+}
+
+// Read 读取并规范化配置，但不替换当前运行时快照，适合在提交热重载前做预检查。
+func Read(path string) (*Config, error) {
+	return load(path, false)
 }
 
 // Get 返回最近一次成功加载的配置快照。
@@ -105,6 +89,13 @@ func Get() *Config {
 	mu.RLock()
 	defer mu.RUnlock()
 	return current
+}
+
+// SetCurrent 用一份已校验的配置替换当前快照，供热重载成功后原子提交。
+func SetCurrent(cfg *Config) {
+	mu.Lock()
+	current = cfg.Clone()
+	mu.Unlock()
 }
 
 // validate 校验启动必须依赖的配置项。
@@ -339,4 +330,59 @@ func (c *Config) normalizeProviders() {
 // StatePersistenceEnabled 返回状态持久化是否启用；未配置时默认启用。
 func (c *Config) StatePersistenceEnabled() bool {
 	return c.PersistState == nil || *c.PersistState
+}
+
+// Clone 返回完整配置副本，避免调用方误改共享切片或指针字段。
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+
+	out := *c
+	out.Keys = append([]string(nil), c.Keys...)
+	if c.Providers != nil {
+		out.Providers = make([]ProviderConfig, len(c.Providers))
+		for i, provider := range c.Providers {
+			out.Providers[i] = provider.copy()
+		}
+	}
+	if c.PersistState != nil {
+		enabled := *c.PersistState
+		out.PersistState = &enabled
+	}
+	return &out
+}
+
+// Equal 按归一化配置内容比较两份配置是否一致，便于判断是否真的发生了配置变更。
+func (c *Config) Equal(other *Config) bool {
+	if c == nil || other == nil {
+		return c == other
+	}
+	return reflect.DeepEqual(c, other)
+}
+
+// load 统一封装配置读取与规范化流程，并按需决定是否提交到当前快照。
+func load(path string, setCurrent bool) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	cfg := &Config{}
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	cfg.applyDefaults()
+	if err := cfg.validateAfterDefaults(); err != nil {
+		return nil, err
+	}
+
+	if setCurrent {
+		SetCurrent(cfg)
+	}
+	return cfg, nil
 }

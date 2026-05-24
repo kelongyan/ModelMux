@@ -1,22 +1,34 @@
 package admin
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 
+	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/logx"
 	"github.com/kelongyan/ModelMux/pool"
 )
 
 type Handler struct {
-	pools      *pool.ProviderPools
-	configPath string
-	reloadFn   func(string) error
+	pools        *pool.ProviderPools
+	cfgManager   *config.Manager
+	reloadFn     func(string) error
+	eventBuffer  *EventBuffer
+	stateChanged func(bool)
 }
 
-func NewHandler(pools *pool.ProviderPools, configPath string, reloadFn func(string) error) *Handler {
-	return &Handler{pools: pools, configPath: configPath, reloadFn: reloadFn}
+// NewHandler 创建管理端处理器，并挂载配置管理器与事件缓冲区。
+func NewHandler(pools *pool.ProviderPools, cfgManager *config.Manager, reloadFn func(string) error, events *EventBuffer, stateChanged func(bool)) *Handler {
+	if stateChanged == nil {
+		stateChanged = func(bool) {}
+	}
+	return &Handler{
+		pools:        pools,
+		cfgManager:   cfgManager,
+		reloadFn:     reloadFn,
+		eventBuffer:  events,
+		stateChanged: stateChanged,
+	}
 }
 
 // Register 注册管理端 HTTP 路由。
@@ -24,6 +36,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/status", h.status)
 	mux.HandleFunc("/admin/health", h.health)
 	mux.HandleFunc("/admin/reload", h.reload)
+	h.registerAPIRoutes(mux)
+	h.registerConsoleRoutes(mux)
 }
 
 // status 输出 key 池状态，供本地排查和监控使用。
@@ -80,20 +94,21 @@ func (h *Handler) reload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := h.reloadFn(h.configPath); err != nil {
+	if h.cfgManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+		return
+	}
+	if err := h.reloadFn(h.cfgManager.Path()); err != nil {
 		slog.Error("admin reload failed", logx.Fields(logx.CategoryAdmin, logx.EventAdminReloadFailed,
 			"err", err,
 		)...)
+		h.recordEvent("error", logx.CategoryAdmin, logx.EventAdminReloadFailed, "legacy reload failed", map[string]any{
+			"error": err.Error(),
+		})
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
 	slog.Info("admin reload ok", logx.Fields(logx.CategoryAdmin, logx.EventAdminReloadOK)...)
+	h.recordEvent("info", logx.CategoryAdmin, logx.EventAdminReloadOK, "legacy reload ok", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// writeJSON 写出统一 JSON 响应。
-func writeJSON(w http.ResponseWriter, code int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
 }

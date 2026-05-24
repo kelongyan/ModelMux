@@ -72,6 +72,14 @@ func (k *Key) MarkInvalid() {
 	k.ErrCount.Add(1)
 }
 
+// ResetActive 手动把 key 恢复为 active，并清理冷却截止时间。
+func (k *Key) ResetActive() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.coolUntil.Store(0)
+	k.state.Store(int32(StateActive))
+}
+
 // RecordLatency 累加上游请求延迟，用于计算平均延迟。
 func (k *Key) RecordLatency(d time.Duration) {
 	k.totalLatencyMs.Add(d.Milliseconds())
