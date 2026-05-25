@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Col,
+  Collapse,
   Divider,
   Form,
   Input,
@@ -37,7 +38,12 @@ const fieldLabels: Record<string, string> = {
   active_provider: "当前活跃 Provider",
   cooling_seconds: "429 冷却秒数",
   max_retries: "最大重试次数",
+  max_transient_retries: "临时故障最大重试次数",
   request_timeout_seconds: "上游请求超时",
+  connect_timeout_seconds: "连接超时",
+  response_header_timeout_seconds: "响应头超时",
+  transient_cooling_seconds: "临时故障冷却秒数",
+  wait_for_key_timeout_ms: "等待 cooling Key 恢复时长",
   max_body_bytes: "请求体大小上限",
   log_level: "日志级别",
   log_format: "日志格式",
@@ -141,24 +147,32 @@ export function SettingsPage(): JSX.Element {
           </div>
 
           <Form<AdminSettingsPayload> form={form} layout="vertical" onFinish={(values) => updateSettingsMutation.mutate(values)}>
-            <SettingSection
-              title="运行策略"
-              fields={settingGroups.runtimeFields}
+            <SettingSection title="核心运行参数" fields={settingGroups.coreFields} />
+
+            <Collapse
+              ghost
+              className="settings-advanced-collapse"
+              items={[
+                {
+                  key: "advanced",
+                  label: (
+                    <Space size={8}>
+                      <Typography.Text strong>高级重试与超时</Typography.Text>
+                      <Tag color="gold">高级</Tag>
+                    </Space>
+                  ),
+                  children: <SettingSection fields={settingGroups.advancedFields} />,
+                },
+              ]}
             />
 
             <Divider />
 
-            <SettingSection
-              title="网络监听与日志"
-              fields={settingGroups.serverAndLogFields}
-            />
+            <SettingSection title="网络监听与日志" fields={settingGroups.serverAndLogFields} />
 
             <Divider />
 
-            <SettingSection
-              title="状态持久化"
-              fields={settingGroups.stateFields}
-            />
+            <SettingSection title="状态持久化" fields={settingGroups.stateFields} />
           </Form>
         </Card>
       </Space>
@@ -242,7 +256,7 @@ type SettingFieldMeta = {
 };
 
 type SettingSectionProps = {
-  title: string;
+  title?: string;
   fields: SettingFieldMeta[];
 };
 
@@ -250,11 +264,13 @@ type SettingSectionProps = {
 function SettingSection({ title, fields }: SettingSectionProps): JSX.Element {
   return (
     <div className="settings-section">
-      <div className="settings-section-head">
-        <Typography.Title level={4} className="section-title">
-          {title}
-        </Typography.Title>
-      </div>
+      {title ? (
+        <div className="settings-section-head">
+          <Typography.Title level={4} className="section-title">
+            {title}
+          </Typography.Title>
+        </div>
+      ) : null}
       <Row gutter={[18, 10]}>
         {fields.map((field) => (
           <Col xs={24} md={12} key={String(field.name)}>
@@ -281,9 +297,10 @@ function SettingSection({ title, fields }: SettingSectionProps): JSX.Element {
   );
 }
 
-// buildSettingGroups 把设置页字段拆成运行策略、日志监听和状态持久化三组。
+// buildSettingGroups 把设置页字段拆成核心运行、高级重试、网络日志和状态持久化四组。
 function buildSettingGroups(response: AdminSettingsResponse): {
-  runtimeFields: SettingFieldMeta[];
+  coreFields: SettingFieldMeta[];
+  advancedFields: SettingFieldMeta[];
   serverAndLogFields: SettingFieldMeta[];
   stateFields: SettingFieldMeta[];
 } {
@@ -304,11 +321,11 @@ function buildSettingGroups(response: AdminSettingsResponse): {
   };
 
   return {
-    runtimeFields: [
+    coreFields: [
       {
         name: "active_provider",
         label: "当前活跃 Provider",
-        hint: "该字段由 Provider 页面负责切换，这里仅做只读展示。",
+        hint: "在总览或提供商页面切换 active provider，这里仅做只读展示。",
         effect: effectOf("active_provider"),
         render: () => <Input disabled />,
       },
@@ -339,6 +356,43 @@ function buildSettingGroups(response: AdminSettingsResponse): {
         hint: "超过该值的请求会在代理入口被直接拒绝。",
         effect: effectOf("max_body_bytes"),
         render: () => <InputNumber min={1024} step={1024} className="full-width" />,
+      },
+    ],
+    advancedFields: [
+      {
+        name: "max_transient_retries",
+        label: "临时故障最大重试次数",
+        hint: "provider 级 502/503/504 与连接级抖动会使用这组独立预算，避免把整个 key 池扫一遍。",
+        effect: effectOf("max_transient_retries"),
+        render: () => <InputNumber min={0} step={1} className="full-width" />,
+      },
+      {
+        name: "connect_timeout_seconds",
+        label: "连接超时（秒）",
+        hint: "控制 TCP 建连和 TLS 握手阶段的超时，适合缩短坏网络下的首次等待。",
+        effect: effectOf("connect_timeout_seconds"),
+        render: () => <InputNumber min={1} step={1} className="full-width" />,
+      },
+      {
+        name: "response_header_timeout_seconds",
+        label: "响应头超时（秒）",
+        hint: "上游迟迟不返回首包时会触发该超时，并按临时故障策略处理。",
+        effect: effectOf("response_header_timeout_seconds"),
+        render: () => <InputNumber min={1} step={1} className="full-width" />,
+      },
+      {
+        name: "transient_cooling_seconds",
+        label: "临时故障冷却秒数",
+        hint: "EOF、连接重置等连接级抖动会先短暂摘除当前 key，再尝试下一个。",
+        effect: effectOf("transient_cooling_seconds"),
+        render: () => <InputNumber min={1} step={1} className="full-width" />,
+      },
+      {
+        name: "wait_for_key_timeout_ms",
+        label: "等待 cooling Key 恢复（毫秒）",
+        hint: "当所有 key 只是短暂 cooling 时，代理会在这个预算内等最近一个 key 恢复，尽量避免立刻向客户端暴露 503。",
+        effect: effectOf("wait_for_key_timeout_ms"),
+        render: () => <InputNumber min={0} step={50} className="full-width" />,
       },
     ],
     serverAndLogFields: [

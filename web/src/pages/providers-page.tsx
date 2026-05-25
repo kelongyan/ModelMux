@@ -19,6 +19,7 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import {
   activateProvider,
@@ -32,6 +33,9 @@ import {
   resetProviderKey,
   updateProvider,
 } from "../api/admin";
+import { CooldownText } from "../components/cooldown-text";
+import { formatRelativeTime } from "../components/format-time";
+import { KeyPoolDots } from "../components/key-pool-dots";
 import type {
   AdminKeyStatus,
   AdminProviderDetailResponse,
@@ -57,7 +61,8 @@ const providersQueryKey = ["providers"];
 export function ProvidersPage(): JSX.Element {
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
-  const [selectedProviderID, setSelectedProviderID] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedProviderID, setSelectedProviderID] = useState<string | null>(() => searchParams.get("provider"));
   const [selectedKeyIDs, setSelectedKeyIDs] = useState<string[]>([]);
   const [providerModal, setProviderModal] = useState<{ open: boolean; mode: ProviderFormMode; provider?: AdminProviderSummary }>({
     open: false,
@@ -92,6 +97,22 @@ export function ProvidersPage(): JSX.Element {
   useEffect(() => {
     setSelectedKeyIDs([]);
   }, [selectedProviderID]);
+
+  // syncSelectionFromURL 让 Dashboard 卡片"详情 →"跳转过来时能直接打开对应 drawer。
+  useEffect(() => {
+    const fromUrl = searchParams.get("provider");
+    if (fromUrl && fromUrl !== selectedProviderID) {
+      setSelectedProviderID(fromUrl);
+    }
+  }, [searchParams, selectedProviderID]);
+
+  const clearProviderInURL = () => {
+    if (searchParams.get("provider")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("provider");
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   const invalidateAdminQueries = async (providerID?: string) => {
     await Promise.all([
@@ -299,16 +320,16 @@ export function ProvidersPage(): JSX.Element {
         render: (value: number) => `${value.toFixed(1)} ms`,
       },
       {
-        title: "冷却截止",
+        title: "冷却倒计时",
         dataIndex: "cool_until",
         key: "cool_until",
-        render: (value?: string) => formatDateTime(value),
+        render: (value?: string) => <CooldownText until={value} />,
       },
       {
         title: "最近 401",
         dataIndex: "last_401_at",
         key: "last_401_at",
-        render: (value?: string) => formatDateTime(value),
+        render: (value?: string) => formatRelativeTime(value),
       },
       {
         title: "操作",
@@ -459,7 +480,10 @@ export function ProvidersPage(): JSX.Element {
         open={selectedProviderID !== null}
         width={920}
         title={selectedProvider ? `Provider 详情：${selectedProvider.id}` : "Provider 详情"}
-        onClose={() => setSelectedProviderID(null)}
+        onClose={() => {
+          setSelectedProviderID(null);
+          clearProviderInURL();
+        }}
       >
         {detailLoading ? (
           <div className="console-loading">
@@ -589,6 +613,17 @@ function ProviderDetailContent({
   return (
     <Space direction="vertical" size={20} className="console-stack">
       <Card className="surface-card" bordered={false}>
+        <div className="provider-detail-pool">
+          <KeyPoolDots
+            active={detail.active_keys}
+            cooling={detail.cooling_keys}
+            invalid={detail.invalid_keys}
+            max={48}
+          />
+          <span className="provider-detail-pool-summary">
+            {`可用 ${detail.active_keys} · 冷却 ${detail.cooling_keys} · 失效 ${detail.invalid_keys} · 总 ${detail.total_keys}`}
+          </span>
+        </div>
         <Descriptions
           className="provider-detail-descriptions"
           column={{ xs: 1, md: 2 }}
@@ -669,14 +704,4 @@ function splitKeysText(input: string): string[] {
     .split(/\r?\n/g)
     .map((key) => key.trim())
     .filter((key) => key.length > 0);
-}
-
-// formatDateTime 把后端时间字段格式化为适合表格阅读的文本。
-function formatDateTime(value?: string): string {
-  if (!value) {
-    return "-";
-  }
-  return new Date(value).toLocaleString("zh-CN", {
-    hour12: false,
-  });
 }

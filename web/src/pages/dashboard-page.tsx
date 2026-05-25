@@ -1,15 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Col, Empty, Result, Row, Space, Spin, Tag, Typography, message } from "antd";
+import { Button, Card, Empty, Result, Space, Spin, Tag, Tooltip, Typography, message } from "antd";
 import { startTransition } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { fetchDashboard, triggerReload } from "../api/admin";
-import type { AdminDashboardResponse, AdminProviderSummary } from "../types/admin";
+import { activateProvider, fetchDashboard, triggerReload } from "../api/admin";
+import { formatClockShort, formatRelativeTime } from "../components/format-time";
+import { HealthDot } from "../components/health-dot";
+import { KeyPoolDots } from "../components/key-pool-dots";
+import type { AdminDashboardResponse, AdminEvent, AdminProviderSummary } from "../types/admin";
 
 const dashboardQueryKey = ["dashboard"];
 
-// DashboardPage 渲染真实数据驱动的首页，包含轮询刷新与手动 reload 快捷操作。
+// DashboardPage 使用左右两栏布局：左侧 provider 卡片矩阵，右侧 KPI + 实时事件流。
 export function DashboardPage(): JSX.Element {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [messageApi, contextHolder] = message.useMessage();
+
   const dashboardQuery = useQuery({
     queryKey: dashboardQueryKey,
     queryFn: fetchDashboard,
@@ -19,13 +26,39 @@ export function DashboardPage(): JSX.Element {
   const reloadMutation = useMutation({
     mutationFn: triggerReload,
     onSuccess: async () => {
-      message.success("已触发配置重载");
+      messageApi.success("已触发配置重载");
       startTransition(() => {
         void queryClient.invalidateQueries({ queryKey: dashboardQueryKey });
       });
     },
     onError: (error: Error) => {
-      message.error(`重载失败：${error.message}`);
+      messageApi.error(`重载失败：${error.message}`);
+    },
+  });
+
+  const activateMutation = useMutation({
+    mutationFn: activateProvider,
+    onMutate: async (providerID) => {
+      await queryClient.cancelQueries({ queryKey: dashboardQueryKey });
+      const previous = queryClient.getQueryData<AdminDashboardResponse>(dashboardQueryKey);
+      if (previous) {
+        const next = applyOptimisticActivate(previous, providerID);
+        queryClient.setQueryData(dashboardQueryKey, next);
+      }
+      return { previous };
+    },
+    onSuccess: async (_, providerID) => {
+      messageApi.success(`已切换到 ${providerID}`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ["providers"] }),
+      ]);
+    },
+    onError: (error: Error, _id, context) => {
+      messageApi.error(`切换失败：${error.message}`);
+      if (context?.previous) {
+        queryClient.setQueryData(dashboardQueryKey, context.previous);
+      }
     },
   });
 
@@ -53,142 +86,273 @@ export function DashboardPage(): JSX.Element {
   }
 
   const dashboard = dashboardQuery.data;
-  const metrics = buildDashboardMetrics(dashboard);
+  const events = dashboard.events ?? [];
+  const lastUpdated = formatClockShort(dashboardQuery.dataUpdatedAt);
 
   return (
-    <Space direction="vertical" size={24} className="console-stack">
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <Typography.Text className="hero-kicker">总览</Typography.Text>
-          <Typography.Title level={3} className="hero-title">
-            实时状态
-          </Typography.Title>
-          <Space wrap>
-            <Button
-              type="primary"
-              loading={reloadMutation.isPending}
-              onClick={() => reloadMutation.mutate()}
-            >
-              立即重载配置
-            </Button>
-            <Button onClick={() => void dashboardQuery.refetch()}>手动刷新</Button>
-          </Space>
-        </div>
-        <div className="hero-status">
-          <span>当前活跃 Provider</span>
-          <strong>{dashboard.active_provider}</strong>
-          <small>{`最近刷新：${formatClock(dashboardQuery.dataUpdatedAt)}`}</small>
-        </div>
-      </section>
+    <>
+      {contextHolder}
+      <div className="dashboard-grid">
+        <section className="dashboard-left">
+          <div className="dashboard-section-head">
+            <div>
+              <Typography.Text className="placeholder-kicker">Providers</Typography.Text>
+              <Typography.Title level={3} className="section-title">
+                提供商矩阵
+              </Typography.Title>
+            </div>
+            <Space wrap>
+              <Button
+                type="primary"
+                loading={reloadMutation.isPending}
+                onClick={() => reloadMutation.mutate()}
+              >
+                立即重载
+              </Button>
+              <Button onClick={() => void dashboardQuery.refetch()}>手动刷新</Button>
+            </Space>
+          </div>
 
-      <Row gutter={[18, 18]}>
-        {metrics.map((metric) => (
-          <Col xs={24} sm={12} xl={6} key={metric.label}>
-            <MetricCard label={metric.label} value={metric.value} accent={metric.accent} />
-          </Col>
-        ))}
-      </Row>
+          {dashboard.providers.length === 0 ? (
+            <Card className="surface-card" bordered={false}>
+              <Empty description="还未配置任何 provider" />
+            </Card>
+          ) : (
+            <div className="provider-grid">
+              {dashboard.providers.map((provider) => (
+                <ProviderCard
+                  key={provider.id}
+                  provider={provider}
+                  recentIssue={findRecentIssue(events, provider.id)}
+                  activating={activateMutation.isPending && activateMutation.variables === provider.id}
+                  onActivate={() => activateMutation.mutate(provider.id)}
+                  onOpenDetail={() => navigate(`/providers?provider=${encodeURIComponent(provider.id)}`)}
+                />
+              ))}
+              <button type="button" className="provider-card provider-card--add" onClick={() => navigate("/providers")}>
+                <span className="provider-card-add-plus">+</span>
+                <span>新增 Provider</span>
+              </button>
+            </div>
+          )}
+        </section>
 
-      <Row gutter={[18, 18]}>
-        <Col xs={24} xl={15}>
-          <Card className="surface-card" bordered={false} title="Provider 状态速览">
-            {dashboard.providers.length === 0 ? (
-              <Empty description="当前没有可展示的 provider" />
-            ) : (
-              <div className="provider-preview-list">
-                {dashboard.providers.map((provider) => (
-                  <ProviderSummaryItem key={provider.id} provider={provider} />
-                ))}
-              </div>
-            )}
-          </Card>
-        </Col>
-        <Col xs={24} xl={9}>
-          <Card className="surface-card" bordered={false} title="最近事件">
-            {dashboard.events.length === 0 ? (
-              <Empty description="当前没有事件" />
-            ) : (
-              <ul className="event-preview-list">
-                {dashboard.events.map((event) => (
-                  <li key={`${event.seq}-${event.event}`}>
-                    <strong>{event.message}</strong>
-                    <span>{`${event.category} · ${event.event}`}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </Col>
-      </Row>
-    </Space>
+        <aside className="dashboard-right">
+          <KpiBlock dashboard={dashboard} lastUpdated={lastUpdated} />
+          <EventsRail events={events.slice(0, 12)} onViewAll={() => navigate("/events")} />
+        </aside>
+      </div>
+    </>
   );
 }
 
-type MetricCardProps = {
-  label: string;
-  value: string;
-  accent: "amber" | "teal" | "green" | "red";
+type ProviderCardProps = {
+  provider: AdminProviderSummary;
+  recentIssue: AdminEvent | undefined;
+  activating: boolean;
+  onActivate: () => void;
+  onOpenDetail: () => void;
 };
 
-// MetricCard 渲染首页统计卡片，统一控制视觉风格。
-function MetricCard({ label, value, accent }: MetricCardProps): JSX.Element {
+// ProviderCard 渲染左栏的单个 provider，是 Dashboard 最高频的交互单元。
+function ProviderCard({ provider, recentIssue, activating, onActivate, onOpenDetail }: ProviderCardProps): JSX.Element {
+  const tone = computeCardTone(provider);
+  const className = `provider-card provider-card--${tone}${provider.active ? " provider-card--current" : ""}`;
   return (
-    <Card className={`metric-card accent-${accent}`} bordered={false}>
-      <Typography.Text className="metric-label">{label}</Typography.Text>
-      <Typography.Title level={2} className="metric-value">
-        {value}
-      </Typography.Title>
+    <article className={className}>
+      <header className="provider-card-head">
+        <div className="provider-card-title">
+          <HealthDot state={tone} pulse={provider.active && tone === "active"} />
+          <h3>{provider.id}</h3>
+          {provider.active ? <Tag color="green">当前活跃</Tag> : <Tag>待命</Tag>}
+        </div>
+        <a className="provider-card-url" href={provider.target_url} target="_blank" rel="noreferrer">
+          {provider.target_url}
+        </a>
+      </header>
+
+      <div className="provider-card-pool">
+        <KeyPoolDots
+          active={provider.active_keys}
+          cooling={provider.cooling_keys}
+          invalid={provider.invalid_keys}
+          max={32}
+        />
+        <div className="provider-card-stats">
+          <span>
+            <strong>{provider.active_keys}</strong> 可用
+          </span>
+          <span>
+            <strong>{provider.cooling_keys}</strong> 冷却
+          </span>
+          <span>
+            <strong>{provider.invalid_keys}</strong> 失效
+          </span>
+          <span className="provider-card-stats-total">{`总 ${provider.total_keys}`}</span>
+        </div>
+      </div>
+
+      {recentIssue ? (
+        <div className="provider-card-issue" title={recentIssue.message}>
+          <Tag color={levelColor(recentIssue.level)}>{recentIssue.level}</Tag>
+          <span className="provider-card-issue-msg">{recentIssue.message}</span>
+          <span className="provider-card-issue-time">{formatRelativeTime(recentIssue.at)}</span>
+        </div>
+      ) : null}
+
+      <footer className="provider-card-actions">
+        {provider.active ? (
+          <Tooltip title="已是当前活跃 provider">
+            <Button disabled>已活跃</Button>
+          </Tooltip>
+        ) : (
+          <Button type="primary" loading={activating} onClick={onActivate}>
+            设为活跃
+          </Button>
+        )}
+        <Button onClick={onOpenDetail}>详情 →</Button>
+      </footer>
+    </article>
+  );
+}
+
+type KpiBlockProps = {
+  dashboard: AdminDashboardResponse;
+  lastUpdated: string;
+};
+
+// KpiBlock 渲染右栏顶部的 KPI 大字，做主数据速读。
+function KpiBlock({ dashboard, lastUpdated }: KpiBlockProps): JSX.Element {
+  return (
+    <Card className="surface-card kpi-card" bordered={false}>
+      <div className="dashboard-section-head">
+        <div>
+          <Typography.Text className="placeholder-kicker">LIVE</Typography.Text>
+          <Typography.Title level={4} className="section-title">
+            当前 Provider 概况
+          </Typography.Title>
+        </div>
+        <Tag>{lastUpdated}</Tag>
+      </div>
+      <div className="kpi-active-row">
+        <HealthDot state={dashboard.active_keys > 0 ? "active" : "invalid"} pulse />
+        <strong className="kpi-active-name" title={dashboard.active_provider}>
+          {dashboard.active_provider || "未配置"}
+        </strong>
+      </div>
+      <div className="kpi-grid">
+        <div className="kpi-cell kpi-cell--green">
+          <span className="kpi-label">可用</span>
+          <strong className="kpi-value">{dashboard.active_keys}</strong>
+        </div>
+        <div className="kpi-cell kpi-cell--amber">
+          <span className="kpi-label">冷却</span>
+          <strong className="kpi-value">{dashboard.cooling_keys}</strong>
+        </div>
+        <div className="kpi-cell kpi-cell--red">
+          <span className="kpi-label">失效</span>
+          <strong className="kpi-value">{dashboard.invalid_keys}</strong>
+        </div>
+        <div className="kpi-cell kpi-cell--teal">
+          <span className="kpi-label">Provider</span>
+          <strong className="kpi-value">{dashboard.provider_count}</strong>
+        </div>
+      </div>
     </Card>
   );
 }
 
-type ProviderSummaryItemProps = {
-  provider: AdminProviderSummary;
+type EventsRailProps = {
+  events: AdminEvent[];
+  onViewAll: () => void;
 };
 
-// ProviderSummaryItem 渲染单个 provider 的状态摘要，供 dashboard 快速浏览。
-function ProviderSummaryItem({ provider }: ProviderSummaryItemProps): JSX.Element {
+// EventsRail 渲染右栏滚动事件列表，提供"最近发生了什么"的速读。
+function EventsRail({ events, onViewAll }: EventsRailProps): JSX.Element {
   return (
-    <div className="provider-preview-item">
-      <div>
-        <div className="provider-preview-head">
-          <strong>{provider.id}</strong>
-          {provider.active ? <Tag color="green">当前活跃</Tag> : <Tag>待命</Tag>}
+    <Card className="surface-card events-rail-card" bordered={false}>
+      <div className="dashboard-section-head">
+        <div>
+          <Typography.Text className="placeholder-kicker">Recent Events</Typography.Text>
+          <Typography.Title level={4} className="section-title">
+            最近事件
+          </Typography.Title>
         </div>
-        <p>{provider.target_url}</p>
-        <div className="provider-stat-row">
-          <span>{`总 key ${provider.total_keys}`}</span>
-          <span>{`可用 ${provider.active_keys}`}</span>
-          <span>{`冷却 ${provider.cooling_keys}`}</span>
-          <span>{`失效 ${provider.invalid_keys}`}</span>
-        </div>
+        <Button size="small" onClick={onViewAll}>
+          全部 →
+        </Button>
       </div>
-    </div>
+      {events.length === 0 ? (
+        <Empty description="暂无事件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+      ) : (
+        <ul className="events-rail-list">
+          {events.map((event) => (
+            <li key={`${event.seq}-${event.event}`} className={`events-rail-item events-rail-item--${event.level}`}>
+              <span className="events-rail-time">{formatClockShort(new Date(event.at).getTime())}</span>
+              <Tag color={levelColor(event.level)}>{event.level}</Tag>
+              <span className="events-rail-msg" title={event.message}>
+                {event.message}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
-type DashboardMetric = {
-  label: string;
-  value: string;
-  accent: "amber" | "teal" | "green" | "red";
-};
-
-// buildDashboardMetrics 把 dashboard 响应整理为 UI 直接可消费的统计卡片模型。
-function buildDashboardMetrics(dashboard: AdminDashboardResponse): DashboardMetric[] {
-  return [
-    { label: "当前 Provider", value: dashboard.active_provider, accent: "amber" },
-    { label: "Provider 总数", value: String(dashboard.provider_count), accent: "teal" },
-    { label: "可用 Key", value: String(dashboard.active_keys), accent: "green" },
-    { label: "冷却 / 失效", value: `${dashboard.cooling_keys} / ${dashboard.invalid_keys}`, accent: "red" },
-  ];
+// applyOptimisticActivate 在乐观更新阶段把 provider 卡片切换到目标项，避免等待轮询。
+function applyOptimisticActivate(prev: AdminDashboardResponse, providerID: string): AdminDashboardResponse {
+  const target = prev.providers.find((p) => p.id === providerID);
+  if (!target) {
+    return prev;
+  }
+  const providers = prev.providers.map((p) => ({ ...p, active: p.id === providerID }));
+  return {
+    ...prev,
+    active_provider: providerID,
+    active_keys: target.active_keys,
+    cooling_keys: target.cooling_keys,
+    invalid_keys: target.invalid_keys,
+    providers,
+  };
 }
 
-// formatClock 把 query 更新时间格式化为前端页头中的简短时钟文本。
-function formatClock(timestamp: number): string {
-  if (!timestamp) {
-    return "--:--:--";
+// computeCardTone 把 provider 概况折算为卡片的色调，控制点位与边框。
+function computeCardTone(provider: AdminProviderSummary): "active" | "cooling" | "invalid" | "idle" {
+  if (provider.active_keys === 0 && provider.cooling_keys === 0) {
+    return "invalid";
   }
-  return new Date(timestamp).toLocaleTimeString("zh-CN", {
-    hour12: false,
-  });
+  if (provider.active_keys === 0) {
+    return "cooling";
+  }
+  if (provider.cooling_keys > 0 || provider.invalid_keys > 0) {
+    return provider.active ? "cooling" : "idle";
+  }
+  return provider.active ? "active" : "idle";
+}
+
+// findRecentIssue 在事件流中找一条与 provider 匹配的最近异常，作为卡片底部一句话。
+function findRecentIssue(events: AdminEvent[], providerID: string): AdminEvent | undefined {
+  for (const event of events) {
+    if (event.level === "info") {
+      continue;
+    }
+    const eventProvider = (event.data?.provider_id as string | undefined) ?? "";
+    if (eventProvider === providerID) {
+      return event;
+    }
+  }
+  return undefined;
+}
+
+// levelColor 把事件 level 映射成 Antd Tag 配色。
+function levelColor(level: string): string {
+  if (level === "error") {
+    return "red";
+  }
+  if (level === "warn") {
+    return "gold";
+  }
+  return "blue";
 }

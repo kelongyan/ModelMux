@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Button, Card, Empty, Input, Result, Row, Col, Select, Space, Spin, Tag, Typography } from "antd";
+import { Button, Card, Col, Empty, Input, Result, Row, Select, Space, Spin, Table, Tag, Typography } from "antd";
+import type { TableColumnsType } from "antd";
 import { useMemo, useState } from "react";
 
 import { fetchRecentEvents } from "../api/admin";
@@ -42,6 +43,44 @@ export function EventsPage(): JSX.Element {
     });
   }, [eventsQuery.data, keyword, level]);
 
+  const columns = useMemo<TableColumnsType<AdminEvent>>(
+    () => [
+      {
+        title: "时间",
+        dataIndex: "at",
+        key: "at",
+        width: 170,
+        render: (value: string) => <span className="events-table-time">{formatDateTime(value)}</span>,
+      },
+      {
+        title: "级别",
+        dataIndex: "level",
+        key: "level",
+        width: 86,
+        render: (lv: string) => <Tag color={levelColor(lv)}>{lv}</Tag>,
+      },
+      {
+        title: "分类",
+        dataIndex: "category",
+        key: "category",
+        width: 110,
+      },
+      {
+        title: "事件",
+        dataIndex: "event",
+        key: "event",
+        width: 160,
+      },
+      {
+        title: "消息",
+        dataIndex: "message",
+        key: "message",
+        ellipsis: { showTitle: true },
+      },
+    ],
+    [],
+  );
+
   if (eventsQuery.isLoading) {
     return (
       <div className="console-loading">
@@ -63,7 +102,7 @@ export function EventsPage(): JSX.Element {
   return (
     <Space direction="vertical" size={20} className="console-stack">
       <Row gutter={[18, 18]}>
-        <Col xs={24} xl={8}>
+        <Col xs={24} xl={7}>
           <Card className="surface-card sticky-card" bordered={false}>
             <div className="section-heading">
               <div>
@@ -82,17 +121,16 @@ export function EventsPage(): JSX.Element {
                 onChange={(event) => setKeyword(event.target.value)}
                 placeholder="按 message / category / event 搜索"
               />
-              <Select
-                value={level}
-                options={eventLevelOptions}
-                onChange={setLevel}
-              />
-              <Tag color="cyan">{`总数 ${eventsQuery.data.events.length}`}</Tag>
+              <Select value={level} options={eventLevelOptions} onChange={setLevel} />
+              <div className="events-summary-row">
+                <Tag color="cyan">{`总数 ${eventsQuery.data.events.length}`}</Tag>
+                <Tag>{`已筛选 ${filteredEvents.length}`}</Tag>
+              </div>
             </Space>
           </Card>
         </Col>
 
-        <Col xs={24} xl={16}>
+        <Col xs={24} xl={17}>
           <Card className="surface-card" bordered={false}>
             <div className="section-heading">
               <div>
@@ -106,11 +144,24 @@ export function EventsPage(): JSX.Element {
             {filteredEvents.length === 0 ? (
               <Empty description="没有匹配的事件" />
             ) : (
-              <div className="event-card-list">
-                {filteredEvents.map((event) => (
-                  <EventCard key={`${event.seq}-${event.event}`} event={event} />
-                ))}
-              </div>
+              <Table
+                className="events-table"
+                columns={columns}
+                dataSource={filteredEvents}
+                pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+                size="small"
+                rowKey={(event) => `${event.seq}-${event.event}`}
+                rowClassName={(event) => `events-table-row events-table-row--${event.level}`}
+                expandable={{
+                  expandedRowRender: (event) =>
+                    event.data ? (
+                      <pre className="events-table-payload">{JSON.stringify(event.data, null, 2)}</pre>
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无附加数据" />
+                    ),
+                  rowExpandable: (event) => Boolean(event.data),
+                }}
+              />
             )}
           </Card>
         </Col>
@@ -119,32 +170,15 @@ export function EventsPage(): JSX.Element {
   );
 }
 
-type EventCardProps = {
-  event: AdminEvent;
-};
-
-// EventCard 渲染单条事件，突出 message，并保留分类和附加数据上下文。
-function EventCard({ event }: EventCardProps): JSX.Element {
-  const levelColor = event.level === "error" ? "red" : event.level === "warn" ? "gold" : "blue";
-
-  return (
-    <Card className="surface-card event-card" bordered={false}>
-      <div className="event-card-head">
-        <Space wrap>
-          <Tag color={levelColor}>{event.level}</Tag>
-          <Tag>{event.category}</Tag>
-          <Tag>{event.event}</Tag>
-        </Space>
-        <Typography.Text className="table-subtext">{formatDateTime(event.at)}</Typography.Text>
-      </div>
-      <Typography.Title level={5} className="event-card-title">
-        {event.message}
-      </Typography.Title>
-      {event.data ? (
-        <pre className="event-card-payload">{JSON.stringify(event.data, null, 2)}</pre>
-      ) : null}
-    </Card>
-  );
+// levelColor 把事件 level 映射成 Antd Tag 配色。
+function levelColor(level: string): string {
+  if (level === "error") {
+    return "red";
+  }
+  if (level === "warn") {
+    return "gold";
+  }
+  return "blue";
 }
 
 // formatDateTime 把事件时间格式化为本地可读文本。
