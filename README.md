@@ -1,8 +1,5 @@
 # ModelMux
 
-<p align="center">
-  <img src="ModelMux.png" alt="ModelMux" width="640" />
-</p>
 
 ModelMux 是一个本地模型提供商管理与请求路由工具。它把多个模型服务提供商、上游地址和 API Key 池集中到一个本地入口，通过 `active_provider` 选择当前使用的提供商，并在该提供商内部完成 key 轮询、错误摘除、限速冷却、热重载、状态持久化、结构化日志和嵌入式可视化管理台。
 
