@@ -26,6 +26,7 @@ var (
 	errStreamFailed        = errors.New("stream failed")
 	errRequestBodyTooLarge = errors.New("request body too large")
 	errKeyQuotaExhausted   = errors.New("key quota exhausted")
+	errRetryableUpstream   = errors.New("retryable upstream failure")
 )
 
 const quotaErrorInspectBytes int64 = 64 * 1024
@@ -39,14 +40,39 @@ type Handler struct {
 type stateChangeHook func(immediate bool)
 
 type runtimeConfig struct {
-	providerID     string
-	targetURL      *url.URL
-	keyPool        *pool.Pool
-	client         *http.Client
-	transport      *http.Transport
-	coolingSeconds int
-	maxRetries     int
-	maxBodyBytes   int64
+	providerID              string
+	targetURL               *url.URL
+	keyPool                 *pool.Pool
+	client                  *http.Client
+	transport               *http.Transport
+	coolingSeconds          int
+	maxRetries              int
+	maxTransientRetries     int
+	transientCoolingSeconds int
+	waitForKeyTimeout       time.Duration
+	maxBodyBytes            int64
+}
+
+type retryScope int
+
+const (
+	retryScopeNone retryScope = iota
+	retryScopeKey
+	retryScopeConnection
+	retryScopeProvider
+)
+
+func (s retryScope) String() string {
+	switch s {
+	case retryScopeKey:
+		return "key"
+	case retryScopeConnection:
+		return "connection"
+	case retryScopeProvider:
+		return "provider"
+	default:
+		return "none"
+	}
 }
 
 // NewHandler 创建代理处理器，并初始化带超时的上游 HTTP client。
@@ -123,15 +149,17 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 	}
 
 	requestTimeoutSeconds := effectiveInt(cfg.RequestTimeoutSeconds, config.DefaultRequestTimeoutSeconds)
+	connectTimeoutSeconds := effectiveInt(cfg.ConnectTimeoutSeconds, config.DefaultConnectTimeoutSeconds)
+	responseHeaderTimeoutSeconds := effectiveInt(cfg.ResponseHeaderTimeoutSeconds, config.DefaultResponseHeaderTimeoutSeconds)
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
+			Timeout:   time.Duration(connectTimeoutSeconds) * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: time.Duration(requestTimeoutSeconds) * time.Second,
+		TLSHandshakeTimeout:   time.Duration(connectTimeoutSeconds) * time.Second,
+		ResponseHeaderTimeout: time.Duration(responseHeaderTimeoutSeconds) * time.Second,
 	}
 	client := &http.Client{
 		Timeout: time.Duration(requestTimeoutSeconds) * time.Second,
@@ -142,14 +170,17 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 	}
 
 	return &runtimeConfig{
-		providerID:     provider.ID,
-		targetURL:      target,
-		keyPool:        keyPool,
-		client:         client,
-		transport:      transport,
-		coolingSeconds: effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
-		maxRetries:     effectiveInt(cfg.MaxRetries, config.DefaultMaxRetries),
-		maxBodyBytes:   effectiveInt64(cfg.MaxBodyBytes, config.DefaultMaxBodyBytes),
+		providerID:              provider.ID,
+		targetURL:               target,
+		keyPool:                 keyPool,
+		client:                  client,
+		transport:               transport,
+		coolingSeconds:          effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
+		maxRetries:              effectiveInt(cfg.MaxRetries, config.DefaultMaxRetries),
+		maxTransientRetries:     effectiveInt(cfg.MaxTransientRetries, config.DefaultMaxTransientRetries),
+		transientCoolingSeconds: effectiveInt(cfg.TransientCoolingSeconds, config.DefaultTransientCoolingSeconds),
+		waitForKeyTimeout:       time.Duration(effectiveInt(cfg.WaitForKeyTimeoutMS, config.DefaultWaitForKeyTimeoutMS)) * time.Millisecond,
+		maxBodyBytes:            effectiveInt64(cfg.MaxBodyBytes, config.DefaultMaxBodyBytes),
 	}, nil
 }
 
@@ -215,19 +246,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var lastStatus int
+	var lastErr error
+	lastScope := retryScopeNone
+	transientFailures := 0
+	waitBudget := rt.waitForKeyTimeout
 
 	for attempt := 0; attempt <= rt.maxRetries; attempt++ {
 		key, err := rt.keyPool.Next()
 		if err != nil {
+			if errors.Is(err, pool.ErrNoAvailableKey) {
+				if waited := h.waitForCoolingKey(r.Context(), rt, waitBudget); waited > 0 {
+					waitBudget -= waited
+					attempt--
+					continue
+				}
+			}
 			slog.Error("no available keys", logx.Fields(logx.CategoryProxy, logx.EventNoAvailableKey,
 				"path", r.URL.Path,
 				"provider_id", rt.providerID,
+				"wait_budget_ms", waitBudget.Milliseconds(),
 			)...)
 			writeProxyError(w, http.StatusServiceUnavailable, "no available API keys")
 			return
 		}
 
-		status, retryAfter, err := h.forward(w, r, rt, key, body)
+		status, retryAfter, scope, err := h.forward(w, r, rt, key, body)
+		key.FinishRequest()
 		if err == nil {
 			slog.Info("proxied", logx.Fields(logx.CategoryProxy, logx.EventProxySuccess,
 				"path", r.URL.Path,
@@ -254,31 +298,51 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		lastStatus = status
+		lastErr = err
+		lastScope = scope
+		stopRetrying := false
 
-		switch status {
-		case http.StatusTooManyRequests:
-			cooling := rt.keyPool.CoolingDuration(rt.coolingSeconds)
-			if retryAfter > 0 {
-				cooling = retryAfter
-			}
-			key.MarkCooling(cooling)
-			h.notifyStateChanged(true)
-			slog.Warn("key rate-limited, cooling", logx.Fields(logx.CategoryRetry, logx.EventKeyCooling,
-				"attempt", attempt+1,
-				"provider_id", rt.providerID,
-				"key_id", logx.MaskSecret(key.Value),
-				"cooling_s", cooling.Seconds(),
-			)...)
-		case http.StatusUnauthorized:
-			key.MarkInvalid()
-			h.notifyStateChanged(true)
-			slog.Warn("key invalid, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyInvalid,
-				"attempt", attempt+1,
-				"provider_id", rt.providerID,
-				"key_id", logx.MaskSecret(key.Value),
-			)...)
-		case http.StatusForbidden:
-			if !errors.Is(err, errKeyQuotaExhausted) {
+		switch scope {
+		case retryScopeKey:
+			switch status {
+			case http.StatusTooManyRequests:
+				cooling := rt.keyPool.CoolingDuration(rt.coolingSeconds)
+				if retryAfter > 0 {
+					cooling = retryAfter
+				}
+				key.MarkCooling(cooling)
+				h.notifyStateChanged(true)
+				slog.Warn("key rate-limited, cooling", logx.Fields(logx.CategoryRetry, logx.EventKeyCooling,
+					"attempt", attempt+1,
+					"provider_id", rt.providerID,
+					"key_id", logx.MaskSecret(key.Value),
+					"cooling_s", cooling.Seconds(),
+				)...)
+			case http.StatusUnauthorized:
+				key.MarkInvalid()
+				h.notifyStateChanged(true)
+				slog.Warn("key invalid, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyInvalid,
+					"attempt", attempt+1,
+					"provider_id", rt.providerID,
+					"key_id", logx.MaskSecret(key.Value),
+				)...)
+			case http.StatusForbidden:
+				if !errors.Is(err, errKeyQuotaExhausted) {
+					slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
+						"status", status,
+						"provider_id", rt.providerID,
+						"err", err,
+					)...)
+					return
+				}
+				key.MarkInvalid()
+				h.notifyStateChanged(true)
+				slog.Warn("key quota exhausted, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyQuotaExhausted,
+					"attempt", attempt+1,
+					"provider_id", rt.providerID,
+					"key_id", logx.MaskSecret(key.Value),
+				)...)
+			default:
 				slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
 					"status", status,
 					"provider_id", rt.providerID,
@@ -286,13 +350,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				)...)
 				return
 			}
-			key.MarkInvalid()
+		case retryScopeConnection:
+			transientFailures++
+			cooling := rt.keyPool.CoolingDuration(rt.transientCoolingSeconds)
+			if retryAfter > 0 {
+				cooling = retryAfter
+			}
+			key.MarkCooling(cooling)
 			h.notifyStateChanged(true)
-			slog.Warn("key quota exhausted, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyQuotaExhausted,
+			slog.Warn("key transient failure, cooling", logx.Fields(logx.CategoryRetry, logx.EventKeyTransientFailure,
 				"attempt", attempt+1,
 				"provider_id", rt.providerID,
 				"key_id", logx.MaskSecret(key.Value),
+				"status", status,
+				"scope", scope.String(),
+				"cooling_s", cooling.Seconds(),
+				"transient_failures", transientFailures,
+				"max_transient_retries", rt.maxTransientRetries,
+				"err", err,
 			)...)
+			stopRetrying = transientFailures > rt.maxTransientRetries
+		case retryScopeProvider:
+			transientFailures++
+			slog.Warn("provider transient failure", logx.Fields(logx.CategoryRetry, logx.EventProviderTransient,
+				"attempt", attempt+1,
+				"provider_id", rt.providerID,
+				"key_id", logx.MaskSecret(key.Value),
+				"status", status,
+				"scope", scope.String(),
+				"transient_failures", transientFailures,
+				"max_transient_retries", rt.maxTransientRetries,
+				"err", err,
+			)...)
+			stopRetrying = transientFailures > rt.maxTransientRetries
 		default:
 			// 非重试错误已经在 forward 中写出响应，这里只记录分类日志。
 			slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
@@ -302,48 +392,84 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)...)
 			return
 		}
+		if stopRetrying {
+			break
+		}
 	}
 
 	slog.Error("all retries exhausted", logx.Fields(logx.CategoryRetry, logx.EventRetryExhausted,
 		"last_status", lastStatus,
 		"provider_id", rt.providerID,
+		"retry_scope", lastScope.String(),
+		"err", lastErr,
 	)...)
+	if lastScope == retryScopeProvider || lastScope == retryScopeConnection {
+		writeProxyError(w, http.StatusServiceUnavailable, "upstream temporarily unavailable after retries")
+		return
+	}
 	writeProxyError(w, http.StatusServiceUnavailable, "all keys exhausted after retries")
+}
+
+// waitForCoolingKey 在所有 key 仅因 cooling 暂不可用时短等最近恢复窗口，尽量避免立即向用户暴露 503。
+func (h *Handler) waitForCoolingKey(ctx context.Context, rt *runtimeConfig, budget time.Duration) time.Duration {
+	if rt == nil || rt.keyPool == nil || budget <= 0 {
+		return 0
+	}
+
+	waitFor, ok := rt.keyPool.NextAvailableIn(time.Now())
+	if !ok || waitFor <= 0 || waitFor > budget {
+		return 0
+	}
+
+	timer := time.NewTimer(waitFor)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return 0
+	case <-timer.C:
+		return waitFor
+	}
 }
 
 // forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
 // 成功时返回状态码和 nil；429、401 和余额不足类 403 返回可重试错误；其他错误会在本函数内写出响应。
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, error) {
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, retryScope, error) {
 	outReq, err := buildRequest(rt, r, key, body)
 	if err != nil {
 		writeProxyError(w, http.StatusInternalServerError, "failed to build request")
-		return http.StatusInternalServerError, 0, err
+		return http.StatusInternalServerError, 0, retryScopeNone, err
 	}
 
 	upstreamStart := time.Now()
 	resp, err := rt.client.Do(outReq)
 	if err != nil {
 		if errors.Is(r.Context().Err(), context.Canceled) {
-			return 0, 0, errClientCanceled
+			return 0, 0, retryScopeNone, errClientCanceled
 		}
+		scope := classifyTransportRetryScope(err)
 		slog.Error("upstream unreachable", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnreachable,
 			"path", r.URL.Path,
 			"provider_id", rt.providerID,
 			"key_id", logx.MaskSecret(key.Value),
+			"scope", scope.String(),
 			"err", err,
 		)...)
-		writeProxyError(w, http.StatusBadGateway, fmt.Sprintf("upstream unreachable: %s", err))
-		return http.StatusBadGateway, 0, err
+		return http.StatusBadGateway, 0, scope, fmt.Errorf("%w: %v", errRetryableUpstream, err)
 	}
 	defer resp.Body.Close()
 
 	// 429/401 需要换 key 重试，因此不能提前向客户端写响应头。
 	if resp.StatusCode == http.StatusTooManyRequests {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		return resp.StatusCode, retryAfter, fmt.Errorf("upstream returned %d", resp.StatusCode)
+		return resp.StatusCode, retryAfter, retryScopeKey, fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return resp.StatusCode, 0, fmt.Errorf("upstream returned %d", resp.StatusCode)
+		return resp.StatusCode, 0, retryScopeKey, fmt.Errorf("upstream returned %d", resp.StatusCode)
+	}
+	if isRetryableUpstreamStatus(resp.StatusCode) {
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		return resp.StatusCode, retryAfter, retryScopeProvider, fmt.Errorf("%w: upstream returned %d", errRetryableUpstream, resp.StatusCode)
 	}
 
 	responseBody := io.Reader(resp.Body)
@@ -351,10 +477,10 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		prefix, replayBody, err := readResponsePrefix(resp.Body, quotaErrorInspectBytes)
 		if err != nil {
 			writeProxyError(w, http.StatusBadGateway, "failed to read upstream error body")
-			return http.StatusBadGateway, 0, err
+			return http.StatusBadGateway, 0, retryScopeNone, err
 		}
 		if isQuotaExhaustedBody(prefix) {
-			return resp.StatusCode, 0, fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
+			return resp.StatusCode, 0, retryScopeKey, fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
 		}
 		responseBody = replayBody
 	}
@@ -371,9 +497,9 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 			"key_id", logx.MaskSecret(key.Value),
 			"err", err,
 		)...)
-		return resp.StatusCode, 0, fmt.Errorf("%w: %v", errStreamFailed, err)
+		return resp.StatusCode, 0, retryScopeNone, fmt.Errorf("%w: %v", errStreamFailed, err)
 	}
-	return resp.StatusCode, 0, nil
+	return resp.StatusCode, 0, retryScopeNone, nil
 }
 
 // readResponsePrefix 读取响应体前缀用于错误分类，并返回可重放完整响应体的 reader。
@@ -485,6 +611,58 @@ func parseRetryAfter(header string) time.Duration {
 		}
 	}
 	return 0
+}
+
+// isRetryableUpstreamStatus 判断哪些网关类状态适合在同一 provider 内换 key 再试。
+func isRetryableUpstreamStatus(status int) bool {
+	switch status {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// classifyTransportRetryScope 区分换 key 可能有用的连接级故障和换 key 通常无效的 provider 级故障。
+func classifyTransportRetryScope(err error) retryScope {
+	if err == nil {
+		return retryScopeNone
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return retryScopeProvider
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return retryScopeProvider
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "tls handshake") || strings.Contains(msg, "dial tcp") {
+			return retryScopeProvider
+		}
+		return retryScopeConnection
+	}
+
+	msg := strings.ToLower(err.Error())
+	providerIndicators := []string{
+		"no such host",
+		"connection refused",
+		"actively refused",
+		"network is unreachable",
+		"tls handshake",
+		"certificate",
+	}
+	for _, indicator := range providerIndicators {
+		if strings.Contains(msg, indicator) {
+			return retryScopeProvider
+		}
+	}
+	return retryScopeConnection
 }
 
 // copyHeaders 复制普通 HTTP 头，并跳过逐跳头，避免代理协议层头泄漏。

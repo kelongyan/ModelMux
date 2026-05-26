@@ -16,8 +16,18 @@ const (
 	DefaultCoolingSeconds = 60
 	// DefaultMaxRetries 是 401/429 后默认最大重试次数。
 	DefaultMaxRetries = 3
+	// DefaultMaxTransientRetries 是网络或 provider 临时失败后的默认最大重试次数。
+	DefaultMaxTransientRetries = 1
 	// DefaultRequestTimeoutSeconds 是默认上游请求超时秒数。
 	DefaultRequestTimeoutSeconds = 120
+	// DefaultConnectTimeoutSeconds 是默认单次上游连接超时秒数。
+	DefaultConnectTimeoutSeconds = 5
+	// DefaultResponseHeaderTimeoutSeconds 是默认等待上游响应头的超时秒数。
+	DefaultResponseHeaderTimeoutSeconds = 30
+	// DefaultTransientCoolingSeconds 是网络或网关类临时失败后的默认短冷却秒数。
+	DefaultTransientCoolingSeconds = 15
+	// DefaultWaitForKeyTimeoutMS 是所有 key 暂时 cooling 时允许短等的默认毫秒数。
+	DefaultWaitForKeyTimeoutMS = 1000
 	// DefaultMaxBodyBytes 是默认请求体上限，避免异常大请求占满内存。
 	DefaultMaxBodyBytes int64 = 32 * 1024 * 1024
 	// DefaultLogOutput 是默认日志输出目标，仅输出到控制台。
@@ -41,27 +51,32 @@ type ProviderConfig struct {
 }
 
 type Config struct {
-	Listen                string           `json:"listen"`
-	AdminListen           string           `json:"admin_listen"`
-	TargetURL             string           `json:"target_url"`
-	Keys                  []string         `json:"keys"`
-	ActiveProvider        string           `json:"active_provider"`
-	Providers             []ProviderConfig `json:"providers"`
-	CoolingSeconds        int              `json:"cooling_seconds"`
-	MaxRetries            int              `json:"max_retries"`
-	RequestTimeoutSeconds int              `json:"request_timeout_seconds"`
-	MaxBodyBytes          int64            `json:"max_body_bytes"`
-	LogLevel              string           `json:"log_level"`
-	LogFormat             string           `json:"log_format"` // "text" (default) or "json"
-	LogOutput             string           `json:"log_output"` // "stdout" (default), "file", or "both"
-	LogFile               string           `json:"log_file"`
-	LogMaxSizeMB          int              `json:"log_max_size_mb"`
-	LogMaxBackups         int              `json:"log_max_backups"`
-	LogMaxAgeDays         int              `json:"log_max_age_days"`
-	LogCompress           bool             `json:"log_compress"`
-	PersistState          *bool            `json:"persist_state"`
-	StateFile             string           `json:"state_file"`
-	InvalidTTLHours       int              `json:"invalid_ttl_hours"`
+	Listen                       string           `json:"listen"`
+	AdminListen                  string           `json:"admin_listen"`
+	TargetURL                    string           `json:"target_url"`
+	Keys                         []string         `json:"keys"`
+	ActiveProvider               string           `json:"active_provider"`
+	Providers                    []ProviderConfig `json:"providers"`
+	CoolingSeconds               int              `json:"cooling_seconds"`
+	MaxRetries                   int              `json:"max_retries"`
+	MaxTransientRetries          int              `json:"max_transient_retries"`
+	RequestTimeoutSeconds        int              `json:"request_timeout_seconds"`
+	ConnectTimeoutSeconds        int              `json:"connect_timeout_seconds"`
+	ResponseHeaderTimeoutSeconds int              `json:"response_header_timeout_seconds"`
+	TransientCoolingSeconds      int              `json:"transient_cooling_seconds"`
+	WaitForKeyTimeoutMS          int              `json:"wait_for_key_timeout_ms"`
+	MaxBodyBytes                 int64            `json:"max_body_bytes"`
+	LogLevel                     string           `json:"log_level"`
+	LogFormat                    string           `json:"log_format"` // "text" (default) or "json"
+	LogOutput                    string           `json:"log_output"` // "stdout" (default), "file", or "both"
+	LogFile                      string           `json:"log_file"`
+	LogMaxSizeMB                 int              `json:"log_max_size_mb"`
+	LogMaxBackups                int              `json:"log_max_backups"`
+	LogMaxAgeDays                int              `json:"log_max_age_days"`
+	LogCompress                  bool             `json:"log_compress"`
+	PersistState                 *bool            `json:"persist_state"`
+	StateFile                    string           `json:"state_file"`
+	InvalidTTLHours              int              `json:"invalid_ttl_hours"`
 }
 
 var (
@@ -277,8 +292,23 @@ func (c *Config) applyDefaults() {
 	if c.MaxRetries <= 0 {
 		c.MaxRetries = DefaultMaxRetries
 	}
+	if c.MaxTransientRetries <= 0 {
+		c.MaxTransientRetries = DefaultMaxTransientRetries
+	}
 	if c.RequestTimeoutSeconds <= 0 {
 		c.RequestTimeoutSeconds = DefaultRequestTimeoutSeconds
+	}
+	if c.ConnectTimeoutSeconds <= 0 {
+		c.ConnectTimeoutSeconds = DefaultConnectTimeoutSeconds
+	}
+	if c.ResponseHeaderTimeoutSeconds <= 0 {
+		c.ResponseHeaderTimeoutSeconds = DefaultResponseHeaderTimeoutSeconds
+	}
+	if c.TransientCoolingSeconds <= 0 {
+		c.TransientCoolingSeconds = DefaultTransientCoolingSeconds
+	}
+	if c.WaitForKeyTimeoutMS <= 0 {
+		c.WaitForKeyTimeoutMS = DefaultWaitForKeyTimeoutMS
 	}
 	if c.MaxBodyBytes <= 0 {
 		c.MaxBodyBytes = DefaultMaxBodyBytes

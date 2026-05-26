@@ -46,6 +46,21 @@ func TestApplyDefaultsUsesSafeLocalAdminAndBodyLimit(t *testing.T) {
 	if cfg.InvalidTTLHours != DefaultInvalidTTLHours {
 		t.Fatalf("InvalidTTLHours = %d, want %d", cfg.InvalidTTLHours, DefaultInvalidTTLHours)
 	}
+	if cfg.ConnectTimeoutSeconds != DefaultConnectTimeoutSeconds {
+		t.Fatalf("ConnectTimeoutSeconds = %d, want %d", cfg.ConnectTimeoutSeconds, DefaultConnectTimeoutSeconds)
+	}
+	if cfg.ResponseHeaderTimeoutSeconds != DefaultResponseHeaderTimeoutSeconds {
+		t.Fatalf("ResponseHeaderTimeoutSeconds = %d, want %d", cfg.ResponseHeaderTimeoutSeconds, DefaultResponseHeaderTimeoutSeconds)
+	}
+	if cfg.TransientCoolingSeconds != DefaultTransientCoolingSeconds {
+		t.Fatalf("TransientCoolingSeconds = %d, want %d", cfg.TransientCoolingSeconds, DefaultTransientCoolingSeconds)
+	}
+	if cfg.WaitForKeyTimeoutMS != DefaultWaitForKeyTimeoutMS {
+		t.Fatalf("WaitForKeyTimeoutMS = %d, want %d", cfg.WaitForKeyTimeoutMS, DefaultWaitForKeyTimeoutMS)
+	}
+	if cfg.MaxTransientRetries != DefaultMaxTransientRetries {
+		t.Fatalf("MaxTransientRetries = %d, want %d", cfg.MaxTransientRetries, DefaultMaxTransientRetries)
+	}
 	if !cfg.StatePersistenceEnabled() {
 		t.Fatal("StatePersistenceEnabled() = false, want true by default")
 	}

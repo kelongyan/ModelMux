@@ -29,6 +29,41 @@ func TestRoundRobin(t *testing.T) {
 	}
 }
 
+func TestNextPrefersLowerInFlightKey(t *testing.T) {
+	p := New([]string{"k1", "k2", "k3"})
+	p.keys[0].BeginRequest()
+	p.keys[0].BeginRequest()
+	p.keys[1].BeginRequest()
+	p.cursor.Store(0)
+
+	k, err := p.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	if k.Value != "k3" {
+		t.Fatalf("Next() key = %q, want k3 with lower in-flight", k.Value)
+	}
+	if k.InFlight() != 1 {
+		t.Fatalf("k3 InFlight = %d, want 1 after selection", k.InFlight())
+	}
+}
+
+func TestFinishRequestDoesNotGoNegative(t *testing.T) {
+	k := newKey("k1")
+	k.BeginRequest()
+	k.BeginRequest()
+
+	k.FinishRequest()
+	if got := k.InFlight(); got != 1 {
+		t.Fatalf("InFlight = %d, want 1", got)
+	}
+	k.FinishRequest()
+	k.FinishRequest()
+	if got := k.InFlight(); got != 0 {
+		t.Fatalf("InFlight = %d, want 0 after extra finish", got)
+	}
+}
+
 func TestSkipCoolingKey(t *testing.T) {
 	p := New([]string{"k1", "k2", "k3"})
 
@@ -87,6 +122,34 @@ func TestCoolingKeyAutoRecovery(t *testing.T) {
 	}
 	if k.State() != StateActive {
 		t.Errorf("expected StateActive after recovery, got %v", k.State())
+	}
+}
+
+func TestNextAvailableInUsesSoonestCoolingKey(t *testing.T) {
+	p := New([]string{"k1", "k2", "k3"})
+	p.keys[0].MarkCooling(200 * time.Millisecond)
+	p.keys[1].MarkCooling(50 * time.Millisecond)
+
+	wait, ok := p.NextAvailableIn(time.Now())
+	if !ok {
+		t.Fatal("NextAvailableIn() ok = false, want true")
+	}
+	if wait <= 0 || wait > 150*time.Millisecond {
+		t.Fatalf("wait = %v, want soonest cooling window", wait)
+	}
+}
+
+func TestNextAvailableInReturnsZeroForExpiredCooling(t *testing.T) {
+	p := New([]string{"k1"})
+	p.keys[0].coolUntil.Store(time.Now().Add(-time.Millisecond).UnixNano())
+	p.keys[0].state.Store(int32(StateCooling))
+
+	wait, ok := p.NextAvailableIn(time.Now())
+	if !ok {
+		t.Fatal("NextAvailableIn() ok = false, want true")
+	}
+	if wait != 0 {
+		t.Fatalf("wait = %v, want 0", wait)
 	}
 }
 
@@ -173,6 +236,13 @@ func TestConcurrentNext(t *testing.T) {
 	if total != goroutines*callsEach {
 		t.Errorf("expected %d total requests, got %d", goroutines*callsEach, total)
 	}
+	inFlight := int64(0)
+	for _, s := range p.Status() {
+		inFlight += s.InFlight
+	}
+	if inFlight != goroutines*callsEach {
+		t.Errorf("expected %d in-flight requests, got %d", goroutines*callsEach, inFlight)
+	}
 }
 
 func TestSnapshotDoesNotExposeRawKeys(t *testing.T) {
@@ -256,5 +326,55 @@ func TestRestoreInvalidOnlyWithinTTL(t *testing.T) {
 	}
 	if p.keys[1].State() != StateActive {
 		t.Fatalf("k2 State = %v, want StateActive", p.keys[1].State())
+	}
+}
+
+// TestIsAvailableRespectsConcurrentInvalidation 复现 cooling 到期与 MarkInvalid 并发时的 race：
+// 旧实现里只要冷却到期 IsAvailable 必返回 true，但 invalid 状态此时已生效，
+// 调用方就会拿一个 invalid key 去打上游、浪费一次重试预算。
+func TestIsAvailableRespectsConcurrentInvalidation(t *testing.T) {
+	k := newKey("k1")
+	// 让 cooling 已到期，CAS 路径可达。
+	k.state.Store(int32(StateCooling))
+	k.coolUntil.Store(time.Now().Add(-time.Hour).UnixNano())
+	// 模拟另一条路径同时把 key 标成 invalid。
+	k.MarkInvalid()
+
+	if k.IsAvailable() {
+		t.Fatalf("IsAvailable() = true, want false after MarkInvalid")
+	}
+	if k.State() != StateInvalid {
+		t.Fatalf("State = %v, want StateInvalid (must not be overwritten by CAS)", k.State())
+	}
+}
+
+// TestIsAvailableConcurrentCoolingExpiryAndInvalidate 在 race 检测器下验证：
+// 多 goroutine 同时调用 IsAvailable / MarkInvalid 时，IsAvailable 不会反悔已生效的 invalid 状态。
+// 用 go test -race 运行可以捕捉到状态被错误覆盖的情况。
+func TestIsAvailableConcurrentCoolingExpiryAndInvalidate(t *testing.T) {
+	const rounds = 200
+
+	for i := 0; i < rounds; i++ {
+		k := newKey("k1")
+		k.state.Store(int32(StateCooling))
+		k.coolUntil.Store(time.Now().Add(-time.Millisecond).UnixNano())
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			k.IsAvailable()
+		}()
+		go func() {
+			defer wg.Done()
+			k.MarkInvalid()
+		}()
+		wg.Wait()
+
+		// MarkInvalid 是单向状态迁移，最终状态必须是 invalid，
+		// IsAvailable 的 CAS 不能把它改回 active。
+		if k.State() != StateInvalid {
+			t.Fatalf("round %d: State = %v, want StateInvalid", i, k.State())
+		}
 	}
 }

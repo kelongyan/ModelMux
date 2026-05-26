@@ -259,6 +259,11 @@ func TestSettingsGetAndPut(t *testing.T) {
 		Providers: []config.ProviderConfig{
 			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
 		},
+		ConnectTimeoutSeconds:        4,
+		MaxTransientRetries:          2,
+		ResponseHeaderTimeoutSeconds: 9,
+		TransientCoolingSeconds:      12,
+		WaitForKeyTimeoutMS:          650,
 	})
 	mux := http.NewServeMux()
 	h.Register(mux)
@@ -297,6 +302,21 @@ func TestSettingsGetAndPut(t *testing.T) {
 	}
 	if loaded.LogLevel != "debug" {
 		t.Fatalf("LogLevel = %q, want debug", loaded.LogLevel)
+	}
+	if loaded.ConnectTimeoutSeconds != 4 {
+		t.Fatalf("ConnectTimeoutSeconds = %d, want 4", loaded.ConnectTimeoutSeconds)
+	}
+	if loaded.MaxTransientRetries != 2 {
+		t.Fatalf("MaxTransientRetries = %d, want 2", loaded.MaxTransientRetries)
+	}
+	if loaded.ResponseHeaderTimeoutSeconds != 9 {
+		t.Fatalf("ResponseHeaderTimeoutSeconds = %d, want 9", loaded.ResponseHeaderTimeoutSeconds)
+	}
+	if loaded.TransientCoolingSeconds != 12 {
+		t.Fatalf("TransientCoolingSeconds = %d, want 12", loaded.TransientCoolingSeconds)
+	}
+	if loaded.WaitForKeyTimeoutMS != 650 {
+		t.Fatalf("WaitForKeyTimeoutMS = %d, want 650", loaded.WaitForKeyTimeoutMS)
 	}
 }
 

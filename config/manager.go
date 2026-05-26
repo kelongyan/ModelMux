@@ -12,7 +12,12 @@ var (
 		"providers",
 		"cooling_seconds",
 		"max_retries",
+		"max_transient_retries",
 		"request_timeout_seconds",
+		"connect_timeout_seconds",
+		"response_header_timeout_seconds",
+		"transient_cooling_seconds",
+		"wait_for_key_timeout_ms",
 		"max_body_bytes",
 	}
 	// RestartRequiredFields 列出保存后需要重启进程才能完全生效的字段。
@@ -148,7 +153,12 @@ func diffFields(before, after *Config) []string {
 	appendIfChanged("providers", equalProviders(before.ProviderConfigs(), after.ProviderConfigs()))
 	appendIfChanged("cooling_seconds", before.CoolingSeconds == after.CoolingSeconds)
 	appendIfChanged("max_retries", before.MaxRetries == after.MaxRetries)
+	appendIfChanged("max_transient_retries", before.MaxTransientRetries == after.MaxTransientRetries)
 	appendIfChanged("request_timeout_seconds", before.RequestTimeoutSeconds == after.RequestTimeoutSeconds)
+	appendIfChanged("connect_timeout_seconds", before.ConnectTimeoutSeconds == after.ConnectTimeoutSeconds)
+	appendIfChanged("response_header_timeout_seconds", before.ResponseHeaderTimeoutSeconds == after.ResponseHeaderTimeoutSeconds)
+	appendIfChanged("transient_cooling_seconds", before.TransientCoolingSeconds == after.TransientCoolingSeconds)
+	appendIfChanged("wait_for_key_timeout_ms", before.WaitForKeyTimeoutMS == after.WaitForKeyTimeoutMS)
 	appendIfChanged("max_body_bytes", before.MaxBodyBytes == after.MaxBodyBytes)
 	appendIfChanged("log_level", before.LogLevel == after.LogLevel)
 	appendIfChanged("log_format", before.LogFormat == after.LogFormat)

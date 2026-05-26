@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/pool"
@@ -159,6 +161,332 @@ func TestServeHTTPRetriesUnauthorizedWithOriginalBody(t *testing.T) {
 	}
 	if attempts.Load() != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts.Load())
+	}
+}
+
+func TestServeHTTPRetriesTransportErrorWithNextKey(t *testing.T) {
+	var attempts atomic.Int32
+	var serverErr error
+	var mu sync.Mutex
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch attempts.Add(1) {
+		case 1:
+			if got := r.Header.Get("X-Api-Key"); got != "k1" {
+				mu.Lock()
+				serverErr = fmt.Errorf("first X-Api-Key = %q, want %q", got, "k1")
+				mu.Unlock()
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				mu.Lock()
+				serverErr = fmt.Errorf("response writer does not support hijacking")
+				mu.Unlock()
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				mu.Lock()
+				serverErr = fmt.Errorf("Hijack() error: %w", err)
+				mu.Unlock()
+				return
+			}
+			_ = conn.Close()
+		case 2:
+			if got := r.Header.Get("X-Api-Key"); got != "k2" {
+				mu.Lock()
+				serverErr = fmt.Errorf("second X-Api-Key = %q, want %q", got, "k2")
+				mu.Unlock()
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			mu.Lock()
+			serverErr = fmt.Errorf("unexpected attempt %d", attempts.Load())
+			mu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:                    upstream.URL,
+		Keys:                         []string{"k1", "k2"},
+		RequestTimeoutSeconds:        10,
+		ResponseHeaderTimeoutSeconds: 2,
+		MaxRetries:                   1,
+		CoolingSeconds:               1,
+		TransientCoolingSeconds:      60,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	var immediateCalls atomic.Int32
+	h.SetStateChangeHook(func(now bool) {
+		if now {
+			immediateCalls.Add(1)
+		}
+	})
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	mu.Lock()
+	err := serverErr
+	mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts.Load())
+	}
+	if immediateCalls.Load() == 0 {
+		t.Fatal("state hook immediate = false, want true for transient key cooling")
+	}
+	status, err := pools.ActiveStatus()
+	if err != nil {
+		t.Fatalf("ActiveStatus() error = %v", err)
+	}
+	if got := status.Keys[0].State; got != "cooling" {
+		t.Fatalf("first key state = %q, want cooling", got)
+	}
+	if got := status.Keys[0].InFlight; got != 0 {
+		t.Fatalf("first key in_flight = %d, want 0 after retry", got)
+	}
+	if got := status.Keys[1].State; got != "active" {
+		t.Fatalf("second key state = %q, want active", got)
+	}
+	if got := status.Keys[1].InFlight; got != 0 {
+		t.Fatalf("second key in_flight = %d, want 0 after success", got)
+	}
+}
+
+func TestServeHTTPRetriesRetryableGatewayStatusWithNextKey(t *testing.T) {
+	var attempts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch attempts.Add(1) {
+		case 1:
+			if got := r.Header.Get("X-Api-Key"); got != "k1" {
+				t.Errorf("first X-Api-Key = %q, want k1", got)
+			}
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case 2:
+			if got := r.Header.Get("X-Api-Key"); got != "k2" {
+				t.Errorf("second X-Api-Key = %q, want k2", got)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Errorf("unexpected attempt %d", attempts.Load())
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:               upstream.URL,
+		Keys:                    []string{"k1", "k2"},
+		RequestTimeoutSeconds:   10,
+		MaxTransientRetries:     1,
+		MaxRetries:              1,
+		CoolingSeconds:          1,
+		TransientCoolingSeconds: 1,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts.Load())
+	}
+	status, err := pools.ActiveStatus()
+	if err != nil {
+		t.Fatalf("ActiveStatus() error = %v", err)
+	}
+	if got := status.Keys[0].State; got != "active" {
+		t.Fatalf("first key state = %q, want active for provider-level transient", got)
+	}
+	if got := status.Keys[1].State; got != "active" {
+		t.Fatalf("second key state = %q, want active", got)
+	}
+}
+
+func TestRuntimeConfigUsesSplitTimeouts(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:                    "https://example.com",
+		Keys:                         []string{"k1"},
+		RequestTimeoutSeconds:        11,
+		ConnectTimeoutSeconds:        3,
+		ResponseHeaderTimeoutSeconds: 7,
+		MaxTransientRetries:          2,
+		TransientCoolingSeconds:      5,
+		WaitForKeyTimeoutMS:          900,
+		MaxRetries:                   1,
+		CoolingSeconds:               1,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	rt := h.snapshot()
+	if rt.client.Timeout != 11*time.Second {
+		t.Fatalf("client timeout = %v, want 11s", rt.client.Timeout)
+	}
+	if rt.transport.ResponseHeaderTimeout != 7*time.Second {
+		t.Fatalf("response header timeout = %v, want 7s", rt.transport.ResponseHeaderTimeout)
+	}
+	if rt.maxTransientRetries != 2 {
+		t.Fatalf("maxTransientRetries = %d, want 2", rt.maxTransientRetries)
+	}
+	if rt.transientCoolingSeconds != 5 {
+		t.Fatalf("transientCoolingSeconds = %d, want 5", rt.transientCoolingSeconds)
+	}
+	if rt.waitForKeyTimeout != 900*time.Millisecond {
+		t.Fatalf("waitForKeyTimeout = %v, want 900ms", rt.waitForKeyTimeout)
+	}
+}
+
+func TestServeHTTPLimitsProviderTransientRetries(t *testing.T) {
+	var attempts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:               upstream.URL,
+		Keys:                    []string{"k1", "k2", "k3"},
+		RequestTimeoutSeconds:   10,
+		MaxRetries:              5,
+		MaxTransientRetries:     1,
+		CoolingSeconds:          1,
+		TransientCoolingSeconds: 1,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("attempts = %d, want 2 because max_transient_retries=1", attempts.Load())
+	}
+	status, err := pools.ActiveStatus()
+	if err != nil {
+		t.Fatalf("ActiveStatus() error = %v", err)
+	}
+	for _, key := range status.Keys {
+		if key.State != "active" {
+			t.Fatalf("key %s state = %q, want active for provider-level transient", key.MaskedKey, key.State)
+		}
+	}
+}
+
+func TestClassifyTransportRetryScope(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want retryScope
+	}{
+		{name: "eof is connection", err: io.EOF, want: retryScopeConnection},
+		{name: "response header timeout is connection", err: errors.New("net/http: timeout awaiting response headers"), want: retryScopeConnection},
+		{name: "connection refused is provider", err: errors.New("dial tcp 127.0.0.1:65535: connectex: No connection could be made because the target machine actively refused it"), want: retryScopeProvider},
+		{name: "dns is provider", err: &net.DNSError{Err: "no such host", Name: "missing.example"}, want: retryScopeProvider},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyTransportRetryScope(tc.err); got != tc.want {
+				t.Fatalf("classifyTransportRetryScope() = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestServeHTTPWaitsForCoolingKeyRecovery(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:             upstream.URL,
+		Keys:                  []string{"k1"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            0,
+		CoolingSeconds:        1,
+		WaitForKeyTimeoutMS:   80,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	keyPool, err := pools.Get(cfg.ActiveProvider)
+	if err != nil {
+		t.Fatalf("Get(%q) error = %v", cfg.ActiveProvider, err)
+	}
+	keyPool.Status()
+	keyPoolSnapshot, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	keyPoolSnapshot.FinishRequest()
+	keyPoolSnapshot.MarkCooling(25 * time.Millisecond)
+
+	start := time.Now()
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Fatalf("elapsed = %v, want proxy to wait for cooling key recovery", elapsed)
+	}
+}
+
+func TestServeHTTPDoesNotWaitPastBudget(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:             "https://example.com",
+		Keys:                  []string{"k1"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            0,
+		CoolingSeconds:        1,
+		WaitForKeyTimeoutMS:   10,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	keyPool, err := pools.Get(cfg.ActiveProvider)
+	if err != nil {
+		t.Fatalf("Get(%q) error = %v", cfg.ActiveProvider, err)
+	}
+	key, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	key.FinishRequest()
+	key.MarkCooling(60 * time.Millisecond)
+
+	start := time.Now()
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+	if elapsed := time.Since(start); elapsed > 40*time.Millisecond {
+		t.Fatalf("elapsed = %v, want failure without long wait", elapsed)
 	}
 }
 

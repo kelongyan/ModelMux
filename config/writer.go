@@ -10,25 +10,30 @@ import (
 
 // persistedConfig 是写回磁盘时采用的首选 schema，避免再次写出 legacy 单 provider 字段。
 type persistedConfig struct {
-	Listen                string           `json:"listen"`
-	AdminListen           string           `json:"admin_listen"`
-	ActiveProvider        string           `json:"active_provider"`
-	Providers             []ProviderConfig `json:"providers"`
-	CoolingSeconds        int              `json:"cooling_seconds"`
-	MaxRetries            int              `json:"max_retries"`
-	RequestTimeoutSeconds int              `json:"request_timeout_seconds"`
-	MaxBodyBytes          int64            `json:"max_body_bytes"`
-	LogLevel              string           `json:"log_level"`
-	LogFormat             string           `json:"log_format"`
-	LogOutput             string           `json:"log_output"`
-	LogFile               string           `json:"log_file"`
-	LogMaxSizeMB          int              `json:"log_max_size_mb"`
-	LogMaxBackups         int              `json:"log_max_backups"`
-	LogMaxAgeDays         int              `json:"log_max_age_days"`
-	LogCompress           bool             `json:"log_compress"`
-	PersistState          bool             `json:"persist_state"`
-	StateFile             string           `json:"state_file"`
-	InvalidTTLHours       int              `json:"invalid_ttl_hours"`
+	Listen                       string           `json:"listen"`
+	AdminListen                  string           `json:"admin_listen"`
+	ActiveProvider               string           `json:"active_provider"`
+	Providers                    []ProviderConfig `json:"providers"`
+	CoolingSeconds               int              `json:"cooling_seconds"`
+	MaxRetries                   int              `json:"max_retries"`
+	MaxTransientRetries          int              `json:"max_transient_retries"`
+	RequestTimeoutSeconds        int              `json:"request_timeout_seconds"`
+	ConnectTimeoutSeconds        int              `json:"connect_timeout_seconds"`
+	ResponseHeaderTimeoutSeconds int              `json:"response_header_timeout_seconds"`
+	TransientCoolingSeconds      int              `json:"transient_cooling_seconds"`
+	WaitForKeyTimeoutMS          int              `json:"wait_for_key_timeout_ms"`
+	MaxBodyBytes                 int64            `json:"max_body_bytes"`
+	LogLevel                     string           `json:"log_level"`
+	LogFormat                    string           `json:"log_format"`
+	LogOutput                    string           `json:"log_output"`
+	LogFile                      string           `json:"log_file"`
+	LogMaxSizeMB                 int              `json:"log_max_size_mb"`
+	LogMaxBackups                int              `json:"log_max_backups"`
+	LogMaxAgeDays                int              `json:"log_max_age_days"`
+	LogCompress                  bool             `json:"log_compress"`
+	PersistState                 bool             `json:"persist_state"`
+	StateFile                    string           `json:"state_file"`
+	InvalidTTLHours              int              `json:"invalid_ttl_hours"`
 }
 
 // writeFileAtomic 把配置以首选 schema 原子写回磁盘，避免保存半截 JSON。
@@ -38,25 +43,30 @@ func writeFileAtomic(path string, cfg *Config) error {
 	}
 
 	payload := persistedConfig{
-		Listen:                cfg.Listen,
-		AdminListen:           cfg.AdminListen,
-		ActiveProvider:        cfg.ActiveProvider,
-		Providers:             cfg.ProviderConfigs(),
-		CoolingSeconds:        cfg.CoolingSeconds,
-		MaxRetries:            cfg.MaxRetries,
-		RequestTimeoutSeconds: cfg.RequestTimeoutSeconds,
-		MaxBodyBytes:          cfg.MaxBodyBytes,
-		LogLevel:              cfg.LogLevel,
-		LogFormat:             cfg.LogFormat,
-		LogOutput:             cfg.LogOutput,
-		LogFile:               cfg.LogFile,
-		LogMaxSizeMB:          cfg.LogMaxSizeMB,
-		LogMaxBackups:         cfg.LogMaxBackups,
-		LogMaxAgeDays:         cfg.LogMaxAgeDays,
-		LogCompress:           cfg.LogCompress,
-		PersistState:          cfg.StatePersistenceEnabled(),
-		StateFile:             cfg.StateFile,
-		InvalidTTLHours:       cfg.InvalidTTLHours,
+		Listen:                       cfg.Listen,
+		AdminListen:                  cfg.AdminListen,
+		ActiveProvider:               cfg.ActiveProvider,
+		Providers:                    cfg.ProviderConfigs(),
+		CoolingSeconds:               cfg.CoolingSeconds,
+		MaxRetries:                   cfg.MaxRetries,
+		MaxTransientRetries:          cfg.MaxTransientRetries,
+		RequestTimeoutSeconds:        cfg.RequestTimeoutSeconds,
+		ConnectTimeoutSeconds:        cfg.ConnectTimeoutSeconds,
+		ResponseHeaderTimeoutSeconds: cfg.ResponseHeaderTimeoutSeconds,
+		TransientCoolingSeconds:      cfg.TransientCoolingSeconds,
+		WaitForKeyTimeoutMS:          cfg.WaitForKeyTimeoutMS,
+		MaxBodyBytes:                 cfg.MaxBodyBytes,
+		LogLevel:                     cfg.LogLevel,
+		LogFormat:                    cfg.LogFormat,
+		LogOutput:                    cfg.LogOutput,
+		LogFile:                      cfg.LogFile,
+		LogMaxSizeMB:                 cfg.LogMaxSizeMB,
+		LogMaxBackups:                cfg.LogMaxBackups,
+		LogMaxAgeDays:                cfg.LogMaxAgeDays,
+		LogCompress:                  cfg.LogCompress,
+		PersistState:                 cfg.StatePersistenceEnabled(),
+		StateFile:                    cfg.StateFile,
+		InvalidTTLHours:              cfg.InvalidTTLHours,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

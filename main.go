@@ -117,7 +117,13 @@ func main() {
 
 	// 管理服务是本地控制面，设置更保守的读头和空闲超时即可。
 	adminMux := http.NewServeMux()
+	// reloadMu 串行化所有 reload 路径：admin API (Manager.Update 内调用) 与 fsnotify watcher
+	// 都会触发 reloadConfig，两条路径只各自持有自己的锁。整体 reload 需要原子地切换
+	// providerPools、proxyHandler.runtime 和 config.current，必须串行执行避免运行时不一致。
+	var reloadMu sync.Mutex
 	reloadConfig := func(path string) error {
+		reloadMu.Lock()
+		defer reloadMu.Unlock()
 		newCfg, err := config.Read(path)
 		if err != nil {
 			eventBuffer.Add("error", logx.CategoryConfig, logx.EventConfigReloadFailed, "config reload failed", map[string]any{
@@ -364,7 +370,9 @@ func newStateSaver(store *state.Store, snapshot func() []state.ProviderRecord, d
 	}
 }
 
-// Trigger 根据 immediate 决定立即保存或防抖保存。
+// Trigger 根据 immediate 决定立即保存或合并窗口保存。
+// 非 immediate 时落入当前合并窗口（已有 pending timer 就不再重置），
+// 避免高 QPS 下 timer 被反复 reset 导致永不落盘。
 func (s *stateSaver) Trigger(immediate bool) {
 	if immediate {
 		if err := s.SaveNow(); err != nil && s.onError != nil {
@@ -378,15 +386,24 @@ func (s *stateSaver) Trigger(immediate bool) {
 	if s.closed {
 		return
 	}
-	if s.timer == nil {
-		s.timer = time.AfterFunc(s.delay, func() {
-			if err := s.SaveNow(); err != nil && s.onError != nil {
-				s.onError(err)
-			}
-		})
+	if s.timer != nil {
 		return
 	}
-	s.timer.Reset(s.delay)
+	s.timer = time.AfterFunc(s.delay, s.flushAfterTimer)
+}
+
+// flushAfterTimer 在合并窗口到期时触发；先清空 timer 让下一窗口能启动，再落盘。
+func (s *stateSaver) flushAfterTimer() {
+	s.mu.Lock()
+	s.timer = nil
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return
+	}
+	if err := s.SaveNow(); err != nil && s.onError != nil {
+		s.onError(err)
+	}
 }
 
 // SaveNow 立即保存当前 key 池快照。

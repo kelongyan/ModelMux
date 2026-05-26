@@ -27,6 +27,8 @@ const (
 	EventKeyCooling          = "retry.key_cooling"
 	EventKeyInvalid          = "retry.key_invalid"
 	EventKeyQuotaExhausted   = "retry.key_quota_exhausted"
+	EventKeyTransientFailure = "retry.key_transient_failure"
+	EventProviderTransient   = "retry.provider_transient"
 	EventNoAvailableKey      = "proxy.no_available_key"
 	EventProxyListening      = "lifecycle.proxy_listening"
 	EventProxySuccess        = "proxy.success"

@@ -33,7 +33,7 @@ func makeKeys(values []string) []*Key {
 	return keys
 }
 
-// Next 使用 round-robin 返回下一个可用 key，并跳过 cooling/invalid key。
+// Next 使用带 in-flight 感知的 round-robin 返回下一个可用 key，并跳过 cooling/invalid key。
 func (p *Pool) Next() (*Key, error) {
 	p.mu.RLock()
 	keys := p.keys
@@ -44,17 +44,29 @@ func (p *Pool) Next() (*Key, error) {
 		return nil, ErrNoAvailableKey
 	}
 
-	start := p.cursor.Load()
+	start := p.cursor.Add(1) - 1
+	var selected *Key
+	var selectedInFlight int64
 	for i := int64(0); i < n; i++ {
 		idx := (start + i) % n
 		k := keys[idx]
-		if k.IsAvailable() {
-			p.cursor.Store((idx + 1) % n)
-			k.ReqCount.Add(1)
-			return k, nil
+		if !k.IsAvailable() {
+			continue
+		}
+		inFlight := k.InFlight()
+		if selected == nil || inFlight < selectedInFlight {
+			selected = k
+			selectedInFlight = inFlight
+			if inFlight == 0 {
+				break
+			}
 		}
 	}
-	return nil, ErrNoAvailableKey
+	if selected == nil {
+		return nil, ErrNoAvailableKey
+	}
+	selected.BeginRequest()
+	return selected, nil
 }
 
 // Update 用新 key 列表更新 key 池；已存在 key 会保留状态和统计，新 key 从 active 开始。
@@ -190,6 +202,7 @@ type KeyStatus struct {
 	State        string    `json:"state"`
 	ReqCount     int64     `json:"req_count"`
 	ErrCount     int64     `json:"err_count"`
+	InFlight     int64     `json:"in_flight"`
 	AvgLatencyMs float64   `json:"avg_latency_ms"`
 	CoolUntil    time.Time `json:"cool_until,omitempty"`
 	Last401At    time.Time `json:"last_401_at,omitempty"`
@@ -208,6 +221,7 @@ func (p *Pool) Status() []KeyStatus {
 			MaskedKey:    logx.MaskSecret(k.Value),
 			ReqCount:     k.ReqCount.Load(),
 			ErrCount:     k.ErrCount.Load(),
+			InFlight:     k.InFlight(),
 			AvgLatencyMs: k.AvgLatencyMs(),
 			Last401At:    k.Last401At(),
 		}
@@ -238,6 +252,31 @@ func (p *Pool) ActiveCount() int {
 		}
 	}
 	return count
+}
+
+// NextAvailableIn 返回最近一个 cooling key 恢复为可用所需的时间。
+func (p *Pool) NextAvailableIn(now time.Time) (time.Duration, bool) {
+	p.mu.RLock()
+	keys := p.keys
+	p.mu.RUnlock()
+
+	var next time.Duration
+	found := false
+	for _, key := range keys {
+		if key.State() != StateCooling {
+			continue
+		}
+		coolUntil := key.CoolUntil()
+		if coolUntil.IsZero() || !coolUntil.After(now) {
+			return 0, true
+		}
+		wait := coolUntil.Sub(now)
+		if !found || wait < next {
+			next = wait
+			found = true
+		}
+	}
+	return next, found
 }
 
 // TotalCount 返回 key 池总数量。

@@ -21,6 +21,7 @@ type Key struct {
 	last401At      atomic.Int64 // unix nano
 	ReqCount       atomic.Int64
 	ErrCount       atomic.Int64
+	inFlight       atomic.Int64
 	totalLatencyMs atomic.Int64
 	mu             sync.Mutex
 }
@@ -38,14 +39,14 @@ func (k *Key) State() KeyState {
 }
 
 // IsAvailable 判断 key 是否可用，并在冷却到期时自动恢复 active。
+// CAS 失败说明状态已被并发改写（例如同一时刻 MarkInvalid），此时不能虚报为可用。
 func (k *Key) IsAvailable() bool {
 	switch k.State() {
 	case StateActive:
 		return true
 	case StateCooling:
 		if time.Now().UnixNano() >= k.coolUntil.Load() {
-			k.state.CompareAndSwap(int32(StateCooling), int32(StateActive))
-			return true
+			return k.state.CompareAndSwap(int32(StateCooling), int32(StateActive))
 		}
 		return false
 	default:
@@ -78,6 +79,30 @@ func (k *Key) ResetActive() {
 	defer k.mu.Unlock()
 	k.coolUntil.Store(0)
 	k.state.Store(int32(StateActive))
+}
+
+// BeginRequest 记录一次进入上游的请求，并增加当前 key 的并发占用数。
+func (k *Key) BeginRequest() {
+	k.ReqCount.Add(1)
+	k.inFlight.Add(1)
+}
+
+// FinishRequest 释放当前 key 的并发占用数，防止异常路径导致计数为负。
+func (k *Key) FinishRequest() {
+	for {
+		current := k.inFlight.Load()
+		if current <= 0 {
+			return
+		}
+		if k.inFlight.CompareAndSwap(current, current-1) {
+			return
+		}
+	}
+}
+
+// InFlight 返回当前正在使用该 key 的请求数量。
+func (k *Key) InFlight() int64 {
+	return k.inFlight.Load()
 }
 
 // RecordLatency 累加上游请求延迟，用于计算平均延迟。

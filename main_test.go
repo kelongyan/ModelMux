@@ -96,3 +96,66 @@ func TestStateSaverTriggerAndClose(t *testing.T) {
 		t.Fatalf("state file not created: %v", err)
 	}
 }
+
+// TestStateSaverHighFrequencyTriggerNotStarved 验证高频 Trigger(false) 不会因 timer 被
+// 反复重置而永远不落盘——这是旧防抖实现下计数器无法持久化的根因。
+func TestStateSaverHighFrequencyTriggerNotStarved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := state.NewStore(path)
+	var snapshots atomic.Int32
+	saver := newStateSaver(store, func() []state.ProviderRecord {
+		snapshots.Add(1)
+		return nil
+	}, 30*time.Millisecond, func(err error) {
+		t.Fatalf("state saver error = %v", err)
+	})
+	t.Cleanup(func() { _ = saver.Close() })
+
+	// 持续 100ms 高频触发；旧实现下 timer 永远被 Reset，snapshots 应为 0。
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(100 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			saver.Trigger(false)
+		}
+	}()
+	<-done
+
+	// 合并窗口最长 30ms，给一点调度宽容。
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for snapshots.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if snapshots.Load() == 0 {
+		t.Fatal("snapshot never saved under sustained high-frequency triggers")
+	}
+}
+
+// TestStateSaverWindowRestartsAfterFire 验证一次窗口落盘后，下一次 Trigger 能重启新窗口。
+// 旧实现里 callback 不会把 s.timer 置 nil，新的非 immediate Trigger 会走 Reset 分支。
+func TestStateSaverWindowRestartsAfterFire(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := state.NewStore(path)
+	var snapshots atomic.Int32
+	saver := newStateSaver(store, func() []state.ProviderRecord {
+		snapshots.Add(1)
+		return nil
+	}, 20*time.Millisecond, func(err error) {
+		t.Fatalf("state saver error = %v", err)
+	})
+	t.Cleanup(func() { _ = saver.Close() })
+
+	saver.Trigger(false)
+	time.Sleep(60 * time.Millisecond)
+	first := snapshots.Load()
+	if first == 0 {
+		t.Fatal("first window did not fire")
+	}
+
+	saver.Trigger(false)
+	time.Sleep(60 * time.Millisecond)
+	if snapshots.Load() <= first {
+		t.Fatalf("second window did not fire; snapshots=%d, want > %d", snapshots.Load(), first)
+	}
+}

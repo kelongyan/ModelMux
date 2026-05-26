@@ -28,8 +28,25 @@ ReactDOM.createRoot(rootElement).render(
         token: {
           colorPrimary: "#0f766e",
           colorInfo: "#0f766e",
-          borderRadius: 18,
+          // 控件圆角分三级，避免单一 borderRadius 让按钮/输入变成胶囊。
+          borderRadius: 10,
+          borderRadiusLG: 20,
+          borderRadiusSM: 6,
+          borderRadiusXS: 4,
+          // 按钮和输入再厚 4px，给"扎实"的感觉。
+          controlHeight: 36,
+          controlHeightSM: 28,
+          controlHeightLG: 44,
           fontFamily: '"Aptos", "Segoe UI", "Microsoft YaHei UI", sans-serif',
+        },
+        components: {
+          Button: {
+            // 主按钮稍微更柔和的阴影，避免和卡片底色硬碰硬。
+            primaryShadow: "0 6px 14px rgba(15, 118, 110, 0.18)",
+          },
+          Tag: {
+            borderRadiusSM: 6,
+          },
         },
       }}
     >

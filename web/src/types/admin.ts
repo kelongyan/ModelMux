@@ -110,7 +110,12 @@ export type AdminSettingsPayload = {
   active_provider: string;
   cooling_seconds: number;
   max_retries: number;
+  max_transient_retries: number;
   request_timeout_seconds: number;
+  connect_timeout_seconds: number;
+  response_header_timeout_seconds: number;
+  transient_cooling_seconds: number;
+  wait_for_key_timeout_ms: number;
   max_body_bytes: number;
   log_level: string;
   log_format: string;

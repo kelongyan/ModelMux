@@ -16,24 +16,29 @@ import (
 )
 
 type apiSettingsPayload struct {
-	Listen                string `json:"listen"`
-	AdminListen           string `json:"admin_listen"`
-	ActiveProvider        string `json:"active_provider"`
-	CoolingSeconds        int    `json:"cooling_seconds"`
-	MaxRetries            int    `json:"max_retries"`
-	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
-	MaxBodyBytes          int64  `json:"max_body_bytes"`
-	LogLevel              string `json:"log_level"`
-	LogFormat             string `json:"log_format"`
-	LogOutput             string `json:"log_output"`
-	LogFile               string `json:"log_file"`
-	LogMaxSizeMB          int    `json:"log_max_size_mb"`
-	LogMaxBackups         int    `json:"log_max_backups"`
-	LogMaxAgeDays         int    `json:"log_max_age_days"`
-	LogCompress           bool   `json:"log_compress"`
-	PersistState          bool   `json:"persist_state"`
-	StateFile             string `json:"state_file"`
-	InvalidTTLHours       int    `json:"invalid_ttl_hours"`
+	Listen                       string `json:"listen"`
+	AdminListen                  string `json:"admin_listen"`
+	ActiveProvider               string `json:"active_provider"`
+	CoolingSeconds               int    `json:"cooling_seconds"`
+	MaxRetries                   int    `json:"max_retries"`
+	MaxTransientRetries          *int   `json:"max_transient_retries,omitempty"`
+	RequestTimeoutSeconds        int    `json:"request_timeout_seconds"`
+	ConnectTimeoutSeconds        *int   `json:"connect_timeout_seconds,omitempty"`
+	ResponseHeaderTimeoutSeconds *int   `json:"response_header_timeout_seconds,omitempty"`
+	TransientCoolingSeconds      *int   `json:"transient_cooling_seconds,omitempty"`
+	WaitForKeyTimeoutMS          *int   `json:"wait_for_key_timeout_ms,omitempty"`
+	MaxBodyBytes                 int64  `json:"max_body_bytes"`
+	LogLevel                     string `json:"log_level"`
+	LogFormat                    string `json:"log_format"`
+	LogOutput                    string `json:"log_output"`
+	LogFile                      string `json:"log_file"`
+	LogMaxSizeMB                 int    `json:"log_max_size_mb"`
+	LogMaxBackups                int    `json:"log_max_backups"`
+	LogMaxAgeDays                int    `json:"log_max_age_days"`
+	LogCompress                  bool   `json:"log_compress"`
+	PersistState                 bool   `json:"persist_state"`
+	StateFile                    string `json:"state_file"`
+	InvalidTTLHours              int    `json:"invalid_ttl_hours"`
 }
 
 type apiProviderSummary struct {
@@ -621,24 +626,29 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, apiSettingsResponse{
 		Settings: apiSettingsPayload{
-			Listen:                cfg.Listen,
-			AdminListen:           cfg.AdminListen,
-			ActiveProvider:        cfg.ActiveProvider,
-			CoolingSeconds:        cfg.CoolingSeconds,
-			MaxRetries:            cfg.MaxRetries,
-			RequestTimeoutSeconds: cfg.RequestTimeoutSeconds,
-			MaxBodyBytes:          cfg.MaxBodyBytes,
-			LogLevel:              cfg.LogLevel,
-			LogFormat:             cfg.LogFormat,
-			LogOutput:             cfg.LogOutput,
-			LogFile:               cfg.LogFile,
-			LogMaxSizeMB:          cfg.LogMaxSizeMB,
-			LogMaxBackups:         cfg.LogMaxBackups,
-			LogMaxAgeDays:         cfg.LogMaxAgeDays,
-			LogCompress:           cfg.LogCompress,
-			PersistState:          cfg.StatePersistenceEnabled(),
-			StateFile:             cfg.StateFile,
-			InvalidTTLHours:       cfg.InvalidTTLHours,
+			Listen:                       cfg.Listen,
+			AdminListen:                  cfg.AdminListen,
+			ActiveProvider:               cfg.ActiveProvider,
+			CoolingSeconds:               cfg.CoolingSeconds,
+			MaxRetries:                   cfg.MaxRetries,
+			MaxTransientRetries:          intPtr(cfg.MaxTransientRetries),
+			RequestTimeoutSeconds:        cfg.RequestTimeoutSeconds,
+			ConnectTimeoutSeconds:        intPtr(cfg.ConnectTimeoutSeconds),
+			ResponseHeaderTimeoutSeconds: intPtr(cfg.ResponseHeaderTimeoutSeconds),
+			TransientCoolingSeconds:      intPtr(cfg.TransientCoolingSeconds),
+			WaitForKeyTimeoutMS:          intPtr(cfg.WaitForKeyTimeoutMS),
+			MaxBodyBytes:                 cfg.MaxBodyBytes,
+			LogLevel:                     cfg.LogLevel,
+			LogFormat:                    cfg.LogFormat,
+			LogOutput:                    cfg.LogOutput,
+			LogFile:                      cfg.LogFile,
+			LogMaxSizeMB:                 cfg.LogMaxSizeMB,
+			LogMaxBackups:                cfg.LogMaxBackups,
+			LogMaxAgeDays:                cfg.LogMaxAgeDays,
+			LogCompress:                  cfg.LogCompress,
+			PersistState:                 cfg.StatePersistenceEnabled(),
+			StateFile:                    cfg.StateFile,
+			InvalidTTLHours:              cfg.InvalidTTLHours,
 		},
 		HotReloadFields:       append([]string(nil), config.HotReloadFields...),
 		RestartRequiredFields: append([]string(nil), config.RestartRequiredFields...),
@@ -663,7 +673,22 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.AdminListen = req.AdminListen
 		cfg.CoolingSeconds = req.CoolingSeconds
 		cfg.MaxRetries = req.MaxRetries
+		if req.MaxTransientRetries != nil {
+			cfg.MaxTransientRetries = *req.MaxTransientRetries
+		}
 		cfg.RequestTimeoutSeconds = req.RequestTimeoutSeconds
+		if req.ConnectTimeoutSeconds != nil {
+			cfg.ConnectTimeoutSeconds = *req.ConnectTimeoutSeconds
+		}
+		if req.ResponseHeaderTimeoutSeconds != nil {
+			cfg.ResponseHeaderTimeoutSeconds = *req.ResponseHeaderTimeoutSeconds
+		}
+		if req.TransientCoolingSeconds != nil {
+			cfg.TransientCoolingSeconds = *req.TransientCoolingSeconds
+		}
+		if req.WaitForKeyTimeoutMS != nil {
+			cfg.WaitForKeyTimeoutMS = *req.WaitForKeyTimeoutMS
+		}
 		cfg.MaxBodyBytes = req.MaxBodyBytes
 		cfg.LogLevel = req.LogLevel
 		cfg.LogFormat = req.LogFormat
@@ -1005,6 +1030,11 @@ func mergeKeys(existing []string, incoming []string) []string {
 // poolKeyID 为 provider 配置中的原始 key 生成与管理接口一致的稳定标识。
 func poolKeyID(key string) string {
 	return state.KeyID(key)
+}
+
+// intPtr 返回 int 指针，便于设置接口在响应中展示可选配置字段。
+func intPtr(value int) *int {
+	return &value
 }
 
 // toChangeResponse 把配置更新结果转换成统一的 API 响应结构。
