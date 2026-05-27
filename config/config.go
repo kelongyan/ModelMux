@@ -12,6 +12,10 @@ import (
 const (
 	// DefaultProviderID 是兼容旧版单 provider 配置时使用的隐式 provider ID。
 	DefaultProviderID = "default"
+	// DefaultListen 是本地代理默认监听地址。
+	DefaultListen = "127.0.0.1:18080"
+	// DefaultAdminListen 是本地管理服务默认监听地址。
+	DefaultAdminListen = "127.0.0.1:18081"
 	// DefaultCoolingSeconds 是 429 后默认冷却秒数。
 	DefaultCoolingSeconds = 60
 	// DefaultMaxRetries 是 401/429 后默认最大重试次数。
@@ -281,10 +285,10 @@ func (p ProviderConfig) copy() ProviderConfig {
 // applyDefaults 为个人使用场景填充安全、稳定的默认值。
 func (c *Config) applyDefaults() {
 	if c.Listen == "" {
-		c.Listen = ":8080"
+		c.Listen = DefaultListen
 	}
 	if c.AdminListen == "" {
-		c.AdminListen = "127.0.0.1:8081"
+		c.AdminListen = DefaultAdminListen
 	}
 	if c.CoolingSeconds <= 0 {
 		c.CoolingSeconds = DefaultCoolingSeconds

@@ -19,7 +19,7 @@ function Write-StartupInfo {
 function Get-AdminBaseUrl {
     param([string]$Path)
 
-    $adminListen = "127.0.0.1:8081"
+    $adminListen = "127.0.0.1:18081"
     if (Test-Path -LiteralPath $Path) {
         $cfg = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
         if ($cfg.admin_listen) {
@@ -28,7 +28,7 @@ function Get-AdminBaseUrl {
     }
 
     $hostName = "127.0.0.1"
-    $port = "8081"
+    $port = "18081"
     if ($adminListen -match "^:(\d+)$") {
         $port = $Matches[1]
     } elseif ($adminListen -match "^(.+):(\d+)$") {

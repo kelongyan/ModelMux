@@ -1,6 +1,6 @@
 {
-  "listen": ":8080",
-  "admin_listen": "127.0.0.1:8081",
+  "listen": "127.0.0.1:18080",
+  "admin_listen": "127.0.0.1:18081",
   "active_provider": "primary",
   "providers": [
     {

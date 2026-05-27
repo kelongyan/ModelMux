@@ -399,16 +399,16 @@ function buildSettingGroups(response: AdminSettingsResponse): {
       {
         name: "listen",
         label: "代理监听地址",
-        hint: "例如 :8080 或 127.0.0.1:8080。",
+        hint: "例如 127.0.0.1:18080。",
         effect: effectOf("listen"),
-        render: () => <Input placeholder=":8080" />,
+        render: () => <Input placeholder="127.0.0.1:18080" />,
       },
       {
         name: "admin_listen",
         label: "管理监听地址",
         hint: "建议继续保持本地回环地址，避免把管理端暴露到公网。",
         effect: effectOf("admin_listen"),
-        render: () => <Input placeholder="127.0.0.1:8081" />,
+        render: () => <Input placeholder="127.0.0.1:18081" />,
       },
       {
         name: "log_level",

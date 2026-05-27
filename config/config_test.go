@@ -10,11 +10,11 @@ func TestApplyDefaultsUsesSafeLocalAdminAndBodyLimit(t *testing.T) {
 
 	cfg.applyDefaults()
 
-	if cfg.Listen != ":8080" {
-		t.Fatalf("Listen = %q, want :8080", cfg.Listen)
+	if cfg.Listen != DefaultListen {
+		t.Fatalf("Listen = %q, want %q", cfg.Listen, DefaultListen)
 	}
-	if cfg.AdminListen != "127.0.0.1:8081" {
-		t.Fatalf("AdminListen = %q, want 127.0.0.1:8081", cfg.AdminListen)
+	if cfg.AdminListen != DefaultAdminListen {
+		t.Fatalf("AdminListen = %q, want %q", cfg.AdminListen, DefaultAdminListen)
 	}
 	if cfg.ActiveProvider != DefaultProviderID {
 		t.Fatalf("ActiveProvider = %q, want %q", cfg.ActiveProvider, DefaultProviderID)

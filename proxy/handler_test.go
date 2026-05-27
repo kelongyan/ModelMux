@@ -80,6 +80,35 @@ func TestBuildRequestRewritesUpstreamAuthHeaders(t *testing.T) {
 	}
 }
 
+func TestBuildRequestDoesNotDuplicateTargetPathPrefix(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:             "https://example.com/v1",
+		Keys:                  []string{"rotated-key"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+
+	h, pools := mustHandler(t, cfg)
+	p, err := pools.Get(cfg.ActiveProvider)
+	if err != nil {
+		t.Fatalf("Get(%q) error = %v", cfg.ActiveProvider, err)
+	}
+	key, err := p.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/messages?foo=bar", strings.NewReader(`{"x":1}`))
+	outReq, err := h.buildRequest(req, key, []byte(`{"x":1}`))
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+	if got := outReq.URL.String(); got != "https://example.com/v1/messages?foo=bar" {
+		t.Fatalf("URL = %q", got)
+	}
+}
+
 func TestServeHTTPRetriesUnauthorizedWithOriginalBody(t *testing.T) {
 	var attempts atomic.Int32
 	var firstBody string

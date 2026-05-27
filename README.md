@@ -28,8 +28,8 @@ Copy-Item config.example.json config.json
 
 ```json
 {
-  "listen": ":8080",
-  "admin_listen": "127.0.0.1:8081",
+  "listen": "127.0.0.1:18080",
+  "admin_listen": "127.0.0.1:18081",
   "active_provider": "primary",
   "providers": [
     {
@@ -64,14 +64,14 @@ go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 默认入口：
 
 ```text
-代理入口: http://127.0.0.1:8080
-管理入口: http://127.0.0.1:8081
-管理台:   http://127.0.0.1:8081/console/
+代理入口: http://127.0.0.1:18080
+管理入口: http://127.0.0.1:18081
+管理台:   http://127.0.0.1:18081/console/
 ```
 
 客户端配置方式：
 
-- Base URL 填 `http://127.0.0.1:8080`。
+- Base URL 填 `http://127.0.0.1:18080/v1`。
 - 客户端 API key 填任意非空值即可。
 - ModelMux 转发到上游时会替换成当前 provider key 池里选中的真实 key。
 
@@ -112,8 +112,8 @@ go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
-| `listen` | `:8080` | 代理服务监听地址 |
-| `admin_listen` | `127.0.0.1:8081` | 管理服务监听地址 |
+| `listen` | `127.0.0.1:18080` | 代理服务监听地址 |
+| `admin_listen` | `127.0.0.1:18081` | 管理服务监听地址 |
 | `active_provider` | 第一个 provider | 当前使用的 provider ID |
 | `providers[].id` | 无 | provider 稳定 ID，不能重复 |
 | `providers[].target_url` | 无 | 上游服务根地址，必须是绝对 URL |
@@ -149,7 +149,7 @@ go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 保存配置文件后，ModelMux 会通过 `fsnotify` 自动 reload。也可以手动触发：
 
 ```powershell
-Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
+Invoke-RestMethod -Method Post http://127.0.0.1:18081/admin/reload
 ```
 
 这些字段热生效：
@@ -187,7 +187,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8081/admin/reload
 管理台地址：
 
 ```text
-http://127.0.0.1:8081/console/
+http://127.0.0.1:18081/console/
 ```
 
 常用接口：
@@ -218,7 +218,7 @@ http://127.0.0.1:8081/console/
 健康检查示例：
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8081/admin/health
+Invoke-RestMethod http://127.0.0.1:18081/admin/health
 ```
 
 ## Key 状态和重试
@@ -277,7 +277,7 @@ npm run build
 Set-Location ..
 ```
 
-前端开发服务器会把 `/admin` 代理到本机 Go 管理服务 `127.0.0.1:8081`：
+前端开发服务器会把 `/admin` 代理到本机 Go 管理服务 `127.0.0.1:18081`：
 
 ```powershell
 Set-Location web
@@ -303,13 +303,13 @@ web/     React + Vite 管理台，dist 由 Go embed 打进二进制
 查看当前可用性：
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8081/admin/health
+Invoke-RestMethod http://127.0.0.1:18081/admin/health
 ```
 
 查看 key 池状态：
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8081/admin/status
+Invoke-RestMethod http://127.0.0.1:18081/admin/status
 ```
 
 请求返回 `503` 的常见原因：
@@ -333,7 +333,7 @@ Invoke-RestMethod http://127.0.0.1:8081/admin/status
 
 ## 安全提醒
 
-- `admin_listen` 默认是 `127.0.0.1:8081`，不要轻易改成公网监听。
+- `admin_listen` 默认是 `127.0.0.1:18081`，不要轻易改成公网监听。
 - 不要提交 `config.json`、`state.json`、日志文件或任何真实 API key。
 - 不要在日志、截图、issue、PR 里暴露完整 API key。
 - 如果必须远程访问管理台，请额外加网络隔离、认证或反向代理鉴权。

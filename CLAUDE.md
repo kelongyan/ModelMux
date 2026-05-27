@@ -27,7 +27,7 @@ go test ./pool/ -run TestRoundRobin -v
 # Frontend build (output goes to web/dist, which is embedded by web/embed.go)
 cd web; npm install; npm run build
 
-# Frontend dev with hot reload (proxies to running modelmux on :8081)
+# Frontend dev with hot reload (proxies to running modelmux on :18081)
 cd web; npm run dev
 
 # One-shot start: builds binary if missing, launches in background, opens console
@@ -40,8 +40,8 @@ The Go binary `embed`s `web/dist`, so a fresh checkout requires `npm run build` 
 
 Two HTTP servers run in the same process from `main.go`:
 
-- **Proxy server** (default `:8080`) — forwards client requests upstream. Long timeouts on read-header / idle only; no fixed write timeout, because SSE streams can run for minutes.
-- **Admin server** (default `127.0.0.1:8081`) — legacy endpoints (`/admin/health`, `/admin/status`, `/admin/reload`) plus the v1 REST API under `/admin/api/v1/*` (`dashboard`, `providers`, `settings`, `events`, `about`, `reload`, `config/backup`, `state/backup`) and the embedded SPA at `/console/`. Conservative timeouts; bound to loopback by default.
+- **Proxy server** (default `127.0.0.1:18080`) — forwards client requests upstream. Long timeouts on read-header / idle only; no fixed write timeout, because SSE streams can run for minutes.
+- **Admin server** (default `127.0.0.1:18081`) — legacy endpoints (`/admin/health`, `/admin/status`, `/admin/reload`) plus the v1 REST API under `/admin/api/v1/*` (`dashboard`, `providers`, `settings`, `events`, `about`, `reload`, `config/backup`, `state/backup`) and the embedded SPA at `/console/`. Conservative timeouts; bound to loopback by default.
 
 Request lifecycle (proxy side, in `proxy/handler.go`):
 
@@ -107,7 +107,7 @@ Restart-required: `listen`, `admin_listen`, all `log_*` fields.
 - **Retries are intra-provider only**: ModelMux does **not** auto-failover to a different provider when the active one is exhausted. Provider switching is an explicit `active_provider` config change. Don't add cross-provider fallback without an explicit ask.
 - **Provider-level transients don't poison keys**: DNS / connection-refused / TLS / 5xx gateway codes consume `max_transient_retries` but leave key state untouched. Don't "simplify" this by treating all transport errors as key failures — it would invalidate keys during upstream outages.
 - **Dependencies stay minimal**: only `fsnotify` and `lumberjack` are direct third-party deps. Justify additions.
-- **Default-deny on admin exposure**: `admin_listen` defaults to `127.0.0.1:8081`. Don't change defaults that would expose it on `0.0.0.0`.
+- **Default-deny on admin exposure**: `admin_listen` defaults to `127.0.0.1:18081`. Don't change defaults that would expose it on `0.0.0.0`.
 
 ## Files to never commit
 

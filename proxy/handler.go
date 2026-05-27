@@ -730,7 +730,11 @@ func isHopByHop(h string) bool {
 }
 
 // singleJoiningSlash 拼接上游基础路径和客户端请求路径，避免多斜杠或缺斜杠。
+// 当两侧都包含同一个 API 前缀（例如 /v1）时，只保留一份，避免转发到 /v1/v1/...
 func singleJoiningSlash(a, b string) string {
+	if hasPathPrefix(b, a) {
+		return b
+	}
 	aSlash := strings.HasSuffix(a, "/")
 	bSlash := strings.HasPrefix(b, "/")
 	switch {
@@ -740,4 +744,12 @@ func singleJoiningSlash(a, b string) string {
 		return a + "/" + b
 	}
 	return a + b
+}
+
+func hasPathPrefix(path, prefix string) bool {
+	prefix = strings.TrimRight(prefix, "/")
+	if prefix == "" {
+		return false
+	}
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
