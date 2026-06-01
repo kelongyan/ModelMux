@@ -3,10 +3,12 @@ package admin
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/logx"
 	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/stats"
 )
 
 type Handler struct {
@@ -15,6 +17,13 @@ type Handler struct {
 	reloadFn     func(string) error
 	eventBuffer  *EventBuffer
 	stateChanged func(bool)
+	statsStore   statsReader
+}
+
+type statsReader interface {
+	SummarySince(time.Time) stats.Summary
+	ModelsSince(time.Time) []stats.ModelSummary
+	Recent(limit int) []stats.CallRecord
 }
 
 // NewHandler 创建管理端处理器，并挂载配置管理器与事件缓冲区。
@@ -29,6 +38,11 @@ func NewHandler(pools *pool.ProviderPools, cfgManager *config.Manager, reloadFn 
 		eventBuffer:  events,
 		stateChanged: stateChanged,
 	}
+}
+
+// SetStatsStore 挂载调用统计读取器，供管理台统计 API 使用。
+func (h *Handler) SetStatsStore(store statsReader) {
+	h.statsStore = store
 }
 
 // Register 注册管理端 HTTP 路由。

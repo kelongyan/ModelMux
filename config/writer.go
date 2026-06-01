@@ -34,6 +34,10 @@ type persistedConfig struct {
 	PersistState                 bool             `json:"persist_state"`
 	StateFile                    string           `json:"state_file"`
 	InvalidTTLHours              int              `json:"invalid_ttl_hours"`
+	StatsEnabled                 bool             `json:"stats_enabled"`
+	StatsDir                     string           `json:"stats_dir"`
+	StatsRetentionDays           int              `json:"stats_retention_days"`
+	StatsMaxRecentRecords        int              `json:"stats_max_recent_records"`
 }
 
 // writeFileAtomic 把配置以首选 schema 原子写回磁盘，避免保存半截 JSON。
@@ -67,6 +71,10 @@ func writeFileAtomic(path string, cfg *Config) error {
 		PersistState:                 cfg.StatePersistenceEnabled(),
 		StateFile:                    cfg.StateFile,
 		InvalidTTLHours:              cfg.InvalidTTLHours,
+		StatsEnabled:                 cfg.StatsCollectionEnabled(),
+		StatsDir:                     cfg.StatsDir,
+		StatsRetentionDays:           cfg.StatsRetentionDays,
+		StatsMaxRecentRecords:        cfg.StatsMaxRecentRecords,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

@@ -1,0 +1,298 @@
+package stats
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+const (
+	defaultRetentionDays    = 30
+	defaultMaxRecentRecords = 10000
+	callFilePrefix          = "calls-"
+	callFileSuffix          = ".jsonl"
+
+	UsageSourceUpstream = "upstream"
+	UsageSourceUnknown  = "unknown"
+)
+
+type Options struct {
+	Dir              string
+	RetentionDays    int
+	MaxRecentRecords int
+	Now              func() time.Time
+}
+
+type CallRecord struct {
+	ID               string    `json:"id"`
+	At               time.Time `json:"at"`
+	ProviderID       string    `json:"provider_id"`
+	Model            string    `json:"model,omitempty"`
+	Endpoint         string    `json:"endpoint"`
+	Method           string    `json:"method"`
+	Status           int       `json:"status"`
+	Success          bool      `json:"success"`
+	Stream           bool      `json:"stream,omitempty"`
+	LatencyMs        int64     `json:"latency_ms"`
+	Attempts         int       `json:"attempts"`
+	KeyID            string    `json:"key_id,omitempty"`
+	PromptTokens     *int64    `json:"prompt_tokens,omitempty"`
+	CompletionTokens *int64    `json:"completion_tokens,omitempty"`
+	TotalTokens      *int64    `json:"total_tokens,omitempty"`
+	UsageSource      string    `json:"usage_source"`
+	Error            string    `json:"error,omitempty"`
+}
+
+type Store struct {
+	dir              string
+	retentionDays    int
+	maxRecentRecords int
+	now              func() time.Time
+	mu               sync.RWMutex
+	records          []CallRecord
+	seq              atomic.Uint64
+	lastCleanupDay   string
+}
+
+func NewStore(options Options) (*Store, error) {
+	if options.Dir == "" {
+		return nil, fmt.Errorf("stats dir is required")
+	}
+	if options.RetentionDays <= 0 {
+		options.RetentionDays = defaultRetentionDays
+	}
+	if options.MaxRecentRecords <= 0 {
+		options.MaxRecentRecords = defaultMaxRecentRecords
+	}
+	if options.Now == nil {
+		options.Now = time.Now
+	}
+
+	store := &Store{
+		dir:              options.Dir,
+		retentionDays:    options.RetentionDays,
+		maxRecentRecords: options.MaxRecentRecords,
+		now:              options.Now,
+	}
+	if err := os.MkdirAll(store.dir, 0755); err != nil {
+		return nil, fmt.Errorf("create stats dir: %w", err)
+	}
+	if err := store.cleanupExpiredFiles(); err != nil {
+		return nil, err
+	}
+	if err := store.loadRecentRecords(); err != nil {
+		return nil, err
+	}
+	store.lastCleanupDay = store.now().UTC().Format(time.DateOnly)
+	return store, nil
+}
+
+func (s *Store) Append(record CallRecord) error {
+	if s == nil {
+		return nil
+	}
+	if record.At.IsZero() {
+		record.At = s.now().UTC()
+	} else {
+		record.At = record.At.UTC()
+	}
+	if record.ID == "" {
+		record.ID = s.nextID(record.At)
+	}
+	if record.Attempts <= 0 {
+		record.Attempts = 1
+	}
+	if record.UsageSource == "" {
+		record.UsageSource = UsageSourceUnknown
+	}
+	if err := s.cleanupIfDayChanged(record.At); err != nil {
+		return err
+	}
+
+	data, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("encode stats record: %w", err)
+	}
+	data = append(data, '\n')
+
+	path := s.filePath(record.At)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return fmt.Errorf("open stats file: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write stats file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close stats file: %w", err)
+	}
+
+	s.mu.Lock()
+	s.records = append(s.records, record)
+	s.capRecentLocked()
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) Recent(limit int) []CallRecord {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 || limit > len(s.records) {
+		limit = len(s.records)
+	}
+	start := len(s.records) - limit
+	out := make([]CallRecord, limit)
+	copy(out, s.records[start:])
+	return out
+}
+
+func (s *Store) nextID(at time.Time) string {
+	return fmt.Sprintf("%d-%06d", at.UnixNano(), s.seq.Add(1))
+}
+
+func (s *Store) filePath(at time.Time) string {
+	return filepath.Join(s.dir, callFilePrefix+at.UTC().Format(time.DateOnly)+callFileSuffix)
+}
+
+func (s *Store) cleanupIfDayChanged(at time.Time) error {
+	day := at.UTC().Format(time.DateOnly)
+	s.mu.RLock()
+	lastCleanupDay := s.lastCleanupDay
+	s.mu.RUnlock()
+	if day == lastCleanupDay {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if day == s.lastCleanupDay {
+		return nil
+	}
+	if err := s.cleanupExpiredFiles(); err != nil {
+		return err
+	}
+	s.pruneExpiredRecordsLocked(at)
+	s.lastCleanupDay = day
+	return nil
+}
+
+func (s *Store) cleanupExpiredFiles() error {
+	files, err := filepath.Glob(filepath.Join(s.dir, callFilePrefix+"*"+callFileSuffix))
+	if err != nil {
+		return fmt.Errorf("scan stats files: %w", err)
+	}
+	cutoff := cutoffDate(s.now().UTC(), s.retentionDays)
+	for _, file := range files {
+		fileDate, ok := parseCallFileDate(filepath.Base(file))
+		if !ok || !fileDate.Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove expired stats file: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) loadRecentRecords() error {
+	files, err := filepath.Glob(filepath.Join(s.dir, callFilePrefix+"*"+callFileSuffix))
+	if err != nil {
+		return fmt.Errorf("scan stats files: %w", err)
+	}
+	sort.Strings(files)
+
+	cutoff := cutoffDate(s.now().UTC(), s.retentionDays)
+	records := make([]CallRecord, 0)
+	for _, file := range files {
+		fileDate, ok := parseCallFileDate(filepath.Base(file))
+		if !ok || fileDate.Before(cutoff) {
+			continue
+		}
+		if err := loadRecordsFromFile(file, func(record CallRecord) {
+			records = append(records, record)
+		}); err != nil {
+			return err
+		}
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].At.Before(records[j].At)
+	})
+	s.records = records
+	s.capRecentLocked()
+	return nil
+}
+
+func loadRecordsFromFile(path string, add func(CallRecord)) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open stats file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var record CallRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			continue
+		}
+		add(record)
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read stats file: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) capRecentLocked() {
+	if s.maxRecentRecords <= 0 || len(s.records) <= s.maxRecentRecords {
+		return
+	}
+	start := len(s.records) - s.maxRecentRecords
+	next := make([]CallRecord, s.maxRecentRecords)
+	copy(next, s.records[start:])
+	s.records = next
+}
+
+func (s *Store) pruneExpiredRecordsLocked(now time.Time) {
+	cutoff := cutoffDate(now.UTC(), s.retentionDays)
+	kept := s.records[:0]
+	for _, record := range s.records {
+		if record.At.IsZero() || !record.At.Before(cutoff) {
+			kept = append(kept, record)
+		}
+	}
+	s.records = kept
+	s.capRecentLocked()
+}
+
+func cutoffDate(now time.Time, retentionDays int) time.Time {
+	if retentionDays <= 0 {
+		retentionDays = defaultRetentionDays
+	}
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -retentionDays+1)
+}
+
+func parseCallFileDate(name string) (time.Time, bool) {
+	if !strings.HasPrefix(name, callFilePrefix) || !strings.HasSuffix(name, callFileSuffix) {
+		return time.Time{}, false
+	}
+	raw := strings.TrimSuffix(strings.TrimPrefix(name, callFilePrefix), callFileSuffix)
+	parsed, err := time.ParseInLocation(time.DateOnly, raw, time.UTC)
+	return parsed, err == nil
+}

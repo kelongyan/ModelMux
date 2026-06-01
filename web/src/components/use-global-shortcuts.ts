@@ -62,6 +62,7 @@ export function useGlobalShortcuts({ onReload, onGoto }: ShortcutHandlers): void
       const mapping: Record<string, string> = {
         d: "/dashboard",
         p: "/providers",
+        t: "/stats",
         s: "/settings",
         e: "/events",
         a: "/about",

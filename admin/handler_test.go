@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/stats"
 )
 
 func TestStatusIncludesProviderSummary(t *testing.T) {
@@ -264,6 +266,9 @@ func TestSettingsGetAndPut(t *testing.T) {
 		ResponseHeaderTimeoutSeconds: 9,
 		TransientCoolingSeconds:      12,
 		WaitForKeyTimeoutMS:          650,
+		StatsDir:                     "custom_stats",
+		StatsRetentionDays:           14,
+		StatsMaxRecentRecords:        1234,
 	})
 	mux := http.NewServeMux()
 	h.Register(mux)
@@ -280,6 +285,10 @@ func TestSettingsGetAndPut(t *testing.T) {
 	}
 	resp.Settings.CoolingSeconds = 88
 	resp.Settings.LogLevel = "debug"
+	resp.Settings.StatsEnabled = false
+	resp.Settings.StatsDir = "next_stats"
+	resp.Settings.StatsRetentionDays = 30
+	resp.Settings.StatsMaxRecentRecords = 4321
 
 	buf, err := json.Marshal(resp.Settings)
 	if err != nil {
@@ -317,6 +326,18 @@ func TestSettingsGetAndPut(t *testing.T) {
 	}
 	if loaded.WaitForKeyTimeoutMS != 650 {
 		t.Fatalf("WaitForKeyTimeoutMS = %d, want 650", loaded.WaitForKeyTimeoutMS)
+	}
+	if loaded.StatsCollectionEnabled() {
+		t.Fatal("StatsCollectionEnabled() = true, want false")
+	}
+	if loaded.StatsDir != "next_stats" {
+		t.Fatalf("StatsDir = %q, want next_stats", loaded.StatsDir)
+	}
+	if loaded.StatsRetentionDays != 30 {
+		t.Fatalf("StatsRetentionDays = %d, want 30", loaded.StatsRetentionDays)
+	}
+	if loaded.StatsMaxRecentRecords != 4321 {
+		t.Fatalf("StatsMaxRecentRecords = %d, want 4321", loaded.StatsMaxRecentRecords)
 	}
 }
 
@@ -547,6 +568,119 @@ func TestBackupStateAPI(t *testing.T) {
 	if disposition := rr.Header().Get("Content-Disposition"); !strings.Contains(disposition, "modelmux-state-backup.json") {
 		t.Fatalf("Content-Disposition = %q", disposition)
 	}
+}
+
+func TestStatsAPIsReturnSummaryModelsAndRecentCalls(t *testing.T) {
+	base := time.Now().UTC()
+	h, _, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	store, err := stats.NewStore(stats.Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 100,
+		Now:              func() time.Time { return base },
+	})
+	if err != nil {
+		t.Fatalf("stats.NewStore() error = %v", err)
+	}
+	if err := store.Append(stats.CallRecord{
+		At:          base.Add(-10 * time.Minute),
+		ProviderID:  "p1",
+		Model:       "gpt-4.1-mini",
+		Status:      http.StatusOK,
+		Success:     true,
+		LatencyMs:   120,
+		TotalTokens: int64PtrAdmin(30),
+		UsageSource: stats.UsageSourceUpstream,
+	}); err != nil {
+		t.Fatalf("Append() error = %v", err)
+	}
+	h.SetStatsStore(store)
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	summaryRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(summaryRecorder, httptest.NewRequest(http.MethodGet, "/admin/api/v1/stats/summary?window=24h", nil))
+	if summaryRecorder.Code != http.StatusOK {
+		t.Fatalf("summary status = %d, want %d, body=%s", summaryRecorder.Code, http.StatusOK, summaryRecorder.Body.String())
+	}
+	var summary struct {
+		Window  string        `json:"window"`
+		Summary stats.Summary `json:"summary"`
+	}
+	if err := json.Unmarshal(summaryRecorder.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("decode summary response: %v", err)
+	}
+	if summary.Window != "24h" || summary.Summary.TotalCalls != 1 || summary.Summary.TotalTokens != 30 {
+		t.Fatalf("summary response = %+v, want 24h total_calls=1 total_tokens=30", summary)
+	}
+
+	modelsRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(modelsRecorder, httptest.NewRequest(http.MethodGet, "/admin/api/v1/stats/models?window=24h", nil))
+	if modelsRecorder.Code != http.StatusOK {
+		t.Fatalf("models status = %d, want %d, body=%s", modelsRecorder.Code, http.StatusOK, modelsRecorder.Body.String())
+	}
+	var models struct {
+		Window string               `json:"window"`
+		Models []stats.ModelSummary `json:"models"`
+	}
+	if err := json.Unmarshal(modelsRecorder.Body.Bytes(), &models); err != nil {
+		t.Fatalf("decode models response: %v", err)
+	}
+	if len(models.Models) != 1 || models.Models[0].Model != "gpt-4.1-mini" {
+		t.Fatalf("models response = %+v, want one gpt-4.1-mini row", models)
+	}
+
+	recentRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(recentRecorder, httptest.NewRequest(http.MethodGet, "/admin/api/v1/stats/recent?limit=10", nil))
+	if recentRecorder.Code != http.StatusOK {
+		t.Fatalf("recent status = %d, want %d, body=%s", recentRecorder.Code, http.StatusOK, recentRecorder.Body.String())
+	}
+	var recent struct {
+		Records []stats.CallRecord `json:"records"`
+	}
+	if err := json.Unmarshal(recentRecorder.Body.Bytes(), &recent); err != nil {
+		t.Fatalf("decode recent response: %v", err)
+	}
+	if len(recent.Records) != 1 || recent.Records[0].Model != "gpt-4.1-mini" {
+		t.Fatalf("recent response = %+v, want one gpt-4.1-mini record", recent)
+	}
+}
+
+func TestStatsSummaryRejectsInvalidWindow(t *testing.T) {
+	h, _, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	store, err := stats.NewStore(stats.Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 100,
+	})
+	if err != nil {
+		t.Fatalf("stats.NewStore() error = %v", err)
+	}
+	h.SetStatsStore(store)
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/admin/api/v1/stats/summary?window=3h", nil))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func int64PtrAdmin(value int64) *int64 {
+	return &value
 }
 
 func newTestHandler(t *testing.T, cfg *config.Config) (*Handler, *pool.ProviderPools, string) {

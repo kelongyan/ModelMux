@@ -20,6 +20,7 @@ import (
 	"github.com/kelongyan/ModelMux/pool"
 	"github.com/kelongyan/ModelMux/proxy"
 	"github.com/kelongyan/ModelMux/state"
+	"github.com/kelongyan/ModelMux/stats"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -59,6 +60,27 @@ func main() {
 		"providers":       providerPools.ProviderCount(),
 		"active_provider": providerPools.ActiveID(),
 	})
+
+	statsStore, err := newStatsStoreFromConfig(cfg)
+	if err != nil {
+		slog.Warn("stats store init failed", logx.Fields("stats", "stats.init_failed",
+			"path", cfg.StatsDir,
+			"err", err,
+		)...)
+		eventBuffer.Add("warn", "stats", "stats.init_failed", "stats store init failed", map[string]any{
+			"path":  cfg.StatsDir,
+			"error": err.Error(),
+		})
+	} else if statsStore != nil {
+		slog.Info("stats store initialized", logx.Fields("stats", "stats.initialized",
+			"path", cfg.StatsDir,
+			"retention_days", cfg.StatsRetentionDays,
+			"max_recent_records", cfg.StatsMaxRecentRecords,
+		)...)
+		eventBuffer.Add("info", "stats", "stats.initialized", "stats store initialized", map[string]any{
+			"path": cfg.StatsDir,
+		})
+	}
 
 	var saver *stateSaver
 	if cfg.StatePersistenceEnabled() {
@@ -102,6 +124,9 @@ func main() {
 	}
 	if saver != nil {
 		proxyHandler.SetStateChangeHook(saver.Trigger)
+	}
+	if statsStore != nil {
+		proxyHandler.SetStatsRecorder(statsStore)
 	}
 
 	// 代理服务允许长时间流式输出，因此只设置读头和空闲超时，不设置固定写超时。
@@ -180,6 +205,9 @@ func main() {
 		adminStateChanged = saver.Trigger
 	}
 	adminHandler := admin.NewHandler(providerPools, configManager, reloadConfig, eventBuffer, adminStateChanged)
+	if statsStore != nil {
+		adminHandler.SetStatsStore(statsStore)
+	}
 	adminHandler.Register(adminMux)
 
 	var configWatcher *config.Watcher
@@ -277,6 +305,29 @@ func providerSpecsFromConfig(providers []config.ProviderConfig) []pool.ProviderS
 		})
 	}
 	return specs
+}
+
+func newStatsStoreFromConfig(cfg *config.Config) (*stats.Store, error) {
+	if cfg == nil || !cfg.StatsCollectionEnabled() {
+		return nil, nil
+	}
+	dir := cfg.StatsDir
+	if dir == "" {
+		dir = config.DefaultStatsDir
+	}
+	retentionDays := cfg.StatsRetentionDays
+	if retentionDays <= 0 {
+		retentionDays = config.DefaultStatsRetentionDays
+	}
+	maxRecentRecords := cfg.StatsMaxRecentRecords
+	if maxRecentRecords <= 0 {
+		maxRecentRecords = config.DefaultStatsMaxRecentRecords
+	}
+	return stats.NewStore(stats.Options{
+		Dir:              dir,
+		RetentionDays:    retentionDays,
+		MaxRecentRecords: maxRecentRecords,
+	})
 }
 
 // setupLogger 根据配置初始化 slog 文本或 JSON 日志输出，并按需启用日志轮转。

@@ -128,6 +128,10 @@ export type AdminSettingsPayload = {
   persist_state: boolean;
   state_file: string;
   invalid_ttl_hours: number;
+  stats_enabled: boolean;
+  stats_dir: string;
+  stats_retention_days: number;
+  stats_max_recent_records: number;
 };
 
 // AdminSettingsResponse 对应设置页读取接口的响应结构。
@@ -153,4 +157,65 @@ export type AdminAboutResponse = {
   features: string[];
   api_endpoints: string[];
   backup_endpoints: string[];
+};
+
+export type AdminStatsWindow = "1h" | "24h" | "7d" | "30d";
+
+export type AdminStatsSummary = {
+  total_calls: number;
+  success_calls: number;
+  failed_calls: number;
+  usage_known_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+};
+
+export type AdminModelStats = {
+  model: string;
+  calls: number;
+  success_calls: number;
+  failed_calls: number;
+  usage_known_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+};
+
+export type AdminCallRecord = {
+  id: string;
+  at: string;
+  provider_id: string;
+  model?: string;
+  endpoint: string;
+  method: string;
+  status: number;
+  success: boolean;
+  stream?: boolean;
+  latency_ms: number;
+  attempts: number;
+  key_id?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  usage_source: "upstream" | "unknown" | string;
+  error?: string;
+};
+
+export type AdminStatsSummaryResponse = {
+  window: AdminStatsWindow;
+  since: string;
+  summary: AdminStatsSummary;
+};
+
+export type AdminStatsModelsResponse = {
+  window: AdminStatsWindow;
+  since: string;
+  models: AdminModelStats[];
+};
+
+export type AdminStatsRecentResponse = {
+  records: AdminCallRecord[];
 };

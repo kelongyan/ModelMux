@@ -13,6 +13,7 @@ const DashboardPage = lazy(() => import("./pages/dashboard-page").then((module) 
 const EventsPage = lazy(() => import("./pages/events-page").then((module) => ({ default: module.EventsPage })));
 const ProvidersPage = lazy(() => import("./pages/providers-page").then((module) => ({ default: module.ProvidersPage })));
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
+const StatsPage = lazy(() => import("./pages/stats-page").then((module) => ({ default: module.StatsPage })));
 
 type NavigationItem = {
   key: string;
@@ -23,6 +24,7 @@ type NavigationItem = {
 const navigationItems: NavigationItem[] = [
   { key: "/dashboard", label: "总览", hint: "g d" },
   { key: "/providers", label: "提供商", hint: "g p" },
+  { key: "/stats", label: "调用统计", hint: "g t" },
   { key: "/settings", label: "设置", hint: "g s" },
   { key: "/events", label: "事件", hint: "g e" },
   { key: "/about", label: "关于", hint: "g a" },
@@ -97,8 +99,8 @@ export function App(): JSX.Element {
             <Tooltip title="Ctrl / ⌘ + R 触发后端 reload">
               <Tag color="cyan">⌘R 重载</Tag>
             </Tooltip>
-            <Tooltip title="先按 g 再按 d / p / s / e / a 切换页面">
-              <Tag color="gold">g + d/p/s/e/a 切页</Tag>
+            <Tooltip title="先按 g 再按 d / p / t / s / e / a 切换页面">
+              <Tag color="gold">g + d/p/t/s/e/a 切页</Tag>
             </Tooltip>
           </Space>
         </header>
@@ -108,6 +110,7 @@ export function App(): JSX.Element {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/providers" element={<ProvidersPage />} />
+              <Route path="/stats" element={<StatsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/events" element={<EventsPage />} />
               <Route path="/about" element={<AboutPage />} />

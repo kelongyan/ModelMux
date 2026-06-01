@@ -850,6 +850,69 @@ a {
   color: rgba(16, 35, 31, 0.86);
 }
 
+/* === stats page === */
+.stats-kpi {
+  min-height: 110px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(16, 35, 31, 0.08);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stats-kpi span {
+  color: rgba(16, 35, 31, 0.62);
+  font-size: 0.86rem;
+}
+
+.stats-kpi strong {
+  font-size: 1.65rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #10231f;
+}
+
+.stats-kpi--teal {
+  border-color: rgba(13, 148, 136, 0.18);
+}
+
+.stats-kpi--green {
+  border-color: rgba(22, 163, 74, 0.18);
+}
+
+.stats-kpi--amber {
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
+.stats-kpi--red {
+  border-color: rgba(220, 38, 38, 0.18);
+}
+
+.stats-table .ant-table {
+  background: transparent;
+}
+
+.stats-table .ant-table-thead > tr > th {
+  background: rgba(16, 35, 31, 0.04);
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.stats-table .ant-table-tbody > tr > td {
+  background: transparent;
+  font-size: 0.84rem;
+}
+
+.stats-time {
+  font-family: "Aptos Mono", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: rgba(16, 35, 31, 0.74);
+  font-size: 0.8rem;
+}
+
 /* === shared components === */
 .key-pool-dots {
   display: inline-flex;

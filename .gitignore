@@ -3,6 +3,7 @@ key.txt
 state.json
 state.json.tmp
 logs/
+stats_data/
 .claude/
 *.log
 *.exe
@@ -18,3 +19,4 @@ web/.vite/
 web/*.tsbuildinfo
 web/vite.config.js
 web/vite.config.d.ts
+.playwright-cli/

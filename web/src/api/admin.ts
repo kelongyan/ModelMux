@@ -12,6 +12,10 @@ import type {
   AdminReloadResponse,
   AdminSettingsPayload,
   AdminSettingsResponse,
+  AdminStatsModelsResponse,
+  AdminStatsRecentResponse,
+  AdminStatsSummaryResponse,
+  AdminStatsWindow,
 } from "../types/admin";
 import { requestDownload, requestJSON, saveDownloadBlob } from "./http";
 
@@ -132,6 +136,21 @@ export function updateSettings(payload: AdminSettingsPayload): Promise<AdminChan
     },
     body: JSON.stringify(payload),
   });
+}
+
+// fetchStatsSummary 拉取指定窗口内的调用统计 KPI。
+export function fetchStatsSummary(window: AdminStatsWindow): Promise<AdminStatsSummaryResponse> {
+  return requestJSON<AdminStatsSummaryResponse>(`/admin/api/v1/stats/summary?window=${window}`);
+}
+
+// fetchStatsModels 拉取指定窗口内按模型聚合的调用统计。
+export function fetchStatsModels(window: AdminStatsWindow): Promise<AdminStatsModelsResponse> {
+  return requestJSON<AdminStatsModelsResponse>(`/admin/api/v1/stats/models?window=${window}`);
+}
+
+// fetchStatsRecent 拉取最近调用明细。
+export function fetchStatsRecent(limit = 100): Promise<AdminStatsRecentResponse> {
+  return requestJSON<AdminStatsRecentResponse>(`/admin/api/v1/stats/recent?limit=${limit}`);
 }
 
 // fetchAbout 拉取关于页所需的运行时信息。

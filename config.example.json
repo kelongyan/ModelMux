@@ -38,5 +38,9 @@
   "log_compress": true,
   "persist_state": true,
   "state_file": "state.json",
-  "invalid_ttl_hours": 24
+  "invalid_ttl_hours": 24,
+  "stats_enabled": true,
+  "stats_dir": "stats_data",
+  "stats_retention_days": 30,
+  "stats_max_recent_records": 10000
 }

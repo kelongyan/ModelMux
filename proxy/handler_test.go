@@ -16,6 +16,8 @@ import (
 
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/state"
+	"github.com/kelongyan/ModelMux/stats"
 )
 
 func mustHandler(t *testing.T, cfg *config.Config) (*Handler, *pool.ProviderPools) {
@@ -191,6 +193,203 @@ func TestServeHTTPRetriesUnauthorizedWithOriginalBody(t *testing.T) {
 	if attempts.Load() != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts.Load())
 	}
+}
+
+func TestServeHTTPRecordsSuccessfulCallStats(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl-test",
+			"usage": {
+				"prompt_tokens": 11,
+				"completion_tokens": 22,
+				"total_tokens": 33
+			}
+		}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{
+			{ID: "primary", TargetURL: upstream.URL, Keys: []string{"k1"}},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	recorder := &recordingStatsSink{}
+	h.SetStatsRecorder(recorder)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"gpt-4.1-mini","messages":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	records := recorder.Records()
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.ProviderID != "primary" {
+		t.Fatalf("ProviderID = %q, want primary", record.ProviderID)
+	}
+	if record.Model != "gpt-4.1-mini" {
+		t.Fatalf("Model = %q, want gpt-4.1-mini", record.Model)
+	}
+	if record.Endpoint != "/v1/chat/completions" || record.Method != http.MethodPost {
+		t.Fatalf("endpoint/method = %s %s, want POST /v1/chat/completions", record.Method, record.Endpoint)
+	}
+	if record.Status != http.StatusOK || !record.Success {
+		t.Fatalf("status/success = %d/%v, want 200/true", record.Status, record.Success)
+	}
+	if record.Attempts != 1 {
+		t.Fatalf("Attempts = %d, want 1", record.Attempts)
+	}
+	if record.KeyID != state.KeyID("k1") || record.KeyID == "k1" {
+		t.Fatalf("KeyID = %q, want hashed key id", record.KeyID)
+	}
+	if record.UsageSource != stats.UsageSourceUpstream {
+		t.Fatalf("UsageSource = %q, want %q", record.UsageSource, stats.UsageSourceUpstream)
+	}
+	if record.PromptTokens == nil || *record.PromptTokens != 11 {
+		t.Fatalf("PromptTokens = %v, want 11", record.PromptTokens)
+	}
+	if record.CompletionTokens == nil || *record.CompletionTokens != 22 {
+		t.Fatalf("CompletionTokens = %v, want 22", record.CompletionTokens)
+	}
+	if record.TotalTokens == nil || *record.TotalTokens != 33 {
+		t.Fatalf("TotalTokens = %v, want 33", record.TotalTokens)
+	}
+}
+
+func TestServeHTTPRecordsStreamingUsageStats(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":8,\"total_tokens\":15}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{
+			{ID: "primary", TargetURL: upstream.URL, Keys: []string{"k1"}},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	recorder := &recordingStatsSink{}
+	h.SetStatsRecorder(recorder)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"stream-model","stream":true,"messages":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	records := recorder.Records()
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	record := records[0]
+	if !record.Stream {
+		t.Fatal("Stream = false, want true")
+	}
+	if record.UsageSource != stats.UsageSourceUpstream {
+		t.Fatalf("UsageSource = %q, want %q", record.UsageSource, stats.UsageSourceUpstream)
+	}
+	if record.PromptTokens == nil || *record.PromptTokens != 7 {
+		t.Fatalf("PromptTokens = %v, want 7", record.PromptTokens)
+	}
+	if record.CompletionTokens == nil || *record.CompletionTokens != 8 {
+		t.Fatalf("CompletionTokens = %v, want 8", record.CompletionTokens)
+	}
+	if record.TotalTokens == nil || *record.TotalTokens != 15 {
+		t.Fatalf("TotalTokens = %v, want 15", record.TotalTokens)
+	}
+}
+
+func TestServeHTTPRecordsOneCallAcrossRetries(t *testing.T) {
+	var attempts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch attempts.Add(1) {
+		case 1:
+			w.WriteHeader(http.StatusUnauthorized)
+		case 2:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{
+			{ID: "primary", TargetURL: upstream.URL, Keys: []string{"k1", "k2"}},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	recorder := &recordingStatsSink{}
+	h.SetStatsRecorder(recorder)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"retry-model"}`)))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	records := recorder.Records()
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.Attempts != 2 {
+		t.Fatalf("Attempts = %d, want 2", record.Attempts)
+	}
+	if record.KeyID != state.KeyID("k2") {
+		t.Fatalf("KeyID = %q, want %q", record.KeyID, state.KeyID("k2"))
+	}
+	if record.Model != "retry-model" {
+		t.Fatalf("Model = %q, want retry-model", record.Model)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("upstream attempts = %d, want 2", attempts.Load())
+	}
+}
+
+type recordingStatsSink struct {
+	mu      sync.Mutex
+	records []stats.CallRecord
+}
+
+func (s *recordingStatsSink) Append(record stats.CallRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = append(s.records, record)
+	return nil
+}
+
+func (s *recordingStatsSink) Records() []stats.CallRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]stats.CallRecord(nil), s.records...)
 }
 
 func TestServeHTTPRetriesTransportErrorWithNextKey(t *testing.T) {

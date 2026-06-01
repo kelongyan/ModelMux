@@ -19,6 +19,8 @@ import (
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/logx"
 	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/state"
+	"github.com/kelongyan/ModelMux/stats"
 )
 
 var (
@@ -29,15 +31,22 @@ var (
 	errRetryableUpstream   = errors.New("retryable upstream failure")
 )
 
-const quotaErrorInspectBytes int64 = 64 * 1024
+const (
+	quotaErrorInspectBytes    int64 = 64 * 1024
+	responseUsageInspectBytes int64 = 256 * 1024
+)
 
 type Handler struct {
 	pools           *pool.ProviderPools
 	runtime         atomic.Value
 	stateChangeHook atomic.Value
+	statsRecorder   atomic.Value
 }
 
 type stateChangeHook func(immediate bool)
+type statsRecorder interface {
+	Append(stats.CallRecord) error
+}
 
 type runtimeConfig struct {
 	providerID              string
@@ -92,11 +101,33 @@ func (h *Handler) SetStateChangeHook(fn func(immediate bool)) {
 	h.stateChangeHook.Store(stateChangeHook(fn))
 }
 
+// SetStatsRecorder 设置调用统计记录器；nil 表示不记录调用统计。
+func (h *Handler) SetStatsRecorder(recorder statsRecorder) {
+	if recorder == nil {
+		recorder = noopStatsRecorder{}
+	}
+	h.statsRecorder.Store(recorder)
+}
+
 // notifyStateChanged 通知外部保存 key 池状态；immediate 表示需要尽快落盘。
 func (h *Handler) notifyStateChanged(immediate bool) {
 	hook, _ := h.stateChangeHook.Load().(stateChangeHook)
 	if hook != nil {
 		hook(immediate)
+	}
+}
+
+func (h *Handler) recordCallStats(record stats.CallRecord) {
+	recorder, _ := h.statsRecorder.Load().(statsRecorder)
+	if recorder == nil {
+		return
+	}
+	if err := recorder.Append(record); err != nil {
+		slog.Warn("stats record failed", logx.Fields(logx.CategoryProxy, "proxy.stats_record_failed",
+			"provider_id", record.ProviderID,
+			"model", record.Model,
+			"err", err,
+		)...)
 	}
 }
 
@@ -245,6 +276,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	callRecord := stats.CallRecord{
+		At:          start.UTC(),
+		ProviderID:  rt.providerID,
+		Model:       extractRequestModel(body),
+		Stream:      extractRequestStream(body),
+		Endpoint:    r.URL.Path,
+		Method:      r.Method,
+		UsageSource: stats.UsageSourceUnknown,
+	}
+	defer func() {
+		if callRecord.Status == 0 {
+			return
+		}
+		callRecord.LatencyMs = time.Since(start).Milliseconds()
+		h.recordCallStats(callRecord)
+	}()
+
 	var lastStatus int
 	var lastErr error
 	lastScope := retryScopeNone
@@ -266,13 +314,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"provider_id", rt.providerID,
 				"wait_budget_ms", waitBudget.Milliseconds(),
 			)...)
+			callRecord.Status = http.StatusServiceUnavailable
+			callRecord.Error = "no available API keys"
 			writeProxyError(w, http.StatusServiceUnavailable, "no available API keys")
 			return
 		}
 
-		status, retryAfter, scope, err := h.forward(w, r, rt, key, body)
+		status, retryAfter, scope, usage, err := h.forward(w, r, rt, key, body)
 		key.FinishRequest()
+		callRecord.Attempts = attempt + 1
+		callRecord.Status = status
+		callRecord.KeyID = state.KeyID(key.Value)
+		applyUsageToRecord(&callRecord, usage)
 		if err == nil {
+			callRecord.Success = status >= http.StatusOK && status < http.StatusBadRequest
+			if !callRecord.Success {
+				callRecord.Error = http.StatusText(status)
+			}
 			slog.Info("proxied", logx.Fields(logx.CategoryProxy, logx.EventProxySuccess,
 				"path", r.URL.Path,
 				"status", status,
@@ -285,6 +343,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, errClientCanceled) {
+			callRecord.Status = 0
 			slog.Info("request canceled", logx.Fields(logx.CategoryProxy, logx.EventClientCanceled,
 				"path", r.URL.Path,
 				"attempt", attempt+1,
@@ -294,6 +353,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, errStreamFailed) {
+			callRecord.Error = "stream failed"
 			return
 		}
 
@@ -333,6 +393,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						"provider_id", rt.providerID,
 						"err", err,
 					)...)
+					callRecord.Error = err.Error()
 					return
 				}
 				key.MarkInvalid()
@@ -348,6 +409,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"provider_id", rt.providerID,
 					"err", err,
 				)...)
+				callRecord.Error = err.Error()
 				return
 			}
 		case retryScopeConnection:
@@ -390,6 +452,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"provider_id", rt.providerID,
 				"err", err,
 			)...)
+			callRecord.Error = err.Error()
 			return
 		}
 		if stopRetrying {
@@ -404,9 +467,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"err", lastErr,
 	)...)
 	if lastScope == retryScopeProvider || lastScope == retryScopeConnection {
+		callRecord.Status = http.StatusServiceUnavailable
+		callRecord.Error = "upstream temporarily unavailable after retries"
 		writeProxyError(w, http.StatusServiceUnavailable, "upstream temporarily unavailable after retries")
 		return
 	}
+	callRecord.Status = http.StatusServiceUnavailable
+	callRecord.Error = "all keys exhausted after retries"
 	writeProxyError(w, http.StatusServiceUnavailable, "all keys exhausted after retries")
 }
 
@@ -434,18 +501,19 @@ func (h *Handler) waitForCoolingKey(ctx context.Context, rt *runtimeConfig, budg
 
 // forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
 // 成功时返回状态码和 nil；429、401 和余额不足类 403 返回可重试错误；其他错误会在本函数内写出响应。
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, retryScope, error) {
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, retryScope, stats.Usage, error) {
+	unknownUsage := stats.Usage{Source: stats.UsageSourceUnknown}
 	outReq, err := buildRequest(rt, r, key, body)
 	if err != nil {
 		writeProxyError(w, http.StatusInternalServerError, "failed to build request")
-		return http.StatusInternalServerError, 0, retryScopeNone, err
+		return http.StatusInternalServerError, 0, retryScopeNone, unknownUsage, err
 	}
 
 	upstreamStart := time.Now()
 	resp, err := rt.client.Do(outReq)
 	if err != nil {
 		if errors.Is(r.Context().Err(), context.Canceled) {
-			return 0, 0, retryScopeNone, errClientCanceled
+			return 0, 0, retryScopeNone, unknownUsage, errClientCanceled
 		}
 		scope := classifyTransportRetryScope(err)
 		slog.Error("upstream unreachable", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnreachable,
@@ -455,21 +523,21 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 			"scope", scope.String(),
 			"err", err,
 		)...)
-		return http.StatusBadGateway, 0, scope, fmt.Errorf("%w: %v", errRetryableUpstream, err)
+		return http.StatusBadGateway, 0, scope, unknownUsage, fmt.Errorf("%w: %v", errRetryableUpstream, err)
 	}
 	defer resp.Body.Close()
 
 	// 429/401 需要换 key 重试，因此不能提前向客户端写响应头。
 	if resp.StatusCode == http.StatusTooManyRequests {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		return resp.StatusCode, retryAfter, retryScopeKey, fmt.Errorf("upstream returned %d", resp.StatusCode)
+		return resp.StatusCode, retryAfter, retryScopeKey, unknownUsage, fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return resp.StatusCode, 0, retryScopeKey, fmt.Errorf("upstream returned %d", resp.StatusCode)
+		return resp.StatusCode, 0, retryScopeKey, unknownUsage, fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 	if isRetryableUpstreamStatus(resp.StatusCode) {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		return resp.StatusCode, retryAfter, retryScopeProvider, fmt.Errorf("%w: upstream returned %d", errRetryableUpstream, resp.StatusCode)
+		return resp.StatusCode, retryAfter, retryScopeProvider, unknownUsage, fmt.Errorf("%w: upstream returned %d", errRetryableUpstream, resp.StatusCode)
 	}
 
 	responseBody := io.Reader(resp.Body)
@@ -477,19 +545,20 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		prefix, replayBody, err := readResponsePrefix(resp.Body, quotaErrorInspectBytes)
 		if err != nil {
 			writeProxyError(w, http.StatusBadGateway, "failed to read upstream error body")
-			return http.StatusBadGateway, 0, retryScopeNone, err
+			return http.StatusBadGateway, 0, retryScopeNone, unknownUsage, err
 		}
 		if isQuotaExhaustedBody(prefix) {
-			return resp.StatusCode, 0, retryScopeKey, fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
+			return resp.StatusCode, 0, retryScopeKey, unknownUsage, fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
 		}
 		responseBody = replayBody
 	}
 
 	key.RecordLatency(time.Since(upstreamStart))
 
+	capturedBody := newCaptureReader(responseBody, responseUsageInspectBytes)
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	if err := streamBody(w, responseBody); err != nil {
+	if err := streamBody(w, capturedBody); err != nil {
 		slog.Warn("stream failed", logx.Fields(logx.CategoryStream, logx.EventStreamFailed,
 			"path", r.URL.Path,
 			"status", resp.StatusCode,
@@ -497,9 +566,9 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 			"key_id", logx.MaskSecret(key.Value),
 			"err", err,
 		)...)
-		return resp.StatusCode, 0, retryScopeNone, fmt.Errorf("%w: %v", errStreamFailed, err)
+		return resp.StatusCode, 0, retryScopeNone, unknownUsage, fmt.Errorf("%w: %v", errStreamFailed, err)
 	}
-	return resp.StatusCode, 0, retryScopeNone, nil
+	return resp.StatusCode, 0, retryScopeNone, stats.ExtractUsage(capturedBody.Bytes()), nil
 }
 
 // readResponsePrefix 读取响应体前缀用于错误分类，并返回可重放完整响应体的 reader。
@@ -517,6 +586,82 @@ func readResponsePrefix(body io.Reader, limit int64) ([]byte, io.Reader, error) 
 	}
 	prefixBytes := prefix.Bytes()
 	return prefixBytes, io.MultiReader(bytes.NewReader(prefixBytes), body), nil
+}
+
+type noopStatsRecorder struct{}
+
+func (noopStatsRecorder) Append(stats.CallRecord) error {
+	return nil
+}
+
+func applyUsageToRecord(record *stats.CallRecord, usage stats.Usage) {
+	if record == nil {
+		return
+	}
+	if usage.Source != "" {
+		record.UsageSource = usage.Source
+	}
+	record.PromptTokens = usage.PromptTokens
+	record.CompletionTokens = usage.CompletionTokens
+	record.TotalTokens = usage.TotalTokens
+}
+
+func extractRequestModel(body []byte) string {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return ""
+	}
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Model)
+}
+
+func extractRequestStream(body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return false
+	}
+	var payload struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	return payload.Stream
+}
+
+type captureReader struct {
+	reader   io.Reader
+	limit    int64
+	captured int64
+	buffer   bytes.Buffer
+}
+
+func newCaptureReader(reader io.Reader, limit int64) *captureReader {
+	return &captureReader{
+		reader: reader,
+		limit:  limit,
+	}
+}
+
+func (r *captureReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.limit > r.captured {
+		remaining := r.limit - r.captured
+		captureN := n
+		if int64(captureN) > remaining {
+			captureN = int(remaining)
+		}
+		_, _ = r.buffer.Write(p[:captureN])
+		r.captured += int64(captureN)
+	}
+	return n, err
+}
+
+func (r *captureReader) Bytes() []byte {
+	return r.buffer.Bytes()
 }
 
 // quotaExhaustedIndicators 覆盖常见中英文余额、额度和信用不足错误文案。

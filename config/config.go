@@ -46,6 +46,12 @@ const (
 	DefaultStateFile = "state.json"
 	// DefaultInvalidTTLHours 是 invalid 状态默认保留小时数。
 	DefaultInvalidTTLHours = 24
+	// DefaultStatsDir 是默认调用统计明细目录，避免与 Go 源码包 stats/ 冲突。
+	DefaultStatsDir = "stats_data"
+	// DefaultStatsRetentionDays 是默认保留调用统计明细的天数。
+	DefaultStatsRetentionDays = 30
+	// DefaultStatsMaxRecentRecords 是默认加载到内存的最近调用记录数量。
+	DefaultStatsMaxRecentRecords = 10000
 )
 
 type ProviderConfig struct {
@@ -81,6 +87,10 @@ type Config struct {
 	PersistState                 *bool            `json:"persist_state"`
 	StateFile                    string           `json:"state_file"`
 	InvalidTTLHours              int              `json:"invalid_ttl_hours"`
+	StatsEnabled                 *bool            `json:"stats_enabled"`
+	StatsDir                     string           `json:"stats_dir"`
+	StatsRetentionDays           int              `json:"stats_retention_days"`
+	StatsMaxRecentRecords        int              `json:"stats_max_recent_records"`
 }
 
 var (
@@ -345,6 +355,15 @@ func (c *Config) applyDefaults() {
 	if c.InvalidTTLHours <= 0 {
 		c.InvalidTTLHours = DefaultInvalidTTLHours
 	}
+	if c.StatsDir == "" {
+		c.StatsDir = DefaultStatsDir
+	}
+	if c.StatsRetentionDays <= 0 {
+		c.StatsRetentionDays = DefaultStatsRetentionDays
+	}
+	if c.StatsMaxRecentRecords <= 0 {
+		c.StatsMaxRecentRecords = DefaultStatsMaxRecentRecords
+	}
 	c.normalizeProviders()
 }
 
@@ -366,6 +385,11 @@ func (c *Config) StatePersistenceEnabled() bool {
 	return c.PersistState == nil || *c.PersistState
 }
 
+// StatsCollectionEnabled 返回调用统计是否启用；未配置时默认启用。
+func (c *Config) StatsCollectionEnabled() bool {
+	return c.StatsEnabled == nil || *c.StatsEnabled
+}
+
 // Clone 返回完整配置副本，避免调用方误改共享切片或指针字段。
 func (c *Config) Clone() *Config {
 	if c == nil {
@@ -383,6 +407,10 @@ func (c *Config) Clone() *Config {
 	if c.PersistState != nil {
 		enabled := *c.PersistState
 		out.PersistState = &enabled
+	}
+	if c.StatsEnabled != nil {
+		enabled := *c.StatsEnabled
+		out.StatsEnabled = &enabled
 	}
 	return &out
 }

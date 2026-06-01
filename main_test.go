@@ -159,3 +159,32 @@ func TestStateSaverWindowRestartsAfterFire(t *testing.T) {
 		t.Fatalf("second window did not fire; snapshots=%d, want > %d", snapshots.Load(), first)
 	}
 }
+
+func TestNewStatsStoreFromConfigDisabled(t *testing.T) {
+	disabled := false
+	store, err := newStatsStoreFromConfig(&config.Config{StatsEnabled: &disabled})
+	if err != nil {
+		t.Fatalf("newStatsStoreFromConfig() error = %v", err)
+	}
+	if store != nil {
+		t.Fatal("newStatsStoreFromConfig() returned store, want nil when disabled")
+	}
+}
+
+func TestNewStatsStoreFromConfigUsesConfig(t *testing.T) {
+	dir := t.TempDir()
+	store, err := newStatsStoreFromConfig(&config.Config{
+		StatsDir:              dir,
+		StatsRetentionDays:    30,
+		StatsMaxRecentRecords: 2,
+	})
+	if err != nil {
+		t.Fatalf("newStatsStoreFromConfig() error = %v", err)
+	}
+	if store == nil {
+		t.Fatal("newStatsStoreFromConfig() = nil, want store")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("stats dir not ready: %v", err)
+	}
+}

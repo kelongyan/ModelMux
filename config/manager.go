@@ -35,6 +35,10 @@ var (
 		"persist_state",
 		"state_file",
 		"invalid_ttl_hours",
+		"stats_enabled",
+		"stats_dir",
+		"stats_retention_days",
+		"stats_max_recent_records",
 	}
 )
 
@@ -171,6 +175,10 @@ func diffFields(before, after *Config) []string {
 	appendIfChanged("persist_state", before.StatePersistenceEnabled() == after.StatePersistenceEnabled())
 	appendIfChanged("state_file", before.StateFile == after.StateFile)
 	appendIfChanged("invalid_ttl_hours", before.InvalidTTLHours == after.InvalidTTLHours)
+	appendIfChanged("stats_enabled", before.StatsCollectionEnabled() == after.StatsCollectionEnabled())
+	appendIfChanged("stats_dir", before.StatsDir == after.StatsDir)
+	appendIfChanged("stats_retention_days", before.StatsRetentionDays == after.StatsRetentionDays)
+	appendIfChanged("stats_max_recent_records", before.StatsMaxRecentRecords == after.StatsMaxRecentRecords)
 	return changed
 }
 

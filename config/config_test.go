@@ -46,6 +46,18 @@ func TestApplyDefaultsUsesSafeLocalAdminAndBodyLimit(t *testing.T) {
 	if cfg.InvalidTTLHours != DefaultInvalidTTLHours {
 		t.Fatalf("InvalidTTLHours = %d, want %d", cfg.InvalidTTLHours, DefaultInvalidTTLHours)
 	}
+	if cfg.StatsDir != DefaultStatsDir {
+		t.Fatalf("StatsDir = %q, want %q", cfg.StatsDir, DefaultStatsDir)
+	}
+	if cfg.StatsRetentionDays != DefaultStatsRetentionDays {
+		t.Fatalf("StatsRetentionDays = %d, want %d", cfg.StatsRetentionDays, DefaultStatsRetentionDays)
+	}
+	if cfg.StatsMaxRecentRecords != DefaultStatsMaxRecentRecords {
+		t.Fatalf("StatsMaxRecentRecords = %d, want %d", cfg.StatsMaxRecentRecords, DefaultStatsMaxRecentRecords)
+	}
+	if !cfg.StatsCollectionEnabled() {
+		t.Fatal("StatsCollectionEnabled() = false, want true by default")
+	}
 	if cfg.ConnectTimeoutSeconds != DefaultConnectTimeoutSeconds {
 		t.Fatalf("ConnectTimeoutSeconds = %d, want %d", cfg.ConnectTimeoutSeconds, DefaultConnectTimeoutSeconds)
 	}
@@ -172,5 +184,14 @@ func TestStatePersistenceCanBeDisabled(t *testing.T) {
 
 	if cfg.StatePersistenceEnabled() {
 		t.Fatal("StatePersistenceEnabled() = true, want false")
+	}
+}
+
+func TestStatsCollectionCanBeDisabled(t *testing.T) {
+	disabled := false
+	cfg := &Config{StatsEnabled: &disabled}
+
+	if cfg.StatsCollectionEnabled() {
+		t.Fatal("StatsCollectionEnabled() = true, want false")
 	}
 }

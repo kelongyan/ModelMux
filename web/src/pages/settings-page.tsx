@@ -56,6 +56,10 @@ const fieldLabels: Record<string, string> = {
   persist_state: "状态持久化",
   state_file: "状态文件路径",
   invalid_ttl_hours: "失效 Key 保留时长",
+  stats_enabled: "调用统计",
+  stats_dir: "统计文件目录",
+  stats_retention_days: "统计保留天数",
+  stats_max_recent_records: "最近记录内存上限",
 };
 
 // SettingsPage 渲染运行配置编辑页，并明确区分热生效与需重启的设置项。
@@ -173,6 +177,10 @@ export function SettingsPage(): JSX.Element {
             <Divider />
 
             <SettingSection title="状态持久化" fields={settingGroups.stateFields} />
+
+            <Divider />
+
+            <SettingSection title="调用统计" fields={settingGroups.statsFields} />
           </Form>
         </Card>
       </Space>
@@ -286,7 +294,11 @@ function SettingSection({ title, fields }: SettingSectionProps): JSX.Element {
               name={field.name}
               tooltip={field.hint}
               rules={buildFieldRules(field.name)}
-              valuePropName={field.name === "log_compress" || field.name === "persist_state" ? "checked" : "value"}
+              valuePropName={
+                field.name === "log_compress" || field.name === "persist_state" || field.name === "stats_enabled"
+                  ? "checked"
+                  : "value"
+              }
             >
               {field.render()}
             </Form.Item>
@@ -297,12 +309,13 @@ function SettingSection({ title, fields }: SettingSectionProps): JSX.Element {
   );
 }
 
-// buildSettingGroups 把设置页字段拆成核心运行、高级重试、网络日志和状态持久化四组。
+// buildSettingGroups 把设置页字段拆成核心运行、高级重试、网络日志、状态和统计几组。
 function buildSettingGroups(response: AdminSettingsResponse): {
   coreFields: SettingFieldMeta[];
   advancedFields: SettingFieldMeta[];
   serverAndLogFields: SettingFieldMeta[];
   stateFields: SettingFieldMeta[];
+  statsFields: SettingFieldMeta[];
 } {
   const hotSet = new Set(response.hot_reload_fields);
   const restartSet = new Set(response.restart_required_fields);
@@ -514,6 +527,36 @@ function buildSettingGroups(response: AdminSettingsResponse): {
         render: () => <InputNumber min={1} step={1} className="full-width" />,
       },
     ],
+    statsFields: [
+      {
+        name: "stats_enabled",
+        label: "调用统计",
+        hint: "开启后会把调用明细写入本地 JSONL 文件；当前进程内切换需要重启后完全生效。",
+        effect: effectOf("stats_enabled"),
+        render: () => <Checkbox>启用调用统计</Checkbox>,
+      },
+      {
+        name: "stats_dir",
+        label: "统计文件目录",
+        hint: "按天保存调用明细，默认 stats_data，避免和源码目录混淆。",
+        effect: effectOf("stats_dir"),
+        render: () => <Input placeholder="stats_data" />,
+      },
+      {
+        name: "stats_retention_days",
+        label: "统计保留天数",
+        hint: "启动或跨天写入时会清理超过该天数的调用明细文件。",
+        effect: effectOf("stats_retention_days"),
+        render: () => <InputNumber min={1} step={1} className="full-width" />,
+      },
+      {
+        name: "stats_max_recent_records",
+        label: "最近记录内存上限",
+        hint: "限制启动时加载到内存、供管理台快速查询的最近调用记录数量。",
+        effect: effectOf("stats_max_recent_records"),
+        render: () => <InputNumber min={100} step={100} className="full-width" />,
+      },
+    ],
   };
 }
 
@@ -527,6 +570,7 @@ function buildFieldRules(field: keyof AdminSettingsPayload) {
     case "log_format":
     case "log_output":
     case "state_file":
+    case "stats_dir":
       return [{ required: true, message: requiredMessage }];
     case "log_file":
       return [];

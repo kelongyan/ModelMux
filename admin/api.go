@@ -39,6 +39,10 @@ type apiSettingsPayload struct {
 	PersistState                 bool   `json:"persist_state"`
 	StateFile                    string `json:"state_file"`
 	InvalidTTLHours              int    `json:"invalid_ttl_hours"`
+	StatsEnabled                 bool   `json:"stats_enabled"`
+	StatsDir                     string `json:"stats_dir"`
+	StatsRetentionDays           int    `json:"stats_retention_days"`
+	StatsMaxRecentRecords        int    `json:"stats_max_recent_records"`
 }
 
 type apiProviderSummary struct {
@@ -135,6 +139,9 @@ func (h *Handler) registerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/v1/events", h.eventsIndex)
 	mux.HandleFunc("/admin/api/v1/about", h.about)
 	mux.HandleFunc("/admin/api/v1/reload", h.apiReload)
+	mux.HandleFunc("/admin/api/v1/stats/summary", h.statsSummary)
+	mux.HandleFunc("/admin/api/v1/stats/models", h.statsModels)
+	mux.HandleFunc("/admin/api/v1/stats/recent", h.statsRecent)
 	mux.HandleFunc("/admin/api/v1/config/backup", h.backupConfig)
 	mux.HandleFunc("/admin/api/v1/state/backup", h.backupState)
 }
@@ -649,6 +656,10 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			PersistState:                 cfg.StatePersistenceEnabled(),
 			StateFile:                    cfg.StateFile,
 			InvalidTTLHours:              cfg.InvalidTTLHours,
+			StatsEnabled:                 cfg.StatsCollectionEnabled(),
+			StatsDir:                     cfg.StatsDir,
+			StatsRetentionDays:           cfg.StatsRetentionDays,
+			StatsMaxRecentRecords:        cfg.StatsMaxRecentRecords,
 		},
 		HotReloadFields:       append([]string(nil), config.HotReloadFields...),
 		RestartRequiredFields: append([]string(nil), config.RestartRequiredFields...),
@@ -702,6 +713,11 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.PersistState = &enabled
 		cfg.StateFile = req.StateFile
 		cfg.InvalidTTLHours = req.InvalidTTLHours
+		statsEnabled := req.StatsEnabled
+		cfg.StatsEnabled = &statsEnabled
+		cfg.StatsDir = req.StatsDir
+		cfg.StatsRetentionDays = req.StatsRetentionDays
+		cfg.StatsMaxRecentRecords = req.StatsMaxRecentRecords
 		return nil
 	})
 	if err != nil {
@@ -797,12 +813,16 @@ func (h *Handler) about(w http.ResponseWriter, r *http.Request) {
 			"热重载",
 			"状态持久化",
 			"事件缓冲区",
+			"调用统计",
 			"配置与状态导出",
 		},
 		ApiEndpoints: []string{
 			"GET /admin/api/v1/dashboard",
 			"GET /admin/api/v1/providers",
 			"GET /admin/api/v1/providers/{id}",
+			"GET /admin/api/v1/stats/summary",
+			"GET /admin/api/v1/stats/models",
+			"GET /admin/api/v1/stats/recent",
 			"GET /admin/api/v1/settings",
 			"GET /admin/api/v1/events",
 		},
