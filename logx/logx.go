@@ -31,6 +31,9 @@ const (
 	EventProviderTransient   = "retry.provider_transient"
 	EventNoAvailableKey      = "proxy.no_available_key"
 	EventProxyListening      = "lifecycle.proxy_listening"
+	EventProxyRequestCompleted = "proxy.request_completed"
+	EventProxyRequestFailed    = "proxy.request_failed"
+	EventProxyRequestStarted   = "proxy.request_started"
 	EventProxySuccess        = "proxy.success"
 	EventRequestStart        = "proxy.request_start"
 	EventRetryExhausted      = "retry.exhausted"
@@ -50,6 +53,63 @@ const (
 func Fields(category, event string, attrs ...any) []any {
 	fields := []any{"category", category, "event", event}
 	return append(fields, attrs...)
+}
+
+// Event is the shared diagnostic event shape used by persistent logs and the admin event feed.
+type Event struct {
+	Level           string         `json:"level"`
+	Category        string         `json:"category"`
+	Event           string         `json:"event"`
+	Message         string         `json:"message"`
+	RequestID       string         `json:"request_id,omitempty"`
+	ClientRequestID string         `json:"client_request_id,omitempty"`
+	ProviderID      string         `json:"provider_id,omitempty"`
+	KeyID           string         `json:"key_id,omitempty"`
+	KeyHint         string         `json:"key_hint,omitempty"`
+	Method          string         `json:"method,omitempty"`
+	Path            string         `json:"path,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	Stream          bool           `json:"stream,omitempty"`
+	Status          int            `json:"status,omitempty"`
+	LatencyMs       int64          `json:"latency_ms,omitempty"`
+	Attempts        int            `json:"attempts,omitempty"`
+	RetryScope      string         `json:"retry_scope,omitempty"`
+	Data            map[string]any `json:"data,omitempty"`
+}
+
+// Attrs returns slog attributes matching the same event shape exposed through the admin API.
+func (e Event) Attrs() []any {
+	fields := Fields(e.Category, e.Event)
+	appendString := func(name, value string) {
+		if value != "" {
+			fields = append(fields, name, value)
+		}
+	}
+	appendString("request_id", e.RequestID)
+	appendString("client_request_id", e.ClientRequestID)
+	appendString("provider_id", e.ProviderID)
+	appendString("key_id", e.KeyID)
+	appendString("key_hint", e.KeyHint)
+	appendString("method", e.Method)
+	appendString("path", e.Path)
+	appendString("model", e.Model)
+	if e.Stream {
+		fields = append(fields, "stream", e.Stream)
+	}
+	if e.Status != 0 {
+		fields = append(fields, "status", e.Status)
+	}
+	if e.LatencyMs != 0 {
+		fields = append(fields, "latency_ms", e.LatencyMs)
+	}
+	if e.Attempts != 0 {
+		fields = append(fields, "attempts", e.Attempts)
+	}
+	appendString("retry_scope", e.RetryScope)
+	if len(e.Data) > 0 {
+		fields = append(fields, "data", e.Data)
+	}
+	return fields
 }
 
 // MaskSecret 返回适合日志展示的密钥短标识，避免把完整 API Key 写入日志。

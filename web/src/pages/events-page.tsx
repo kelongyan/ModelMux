@@ -36,7 +36,16 @@ export function EventsPage(): JSX.Element {
         return true;
       }
       const query = keyword.trim().toLowerCase();
-      return [event.message, event.category, event.event, JSON.stringify(event.data ?? {})]
+      return [
+        event.message,
+        event.category,
+        event.event,
+        event.provider_id ?? "",
+        event.request_id ?? "",
+        event.model ?? "",
+        String(event.status ?? ""),
+        JSON.stringify(event.data ?? {}),
+      ]
         .join(" ")
         .toLowerCase()
         .includes(query);
@@ -49,7 +58,7 @@ export function EventsPage(): JSX.Element {
         title: "时间",
         dataIndex: "at",
         key: "at",
-        width: 170,
+        width: 168,
         render: (value: string) => <span className="events-table-time">{formatDateTime(value)}</span>,
       },
       {
@@ -60,16 +69,46 @@ export function EventsPage(): JSX.Element {
         render: (lv: string) => <Tag color={levelColor(lv)}>{lv}</Tag>,
       },
       {
+        title: "Provider",
+        dataIndex: "provider_id",
+        key: "provider_id",
+        width: 110,
+        render: (value: string | undefined) => value ?? "-",
+      },
+      {
+        title: "状态",
+        dataIndex: "status",
+        key: "status",
+        width: 90,
+        render: (value: number | undefined) => (value ? <Tag color={statusColor(value)}>{value}</Tag> : "-"),
+      },
+      {
+        title: "模型",
+        dataIndex: "model",
+        key: "model",
+        width: 160,
+        ellipsis: { showTitle: true },
+        render: (value: string | undefined) => value ?? "-",
+      },
+      {
         title: "分类",
         dataIndex: "category",
         key: "category",
-        width: 110,
+        width: 96,
       },
       {
         title: "事件",
         dataIndex: "event",
         key: "event",
-        width: 160,
+        width: 180,
+      },
+      {
+        title: "Request ID",
+        dataIndex: "request_id",
+        key: "request_id",
+        width: 220,
+        ellipsis: { showTitle: true },
+        render: (value: string | undefined) => value ?? "-",
       },
       {
         title: "消息",
@@ -149,17 +188,14 @@ export function EventsPage(): JSX.Element {
                 columns={columns}
                 dataSource={filteredEvents}
                 pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+                scroll={{ x: 1350 }}
                 size="small"
                 rowKey={(event) => `${event.seq}-${event.event}`}
                 rowClassName={(event) => `events-table-row events-table-row--${event.level}`}
                 expandable={{
                   expandedRowRender: (event) =>
-                    event.data ? (
-                      <pre className="events-table-payload">{JSON.stringify(event.data, null, 2)}</pre>
-                    ) : (
-                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无附加数据" />
-                    ),
-                  rowExpandable: (event) => Boolean(event.data),
+                    <pre className="events-table-payload">{JSON.stringify(buildExpandedPayload(event), null, 2)}</pre>,
+                  rowExpandable: () => true,
                 }}
               />
             )}
@@ -179,6 +215,35 @@ function levelColor(level: string): string {
     return "gold";
   }
   return "blue";
+}
+
+function statusColor(status: number): string {
+  if (status >= 500) {
+    return "red";
+  }
+  if (status >= 400) {
+    return "gold";
+  }
+  return "green";
+}
+
+function buildExpandedPayload(event: AdminEvent): Record<string, unknown> {
+  return {
+    request_id: event.request_id,
+    client_request_id: event.client_request_id,
+    provider_id: event.provider_id,
+    key_id: event.key_id,
+    key_hint: event.key_hint,
+    method: event.method,
+    path: event.path,
+    model: event.model,
+    stream: event.stream,
+    status: event.status,
+    latency_ms: event.latency_ms,
+    attempts: event.attempts,
+    retry_scope: event.retry_scope,
+    ...(event.data ?? {}),
+  };
 }
 
 // formatDateTime 把事件时间格式化为本地可读文本。

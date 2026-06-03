@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -1085,8 +1086,23 @@ func (h *Handler) listEvents(limit int) []AdminEvent {
 
 // recordEvent 统一记录结构化事件，供前端页面和日志排查共享。
 func (h *Handler) recordEvent(level, category, event, message string, data map[string]any) {
+	entry := logx.Event{
+		Level:    level,
+		Category: category,
+		Event:    event,
+		Message:  message,
+		Data:     data,
+	}
+	switch level {
+	case "warn":
+		slog.Warn(message, entry.Attrs()...)
+	case "error":
+		slog.Error(message, entry.Attrs()...)
+	default:
+		slog.Info(message, entry.Attrs()...)
+	}
 	if h.eventBuffer != nil {
-		h.eventBuffer.Add(level, category, event, message, data)
+		h.eventBuffer.AddEvent(entry)
 	}
 }
 

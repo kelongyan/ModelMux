@@ -338,7 +338,7 @@ function findRecentIssue(events: AdminEvent[], providerID: string): AdminEvent |
     if (event.level === "info") {
       continue;
     }
-    const eventProvider = (event.data?.provider_id as string | undefined) ?? "";
+    const eventProvider = event.provider_id ?? ((event.data?.provider_id as string | undefined) ?? "");
     if (eventProvider === providerID) {
       return event;
     }

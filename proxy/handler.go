@@ -29,23 +29,32 @@ var (
 	errRequestBodyTooLarge = errors.New("request body too large")
 	errKeyQuotaExhausted   = errors.New("key quota exhausted")
 	errRetryableUpstream   = errors.New("retryable upstream failure")
+	requestSeq             atomic.Uint64
 )
 
 const (
 	quotaErrorInspectBytes    int64 = 64 * 1024
 	responseUsageInspectBytes int64 = 256 * 1024
+	upstreamErrorExcerptBytes int   = 2048
 )
+
+var toolFieldNames = []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"}
 
 type Handler struct {
 	pools           *pool.ProviderPools
 	runtime         atomic.Value
 	stateChangeHook atomic.Value
 	statsRecorder   atomic.Value
+	eventRecorder   atomic.Value
 }
 
 type stateChangeHook func(immediate bool)
 type statsRecorder interface {
 	Append(stats.CallRecord) error
+}
+
+type eventRecorder interface {
+	AddEvent(logx.Event)
 }
 
 type runtimeConfig struct {
@@ -54,6 +63,7 @@ type runtimeConfig struct {
 	keyPool                 *pool.Pool
 	client                  *http.Client
 	transport               *http.Transport
+	stripTools              bool
 	coolingSeconds          int
 	maxRetries              int
 	maxTransientRetries     int
@@ -109,11 +119,37 @@ func (h *Handler) SetStatsRecorder(recorder statsRecorder) {
 	h.statsRecorder.Store(recorder)
 }
 
+// SetEventRecorder sets the shared diagnostic event sink used by the admin event feed.
+func (h *Handler) SetEventRecorder(recorder eventRecorder) {
+	if recorder == nil {
+		recorder = noopEventRecorder{}
+	}
+	h.eventRecorder.Store(recorder)
+}
+
 // notifyStateChanged 通知外部保存 key 池状态；immediate 表示需要尽快落盘。
 func (h *Handler) notifyStateChanged(immediate bool) {
 	hook, _ := h.stateChangeHook.Load().(stateChangeHook)
 	if hook != nil {
 		hook(immediate)
+	}
+}
+
+func (h *Handler) emitEvent(ctx context.Context, event logx.Event) {
+	switch event.Level {
+	case "debug":
+		slog.DebugContext(ctx, event.Message, event.Attrs()...)
+	case "warn":
+		slog.WarnContext(ctx, event.Message, event.Attrs()...)
+	case "error":
+		slog.ErrorContext(ctx, event.Message, event.Attrs()...)
+	default:
+		slog.InfoContext(ctx, event.Message, event.Attrs()...)
+	}
+
+	recorder, _ := h.eventRecorder.Load().(eventRecorder)
+	if recorder != nil {
+		recorder.AddEvent(event)
 	}
 }
 
@@ -206,6 +242,7 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 		keyPool:                 keyPool,
 		client:                  client,
 		transport:               transport,
+		stripTools:              provider.StripTools,
 		coolingSeconds:          effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
 		maxRetries:              effectiveInt(cfg.MaxRetries, config.DefaultMaxRetries),
 		maxTransientRetries:     effectiveInt(cfg.MaxTransientRetries, config.DefaultMaxTransientRetries),
@@ -246,9 +283,20 @@ func effectiveInt64(value, fallback int64) int64 {
 // ServeHTTP 读取请求体后执行带 key 轮换的上游转发。
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	requestID := nextRequestID(start)
+	clientRequestID := sanitizeClientRequestID(r.Header.Get("X-Request-ID"))
 	rt := h.snapshot()
 	if rt == nil {
-		slog.Error("proxy runtime config is not ready", logx.Fields(logx.CategoryProxy, logx.EventRuntimeNotReady)...)
+		h.emitEvent(r.Context(), logx.Event{
+			Level:           "error",
+			Category:        logx.CategoryProxy,
+			Event:           logx.EventRuntimeNotReady,
+			Message:         "proxy runtime config is not ready",
+			RequestID:       requestID,
+			ClientRequestID: clientRequestID,
+			Method:          r.Method,
+			Path:            r.URL.Path,
+		})
 		writeProxyError(w, http.StatusServiceUnavailable, "proxy runtime config is not ready")
 		return
 	}
@@ -276,11 +324,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	requestModel := extractRequestModel(body)
+	requestStream := extractRequestStream(body)
+	toolsPresent := extractToolFieldsPresent(body)
+	toolsStripped := rt.stripTools && toolsPresent
+
 	callRecord := stats.CallRecord{
 		At:          start.UTC(),
 		ProviderID:  rt.providerID,
-		Model:       extractRequestModel(body),
-		Stream:      extractRequestStream(body),
+		Model:       requestModel,
+		Stream:      requestStream,
 		Endpoint:    r.URL.Path,
 		Method:      r.Method,
 		UsageSource: stats.UsageSourceUnknown,
@@ -316,11 +369,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)...)
 			callRecord.Status = http.StatusServiceUnavailable
 			callRecord.Error = "no available API keys"
+			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+				level:           "error",
+				event:           logx.EventProxyRequestFailed,
+				message:         "no available API keys",
+				requestID:       requestID,
+				clientRequestID: clientRequestID,
+				request:         r,
+				runtime:         rt,
+				model:           requestModel,
+				stream:          requestStream,
+				status:          http.StatusServiceUnavailable,
+				latencyMs:       time.Since(start).Milliseconds(),
+				attempts:        attempt,
+				retryScope:      retryScopeNone,
+				toolsPresent:    toolsPresent,
+				toolsStripped:   toolsStripped,
+			}))
 			writeProxyError(w, http.StatusServiceUnavailable, "no available API keys")
 			return
 		}
 
-		status, retryAfter, scope, usage, err := h.forward(w, r, rt, key, body)
+		status, retryAfter, scope, usage, upstreamErrorExcerpt, err := h.forward(w, r, rt, key, body)
 		key.FinishRequest()
 		callRecord.Attempts = attempt + 1
 		callRecord.Status = status
@@ -331,14 +401,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !callRecord.Success {
 				callRecord.Error = http.StatusText(status)
 			}
-			slog.Info("proxied", logx.Fields(logx.CategoryProxy, logx.EventProxySuccess,
-				"path", r.URL.Path,
-				"status", status,
-				"attempt", attempt+1,
-				"provider_id", rt.providerID,
-				"key_id", logx.MaskSecret(key.Value),
-				"latency_ms", time.Since(start).Milliseconds(),
-			)...)
+			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+				level:                levelForStatus(status),
+				event:                eventForStatus(status),
+				message:              messageForStatus(status),
+				requestID:            requestID,
+				clientRequestID:      clientRequestID,
+				request:              r,
+				runtime:              rt,
+				key:                  key,
+				model:                requestModel,
+				stream:               requestStream,
+				status:               status,
+				attempts:             attempt + 1,
+				latencyMs:            time.Since(start).Milliseconds(),
+				retryScope:           retryScopeNone,
+				toolsPresent:         toolsPresent,
+				toolsStripped:        toolsStripped,
+				upstreamErrorExcerpt: upstreamErrorExcerpt,
+			}))
 			h.notifyStateChanged(false)
 			return
 		}
@@ -354,6 +435,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errStreamFailed) {
 			callRecord.Error = "stream failed"
+			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+				level:           "warn",
+				event:           logx.EventProxyRequestFailed,
+				message:         "stream failed",
+				requestID:       requestID,
+				clientRequestID: clientRequestID,
+				request:         r,
+				runtime:         rt,
+				key:             key,
+				model:           requestModel,
+				stream:          requestStream,
+				status:          status,
+				latencyMs:       time.Since(start).Milliseconds(),
+				attempts:        attempt + 1,
+				retryScope:      retryScopeNone,
+				toolsPresent:    toolsPresent,
+				toolsStripped:   toolsStripped,
+			}))
 			return
 		}
 
@@ -410,6 +509,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"err", err,
 				)...)
 				callRecord.Error = err.Error()
+				h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+					level:                levelForStatus(status),
+					event:                logx.EventProxyRequestFailed,
+					message:              messageForStatus(status),
+					requestID:            requestID,
+					clientRequestID:      clientRequestID,
+					request:              r,
+					runtime:              rt,
+					key:                  key,
+					model:                requestModel,
+					stream:               requestStream,
+					status:               status,
+					latencyMs:            time.Since(start).Milliseconds(),
+					attempts:             attempt + 1,
+					retryScope:           scope,
+					toolsPresent:         toolsPresent,
+					toolsStripped:        toolsStripped,
+					upstreamErrorExcerpt: upstreamErrorExcerpt,
+				}))
 				return
 			}
 		case retryScopeConnection:
@@ -453,6 +571,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"err", err,
 			)...)
 			callRecord.Error = err.Error()
+			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+				level:                levelForStatus(status),
+				event:                logx.EventProxyRequestFailed,
+				message:              messageForStatus(status),
+				requestID:            requestID,
+				clientRequestID:      clientRequestID,
+				request:              r,
+				runtime:              rt,
+				key:                  key,
+				model:                requestModel,
+				stream:               requestStream,
+				status:               status,
+				latencyMs:            time.Since(start).Milliseconds(),
+				attempts:             attempt + 1,
+				retryScope:           scope,
+				toolsPresent:         toolsPresent,
+				toolsStripped:        toolsStripped,
+				upstreamErrorExcerpt: upstreamErrorExcerpt,
+			}))
 			return
 		}
 		if stopRetrying {
@@ -469,11 +606,45 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if lastScope == retryScopeProvider || lastScope == retryScopeConnection {
 		callRecord.Status = http.StatusServiceUnavailable
 		callRecord.Error = "upstream temporarily unavailable after retries"
+		h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+			level:           "error",
+			event:           logx.EventProxyRequestFailed,
+			message:         "upstream temporarily unavailable after retries",
+			requestID:       requestID,
+			clientRequestID: clientRequestID,
+			request:         r,
+			runtime:         rt,
+			model:           requestModel,
+			stream:          requestStream,
+			status:          http.StatusServiceUnavailable,
+			latencyMs:       time.Since(start).Milliseconds(),
+			attempts:        callRecord.Attempts,
+			retryScope:      lastScope,
+			toolsPresent:    toolsPresent,
+			toolsStripped:   toolsStripped,
+		}))
 		writeProxyError(w, http.StatusServiceUnavailable, "upstream temporarily unavailable after retries")
 		return
 	}
 	callRecord.Status = http.StatusServiceUnavailable
 	callRecord.Error = "all keys exhausted after retries"
+	h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+		level:           "error",
+		event:           logx.EventProxyRequestFailed,
+		message:         "all keys exhausted after retries",
+		requestID:       requestID,
+		clientRequestID: clientRequestID,
+		request:         r,
+		runtime:         rt,
+		model:           requestModel,
+		stream:          requestStream,
+		status:          http.StatusServiceUnavailable,
+		latencyMs:       time.Since(start).Milliseconds(),
+		attempts:        callRecord.Attempts,
+		retryScope:      lastScope,
+		toolsPresent:    toolsPresent,
+		toolsStripped:   toolsStripped,
+	}))
 	writeProxyError(w, http.StatusServiceUnavailable, "all keys exhausted after retries")
 }
 
@@ -501,19 +672,19 @@ func (h *Handler) waitForCoolingKey(ctx context.Context, rt *runtimeConfig, budg
 
 // forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
 // 成功时返回状态码和 nil；429、401 和余额不足类 403 返回可重试错误；其他错误会在本函数内写出响应。
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, retryScope, stats.Usage, error) {
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, retryScope, stats.Usage, string, error) {
 	unknownUsage := stats.Usage{Source: stats.UsageSourceUnknown}
 	outReq, err := buildRequest(rt, r, key, body)
 	if err != nil {
 		writeProxyError(w, http.StatusInternalServerError, "failed to build request")
-		return http.StatusInternalServerError, 0, retryScopeNone, unknownUsage, err
+		return http.StatusInternalServerError, 0, retryScopeNone, unknownUsage, "", err
 	}
 
 	upstreamStart := time.Now()
 	resp, err := rt.client.Do(outReq)
 	if err != nil {
 		if errors.Is(r.Context().Err(), context.Canceled) {
-			return 0, 0, retryScopeNone, unknownUsage, errClientCanceled
+			return 0, 0, retryScopeNone, unknownUsage, "", errClientCanceled
 		}
 		scope := classifyTransportRetryScope(err)
 		slog.Error("upstream unreachable", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnreachable,
@@ -523,21 +694,21 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 			"scope", scope.String(),
 			"err", err,
 		)...)
-		return http.StatusBadGateway, 0, scope, unknownUsage, fmt.Errorf("%w: %v", errRetryableUpstream, err)
+		return http.StatusBadGateway, 0, scope, unknownUsage, "", fmt.Errorf("%w: %v", errRetryableUpstream, err)
 	}
 	defer resp.Body.Close()
 
 	// 429/401 需要换 key 重试，因此不能提前向客户端写响应头。
 	if resp.StatusCode == http.StatusTooManyRequests {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		return resp.StatusCode, retryAfter, retryScopeKey, unknownUsage, fmt.Errorf("upstream returned %d", resp.StatusCode)
+		return resp.StatusCode, retryAfter, retryScopeKey, unknownUsage, "", fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return resp.StatusCode, 0, retryScopeKey, unknownUsage, fmt.Errorf("upstream returned %d", resp.StatusCode)
+		return resp.StatusCode, 0, retryScopeKey, unknownUsage, "", fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 	if isRetryableUpstreamStatus(resp.StatusCode) {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-		return resp.StatusCode, retryAfter, retryScopeProvider, unknownUsage, fmt.Errorf("%w: upstream returned %d", errRetryableUpstream, resp.StatusCode)
+		return resp.StatusCode, retryAfter, retryScopeProvider, unknownUsage, "", fmt.Errorf("%w: upstream returned %d", errRetryableUpstream, resp.StatusCode)
 	}
 
 	responseBody := io.Reader(resp.Body)
@@ -545,10 +716,10 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		prefix, replayBody, err := readResponsePrefix(resp.Body, quotaErrorInspectBytes)
 		if err != nil {
 			writeProxyError(w, http.StatusBadGateway, "failed to read upstream error body")
-			return http.StatusBadGateway, 0, retryScopeNone, unknownUsage, err
+			return http.StatusBadGateway, 0, retryScopeNone, unknownUsage, "", err
 		}
 		if isQuotaExhaustedBody(prefix) {
-			return resp.StatusCode, 0, retryScopeKey, unknownUsage, fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
+			return resp.StatusCode, 0, retryScopeKey, unknownUsage, errorExcerpt(prefix), fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
 		}
 		responseBody = replayBody
 	}
@@ -566,9 +737,10 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 			"key_id", logx.MaskSecret(key.Value),
 			"err", err,
 		)...)
-		return resp.StatusCode, 0, retryScopeNone, unknownUsage, fmt.Errorf("%w: %v", errStreamFailed, err)
+		return resp.StatusCode, 0, retryScopeNone, unknownUsage, "", fmt.Errorf("%w: %v", errStreamFailed, err)
 	}
-	return resp.StatusCode, 0, retryScopeNone, stats.ExtractUsage(capturedBody.Bytes()), nil
+	captured := capturedBody.Bytes()
+	return resp.StatusCode, 0, retryScopeNone, stats.ExtractUsage(captured), errorExcerptForStatus(resp.StatusCode, captured), nil
 }
 
 // readResponsePrefix 读取响应体前缀用于错误分类，并返回可重放完整响应体的 reader。
@@ -593,6 +765,10 @@ type noopStatsRecorder struct{}
 func (noopStatsRecorder) Append(stats.CallRecord) error {
 	return nil
 }
+
+type noopEventRecorder struct{}
+
+func (noopEventRecorder) AddEvent(logx.Event) {}
 
 func applyUsageToRecord(record *stats.CallRecord, usage stats.Usage) {
 	if record == nil {
@@ -632,6 +808,22 @@ func extractRequestStream(body []byte) bool {
 	return payload.Stream
 }
 
+func extractToolFieldsPresent(body []byte) bool {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return false
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	for _, field := range toolFieldNames {
+		if _, ok := payload[field]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 type captureReader struct {
 	reader   io.Reader
 	limit    int64
@@ -662,6 +854,145 @@ func (r *captureReader) Read(p []byte) (int, error) {
 
 func (r *captureReader) Bytes() []byte {
 	return r.buffer.Bytes()
+}
+
+type requestDiagnosticInput struct {
+	level                string
+	event                string
+	message              string
+	requestID            string
+	clientRequestID      string
+	request              *http.Request
+	runtime              *runtimeConfig
+	key                  *pool.Key
+	model                string
+	stream               bool
+	status               int
+	latencyMs            int64
+	attempts             int
+	retryScope           retryScope
+	toolsPresent         bool
+	toolsStripped        bool
+	upstreamErrorExcerpt string
+}
+
+func requestDiagnosticEvent(input requestDiagnosticInput) logx.Event {
+	data := map[string]any{
+		"tools_present":  input.toolsPresent,
+		"tools_stripped": input.toolsStripped,
+	}
+	if input.upstreamErrorExcerpt != "" {
+		data["upstream_error_excerpt"] = input.upstreamErrorExcerpt
+	}
+
+	event := logx.Event{
+		Level:           input.level,
+		Category:        logx.CategoryProxy,
+		Event:           input.event,
+		Message:         input.message,
+		RequestID:       input.requestID,
+		ClientRequestID: input.clientRequestID,
+		Model:           input.model,
+		Stream:          input.stream,
+		Status:          input.status,
+		LatencyMs:       input.latencyMs,
+		Attempts:        input.attempts,
+		RetryScope:      input.retryScope.String(),
+		Data:            data,
+	}
+	if input.request != nil {
+		event.Method = input.request.Method
+		event.Path = input.request.URL.Path
+	}
+	if input.runtime != nil {
+		event.ProviderID = input.runtime.providerID
+	}
+	if input.key != nil {
+		event.KeyID = state.KeyID(input.key.Value)
+		event.KeyHint = logx.MaskSecret(input.key.Value)
+	}
+	return event
+}
+
+func nextRequestID(at time.Time) string {
+	return fmt.Sprintf("req_%d_%06d", at.UnixNano(), requestSeq.Add(1))
+}
+
+func sanitizeClientRequestID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > 128 {
+		return value[:128]
+	}
+	return value
+}
+
+func levelForStatus(status int) string {
+	switch {
+	case status >= http.StatusInternalServerError:
+		return "error"
+	case status >= http.StatusBadRequest:
+		return "warn"
+	default:
+		return "info"
+	}
+}
+
+func eventForStatus(status int) string {
+	if status >= http.StatusBadRequest {
+		return logx.EventProxyRequestFailed
+	}
+	return logx.EventProxyRequestCompleted
+}
+
+func messageForStatus(status int) string {
+	if status >= http.StatusBadRequest {
+		return "upstream rejected request"
+	}
+	return "request completed"
+}
+
+func errorExcerptForStatus(status int, body []byte) string {
+	if status < http.StatusBadRequest {
+		return ""
+	}
+	return errorExcerpt(body)
+}
+
+func errorExcerpt(body []byte) string {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return ""
+	}
+	if len(body) > upstreamErrorExcerptBytes {
+		body = body[:upstreamErrorExcerptBytes]
+	}
+
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(body, &root); err == nil {
+		if rawError, ok := root["error"]; ok {
+			var errObj map[string]json.RawMessage
+			if json.Unmarshal(rawError, &errObj) == nil {
+				if rawMsg, ok := errObj["message"]; ok {
+					var msg string
+					if json.Unmarshal(rawMsg, &msg) == nil {
+						return strings.TrimSpace(msg)
+					}
+				}
+			}
+			var errText string
+			if json.Unmarshal(rawError, &errText) == nil {
+				return strings.TrimSpace(errText)
+			}
+		}
+		if rawMsg, ok := root["message"]; ok {
+			var msg string
+			if json.Unmarshal(rawMsg, &msg) == nil {
+				return strings.TrimSpace(msg)
+			}
+		}
+	}
+
+	return strings.TrimSpace(string(body))
 }
 
 // quotaExhaustedIndicators 覆盖常见中英文余额、额度和信用不足错误文案。
@@ -708,7 +1039,12 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	outURL.Path = singleJoiningSlash(rt.targetURL.Path, r.URL.Path)
 	outURL.RawQuery = r.URL.RawQuery
 
-	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(body))
+	outBody := body
+	if rt.stripTools {
+		outBody = stripToolFields(body)
+	}
+
+	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(outBody))
 	if err != nil {
 		return nil, err
 	}
@@ -721,6 +1057,35 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	outReq.Host = rt.targetURL.Host
 
 	return outReq, nil
+}
+
+// stripToolFields removes OpenAI tool-calling fields for providers that reject them.
+func stripToolFields(body []byte) []byte {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return body
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+
+	changed := false
+	for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"} {
+		if _, ok := payload[field]; ok {
+			delete(payload, field)
+			changed = true
+		}
+	}
+	if !changed {
+		return body
+	}
+
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 // readRequestBody 在支持重试的前提下读取请求体，并限制最大内存占用。

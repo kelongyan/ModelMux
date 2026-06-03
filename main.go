@@ -128,6 +128,7 @@ func main() {
 	if statsStore != nil {
 		proxyHandler.SetStatsRecorder(statsStore)
 	}
+	proxyHandler.SetEventRecorder(eventBuffer)
 
 	// 代理服务允许长时间流式输出，因此只设置读头和空闲超时，不设置固定写超时。
 	proxyMux := http.NewServeMux()

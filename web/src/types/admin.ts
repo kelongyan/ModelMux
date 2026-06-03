@@ -6,6 +6,19 @@ export type AdminEvent = {
   category: string;
   event: string;
   message: string;
+  request_id?: string;
+  client_request_id?: string;
+  provider_id?: string;
+  key_id?: string;
+  key_hint?: string;
+  method?: string;
+  path?: string;
+  model?: string;
+  stream?: boolean;
+  status?: number;
+  latency_ms?: number;
+  attempts?: number;
+  retry_scope?: string;
   data?: Record<string, unknown>;
 };
 

@@ -41,7 +41,7 @@ The Go binary `embed`s `web/dist`, so a fresh checkout requires `npm run build` 
 Two HTTP servers run in the same process from `main.go`:
 
 - **Proxy server** (default `127.0.0.1:18080`) — forwards client requests upstream. Long timeouts on read-header / idle only; no fixed write timeout, because SSE streams can run for minutes.
-- **Admin server** (default `127.0.0.1:18081`) — legacy endpoints (`/admin/health`, `/admin/status`, `/admin/reload`) plus the v1 REST API under `/admin/api/v1/*` (`dashboard`, `providers`, `settings`, `events`, `about`, `reload`, `config/backup`, `state/backup`) and the embedded SPA at `/console/`. Conservative timeouts; bound to loopback by default.
+- **Admin server** (default `127.0.0.1:18081`) — legacy endpoints (`/admin/health`, `/admin/status`, `/admin/reload`) plus the v1 REST API under `/admin/api/v1/*` (`dashboard`, `providers`, `settings`, `events`, `about`, `reload`, `config/backup`, `state/backup`, `stats/summary`, `stats/models`, `stats/recent`) and the embedded SPA at `/console/`. Conservative timeouts; bound to loopback by default.
 
 Request lifecycle (proxy side, in `proxy/handler.go`):
 
@@ -69,11 +69,12 @@ Classification lives in `classifyTransportRetryScope` (transport errors) and `is
 ### Package layout
 
 ```
-admin/   REST API + embedded SPA mounting (handler.go, api.go, console.go, events.go)
+admin/   REST API + embedded SPA mounting (handler.go, api.go, console.go, events.go, stats_api.go)
 config/  JSON load + validation + defaults + fsnotify file watcher (config.go, manager.go, watcher.go, writer.go)
 pool/    ProviderPools registry → per-provider Pool → []*Key with round-robin cursor (key.go, pool.go, providers.go)
 proxy/   Reverse proxy handler with atomic runtimeConfig and retry/stream logic (handler.go)
 state/   Key-pool persistence; only stores SHA-256 hashes of keys, never raw values (state.go)
+stats/   Per-call JSONL log store + aggregation queries (store.go, query.go, usage.go); files rotate daily as calls-YYYY-MM-DD.jsonl
 logx/    slog category/event field helpers + secret masking (logx.go)
 web/     React 18 + Vite + Antd + react-query + react-router admin console; embed.go bundles dist/
 ```
@@ -99,6 +100,8 @@ Restart-required: `listen`, `admin_listen`, all `log_*` fields.
 - Legacy single-provider shape (`target_url` + `keys` at top level) is still accepted and silently mapped to a provider with id `default` (`config.DefaultProviderID`).
 - `persist_state` is `*bool` — `nil` defaults to enabled. Use `cfg.StatePersistenceEnabled()`, not `cfg.PersistState != nil && *cfg.PersistState`.
 - `invalid_ttl_hours` (default 24): on startup, persisted `invalid` keys older than this TTL are restored to `active`. This is the only automatic recovery path for invalid keys — within a running process, invalid is sticky until the key list is updated.
+- `stats_enabled` is `*bool` — `nil` defaults to enabled. Use `cfg.StatsCollectionEnabled()`, not direct pointer dereference.
+- `stats_dir` (default `stats_data`), `stats_retention_days` (default 30), `stats_max_recent_records` (default 10000) control the call-statistics store. The stats dir is separate from `logs/` and stores daily JSONL files — don't commit it.
 
 ## Key design decisions worth respecting
 
@@ -111,4 +114,4 @@ Restart-required: `listen`, `admin_listen`, all `log_*` fields.
 
 ## Files to never commit
 
-`config.json`, `state.json`, anything in `logs/`, and the build artifact `modelmux.exe` (already in `.gitignore`, but worth re-checking on new files that might leak keys).
+`config.json`, `state.json`, anything in `logs/`, the `stats_data/` directory, and the build artifact `modelmux.exe` (already in `.gitignore`, but worth re-checking on new files that might leak keys).

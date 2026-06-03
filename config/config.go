@@ -55,9 +55,10 @@ const (
 )
 
 type ProviderConfig struct {
-	ID        string   `json:"id"`
-	TargetURL string   `json:"target_url"`
-	Keys      []string `json:"keys"`
+	ID         string   `json:"id"`
+	TargetURL  string   `json:"target_url"`
+	Keys       []string `json:"keys"`
+	StripTools bool     `json:"strip_tools,omitempty"`
 }
 
 type Config struct {

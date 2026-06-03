@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kelongyan/ModelMux/config"
+	"github.com/kelongyan/ModelMux/logx"
 	"github.com/kelongyan/ModelMux/pool"
 	"github.com/kelongyan/ModelMux/state"
 	"github.com/kelongyan/ModelMux/stats"
@@ -108,6 +109,101 @@ func TestBuildRequestDoesNotDuplicateTargetPathPrefix(t *testing.T) {
 	}
 	if got := outReq.URL.String(); got != "https://example.com/v1/messages?foo=bar" {
 		t.Fatalf("URL = %q", got)
+	}
+}
+
+func TestBuildRequestStripsToolFieldsWhenProviderRequiresIt(t *testing.T) {
+	cfg := &config.Config{
+		ActiveProvider: "thank",
+		Providers: []config.ProviderConfig{
+			{
+				ID:         "thank",
+				TargetURL:  "https://example.com/v1",
+				Keys:       []string{"rotated-key"},
+				StripTools: true,
+			},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+
+	h, pools := mustHandler(t, cfg)
+	p, err := pools.Get(cfg.ActiveProvider)
+	if err != nil {
+		t.Fatalf("Get(%q) error = %v", cfg.ActiveProvider, err)
+	}
+	key, err := p.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"ping"}],"stream":true,"tools":[{"type":"function"}],"tool_choice":"auto","parallel_tool_calls":true}`)
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
+	outReq, err := h.buildRequest(req, key, body)
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+	outBody, err := io.ReadAll(outReq.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(outBody, &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls"} {
+		if _, ok := payload[field]; ok {
+			t.Fatalf("payload still contains %q: %s", field, string(outBody))
+		}
+	}
+	if payload["model"] != "claude-sonnet-4-6" {
+		t.Fatalf("model = %v, want claude-sonnet-4-6", payload["model"])
+	}
+	if _, ok := payload["messages"]; !ok {
+		t.Fatalf("payload missing messages: %s", string(outBody))
+	}
+}
+
+func TestBuildRequestKeepsToolFieldsByDefault(t *testing.T) {
+	cfg := &config.Config{
+		ActiveProvider: "default",
+		Providers: []config.ProviderConfig{
+			{
+				ID:        "default",
+				TargetURL: "https://example.com/v1",
+				Keys:      []string{"rotated-key"},
+			},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+
+	h, pools := mustHandler(t, cfg)
+	p, err := pools.Get(cfg.ActiveProvider)
+	if err != nil {
+		t.Fatalf("Get(%q) error = %v", cfg.ActiveProvider, err)
+	}
+	key, err := p.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+
+	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"ping"}],"tools":[{"type":"function"}],"tool_choice":"auto","parallel_tool_calls":true}`)
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
+	outReq, err := h.buildRequest(req, key, body)
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+	outBody, err := io.ReadAll(outReq.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	if string(outBody) != string(body) {
+		t.Fatalf("body changed by default:\ngot  %s\nwant %s", string(outBody), string(body))
 	}
 }
 
@@ -374,6 +470,132 @@ func TestServeHTTPRecordsOneCallAcrossRetries(t *testing.T) {
 	}
 }
 
+func TestServeHTTPRecordsDiagnosticEventForStrippedTools(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("ReadAll() error = %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if strings.Contains(string(body), `"tools"`) {
+			t.Errorf("upstream body still contains tools: %s", string(body))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "thank",
+		Providers: []config.ProviderConfig{
+			{ID: "thank", TargetURL: upstream.URL, Keys: []string{"k1"}, StripTools: true},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	events := &recordingEventSink{}
+	h.SetEventRecorder(events)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"claude-sonnet-4-6","messages":[],"stream":true,"tools":[{"type":"function"}],"tool_choice":"auto"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	event := events.Last()
+	if event.Event != logx.EventProxyRequestCompleted {
+		t.Fatalf("event = %q, want %q", event.Event, logx.EventProxyRequestCompleted)
+	}
+	if event.RequestID == "" {
+		t.Fatal("RequestID is empty")
+	}
+	if event.ProviderID != "thank" {
+		t.Fatalf("ProviderID = %q, want thank", event.ProviderID)
+	}
+	if event.KeyID != state.KeyID("k1") {
+		t.Fatalf("KeyID = %q, want %q", event.KeyID, state.KeyID("k1"))
+	}
+	if event.KeyHint != logx.MaskSecret("k1") {
+		t.Fatalf("KeyHint = %q, want %q", event.KeyHint, logx.MaskSecret("k1"))
+	}
+	if event.Model != "claude-sonnet-4-6" || !event.Stream {
+		t.Fatalf("model/stream = %q/%v, want claude-sonnet-4-6/true", event.Model, event.Stream)
+	}
+	if event.Status != http.StatusOK || event.Attempts != 1 {
+		t.Fatalf("status/attempts = %d/%d, want 200/1", event.Status, event.Attempts)
+	}
+	if got, ok := event.Data["tools_present"].(bool); !ok || !got {
+		t.Fatalf("tools_present = %v, want true", event.Data["tools_present"])
+	}
+	if got, ok := event.Data["tools_stripped"].(bool); !ok || !got {
+		t.Fatalf("tools_stripped = %v, want true", event.Data["tools_stripped"])
+	}
+}
+
+func TestServeHTTPRecordsDiagnosticEventForUpstreamBadRequest(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"tools are not supported by this provider"}}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{
+			{ID: "primary", TargetURL: upstream.URL, Keys: []string{"k1"}},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	events := &recordingEventSink{}
+	h.SetEventRecorder(events)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"bad-model","messages":[],"tools":[{"type":"function"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+	event := events.Last()
+	if event.Level != "warn" {
+		t.Fatalf("Level = %q, want warn", event.Level)
+	}
+	if event.Event != logx.EventProxyRequestFailed {
+		t.Fatalf("event = %q, want %q", event.Event, logx.EventProxyRequestFailed)
+	}
+	if event.Status != http.StatusBadRequest {
+		t.Fatalf("Status = %d, want 400", event.Status)
+	}
+	if event.RequestID == "" {
+		t.Fatal("RequestID is empty")
+	}
+	if event.RetryScope != retryScopeNone.String() {
+		t.Fatalf("RetryScope = %q, want %q", event.RetryScope, retryScopeNone.String())
+	}
+	excerpt, _ := event.Data["upstream_error_excerpt"].(string)
+	if !strings.Contains(excerpt, "tools are not supported") {
+		t.Fatalf("upstream_error_excerpt = %q, want provider error text", excerpt)
+	}
+	if got, ok := event.Data["tools_present"].(bool); !ok || !got {
+		t.Fatalf("tools_present = %v, want true", event.Data["tools_present"])
+	}
+	if got, ok := event.Data["tools_stripped"].(bool); !ok || got {
+		t.Fatalf("tools_stripped = %v, want false", event.Data["tools_stripped"])
+	}
+}
+
 type recordingStatsSink struct {
 	mu      sync.Mutex
 	records []stats.CallRecord
@@ -390,6 +612,26 @@ func (s *recordingStatsSink) Records() []stats.CallRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]stats.CallRecord(nil), s.records...)
+}
+
+type recordingEventSink struct {
+	mu     sync.Mutex
+	events []logx.Event
+}
+
+func (s *recordingEventSink) AddEvent(event logx.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+}
+
+func (s *recordingEventSink) Last() logx.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.events) == 0 {
+		return logx.Event{}
+	}
+	return s.events[len(s.events)-1]
 }
 
 func TestServeHTTPRetriesTransportErrorWithNextKey(t *testing.T) {

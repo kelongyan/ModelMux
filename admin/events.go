@@ -4,17 +4,32 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kelongyan/ModelMux/logx"
 )
 
 // AdminEvent 表示管理台最近发生的一条可视化事件。
 type AdminEvent struct {
-	Seq      int64          `json:"seq"`
-	At       time.Time      `json:"at"`
-	Level    string         `json:"level"`
-	Category string         `json:"category"`
-	Event    string         `json:"event"`
-	Message  string         `json:"message"`
-	Data     map[string]any `json:"data,omitempty"`
+	Seq             int64          `json:"seq"`
+	At              time.Time      `json:"at"`
+	Level           string         `json:"level"`
+	Category        string         `json:"category"`
+	Event           string         `json:"event"`
+	Message         string         `json:"message"`
+	RequestID       string         `json:"request_id,omitempty"`
+	ClientRequestID string         `json:"client_request_id,omitempty"`
+	ProviderID      string         `json:"provider_id,omitempty"`
+	KeyID           string         `json:"key_id,omitempty"`
+	KeyHint         string         `json:"key_hint,omitempty"`
+	Method          string         `json:"method,omitempty"`
+	Path            string         `json:"path,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	Stream          bool           `json:"stream,omitempty"`
+	Status          int            `json:"status,omitempty"`
+	LatencyMs       int64          `json:"latency_ms,omitempty"`
+	Attempts        int            `json:"attempts,omitempty"`
+	RetryScope      string         `json:"retry_scope,omitempty"`
+	Data            map[string]any `json:"data,omitempty"`
 }
 
 // EventBuffer 保存最近发生的管理事件，供 Dashboard 和事件页轮询读取。
@@ -35,18 +50,42 @@ func NewEventBuffer(capacity int) *EventBuffer {
 
 // Add 追加一条事件，并在超过容量时丢弃最旧的数据。
 func (b *EventBuffer) Add(level, category, event, message string, data map[string]any) {
-	if b == nil {
-		return
-	}
-
-	entry := AdminEvent{
-		Seq:      b.seq.Add(1),
-		At:       time.Now(),
+	b.AddEvent(logx.Event{
 		Level:    level,
 		Category: category,
 		Event:    event,
 		Message:  message,
 		Data:     data,
+	})
+}
+
+// AddEvent appends a structured diagnostic event and keeps its fields aligned with slog output.
+func (b *EventBuffer) AddEvent(event logx.Event) {
+	if b == nil {
+		return
+	}
+
+	entry := AdminEvent{
+		Seq:             b.seq.Add(1),
+		At:              time.Now(),
+		Level:           event.Level,
+		Category:        event.Category,
+		Event:           event.Event,
+		Message:         event.Message,
+		RequestID:       event.RequestID,
+		ClientRequestID: event.ClientRequestID,
+		ProviderID:      event.ProviderID,
+		KeyID:           event.KeyID,
+		KeyHint:         event.KeyHint,
+		Method:          event.Method,
+		Path:            event.Path,
+		Model:           event.Model,
+		Stream:          event.Stream,
+		Status:          event.Status,
+		LatencyMs:       event.LatencyMs,
+		Attempts:        event.Attempts,
+		RetryScope:      event.RetryScope,
+		Data:            event.Data,
 	}
 
 	b.mu.Lock()
