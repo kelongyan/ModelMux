@@ -398,7 +398,7 @@ export function ProvidersPage(): JSX.Element {
   return (
     <>
       {contextHolder}
-      <Space direction="vertical" size={20} className="console-stack">
+      <Space direction="vertical" size={16} className="console-stack">
         <Card className="surface-card" bordered={false}>
           <div className="section-heading">
             <div>
@@ -406,9 +406,6 @@ export function ProvidersPage(): JSX.Element {
               <Typography.Title level={3} className="section-title">
                 Provider 列表
               </Typography.Title>
-              <Typography.Paragraph className="dashboard-section-copy">
-                用表格集中管理 provider 与 key 池状态，详情放到抽屉中处理，避免首页过度分散。
-              </Typography.Paragraph>
             </div>
             <Space wrap>
               <Button onClick={() => void providersQuery.refetch()}>刷新</Button>
@@ -641,7 +638,7 @@ function ProviderDetailContent({
   deletingKeys,
 }: ProviderDetailContentProps): JSX.Element {
   return (
-    <Space direction="vertical" size={20} className="console-stack">
+    <Space direction="vertical" size={16} className="console-stack">
       <Card className="surface-card" bordered={false}>
         <div className="provider-detail-pool">
           <KeyPoolDots

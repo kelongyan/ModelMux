@@ -123,7 +123,7 @@ export function SettingsPage(): JSX.Element {
   return (
     <>
       {contextHolder}
-      <Space direction="vertical" size={20} className="console-stack">
+      <Space direction="vertical" size={16} className="console-stack">
         {saveSummary ? <SaveSummaryBanner summary={saveSummary} /> : null}
 
         <Card className="surface-card settings-hero-card" bordered={false}>
@@ -133,9 +133,6 @@ export function SettingsPage(): JSX.Element {
               <Typography.Title level={3} className="section-title">
                 运行配置
               </Typography.Title>
-              <Typography.Paragraph className="dashboard-section-copy">
-                将设置分成核心运行、网络与日志、状态持久化、调用统计几类，优先把生效方式讲清楚。
-              </Typography.Paragraph>
             </div>
             <Space wrap>
               <Button onClick={() => resetFormFromServer(settingsQuery.data)}>重置为服务端配置</Button>
@@ -150,7 +147,6 @@ export function SettingsPage(): JSX.Element {
           </div>
           <div className="settings-hero-meta">
             <span className="settings-meta-chip">{`当前活跃：${settingsQuery.data.settings.active_provider}`}</span>
-            <span className="settings-meta-chip">保存后自动写入 config.json</span>
             <span className="settings-meta-chip">热生效与重启项已按分组标注</span>
           </div>
         </Card>

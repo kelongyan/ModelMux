@@ -54,7 +54,7 @@ export function AboutPage(): JSX.Element {
   return (
     <>
       {contextHolder}
-      <Space direction="vertical" size={20} className="console-stack">
+      <Space direction="vertical" size={16} className="console-stack">
         <Row gutter={[18, 18]}>
           <Col xs={24} xl={14}>
             <Card className="surface-card" bordered={false}>
@@ -64,9 +64,6 @@ export function AboutPage(): JSX.Element {
                   <Typography.Title level={3} className="section-title">
                     运行信息
                   </Typography.Title>
-                  <Typography.Paragraph className="dashboard-section-copy">
-                    用于确认当前进程、监听地址、版本和导出入口，适合作为交付前的最终核对页。
-                  </Typography.Paragraph>
                 </div>
                 <Space wrap>
                   <Tag color="green">{about.version}</Tag>
@@ -100,7 +97,7 @@ export function AboutPage(): JSX.Element {
           </Col>
 
           <Col xs={24} xl={10}>
-            <Space direction="vertical" size={18} className="console-stack">
+            <Space direction="vertical" size={14} className="console-stack">
               <Card className="surface-card" bordered={false}>
                 <div className="section-heading">
                   <div>

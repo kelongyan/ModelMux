@@ -1,83 +1,137 @@
-# ModelMux
+<p align="center">
+  <h1 align="center">ModelMux</h1>
+  <p align="center">
+    <strong>本地模型 API 反向代理 — 多 Provider · 多 Key · 单入口</strong>
+  </p>
+  <p align="center">
+    将多家模型服务的多组 API Key 收归一个本地代理入口，智能轮换、自动重试、一键切换。
+  </p>
+</p>
 
-ModelMux 是一个本地运行的模型 API 反向代理。客户端只连一个本地地址，ModelMux 根据 `active_provider` 选择当前 provider，再从该 provider 自己的 key 池里挑选可用 key 转发请求。
+---
 
-适合个人或小团队把多家模型服务、多组上游地址、多把 API key 收到一个本地入口里管理。
+![控制台总览](首页效果展示.png)
 
-## 核心行为
+## 特性
 
-- 只使用当前 `active_provider`，不会自动跨 provider 故障转移。
-- 每个 provider 有独立 key 池，key 状态互不影响。
-- 转发前会覆盖 `Authorization` 和 `X-Api-Key` 为选中的真实上游 key。
-- `429` 会让当前 key 进入 cooling，并优先尊重上游 `Retry-After`。
-- `401` 和余额/额度不足类 `403` 会把当前 key 标记为 invalid。
-- DNS、连接拒绝、TLS 和上游 `502/503/504` 属于 provider 临时故障，不会污染 key 状态。
-- 流式响应按小块透传并立即 flush，适合 SSE / streaming 场景。
-- 配置支持热重载；管理台保存配置会原子写盘，reload 失败会回滚。
-- 状态持久化只保存 key 的 SHA-256 标识，不保存完整 API key。
+| | |
+|---|---|
+| **多 Provider 统一管理** | 多家模型服务、多组上游地址、多把 API Key 收归一个本地入口 |
+| **Key 级状态机** | `active → cooling → invalid` 三态流转，互不干扰 |
+| **智能重试** | 429 冷却、401 失效、网络抖动分级处理，独立重试预算 |
+| **配置热重载** | `fsnotify` 监听 + 原子写盘，改配置即时生效、reload 失败自动回滚 |
+| **流式透传** | SSE / Streaming 按 chunk 立即 flush，零缓冲延迟 |
+| **内置管理台** | React SPA 嵌入 Go 二进制，Dashboard / Provider / 统计 / 事件一屏掌控 |
+| **安全设计** | Key SHA-256 哈希持久化、密钥脱敏、Admin 默认仅本地监听 |
+| **单二进制交付** | 前端 `go:embed` 打进可执行文件，零依赖部署 |
 
 ## 快速开始
 
-准备配置：
+### 1. 准备配置
 
 ```powershell
 Copy-Item config.example.json config.json
 ```
 
-编辑 `config.json`，至少改掉 `target_url` 和 `keys`：
+编辑 `config.json`，填入你的 Provider 和 Key：
 
 ```json
 {
-  "listen": "127.0.0.1:18080",
-  "admin_listen": "127.0.0.1:18081",
   "active_provider": "primary",
   "providers": [
     {
       "id": "primary",
-      "target_url": "https://your-provider.example.com",
-      "keys": ["sk-your-key-1", "sk-your-key-2"]
+      "target_url": "https://your-provider.com",
+      "keys": ["sk-key-1", "sk-key-2"]
     },
     {
       "id": "backup",
-      "target_url": "https://backup-provider.example.com",
+      "target_url": "https://backup-provider.com",
       "keys": ["sk-backup-key"]
     }
   ]
 }
 ```
 
-一键启动：
+### 2. 启动
 
 ```powershell
 .\start.ps1
 ```
 
-`start.ps1` 会检查 `config.json`，缺少 `modelmux.exe` 时自动构建，后台启动服务，并打开管理台。
+脚本会自动检测环境、构建二进制（如缺失）、后台启动并打开管理台。
 
-手动构建和启动：
+手动构建：
 
 ```powershell
 go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 .\modelmux.exe -config config.json
 ```
 
-默认入口：
+### 3. 接入客户端
 
-```text
-代理入口: http://127.0.0.1:18080
-管理入口: http://127.0.0.1:18081
-管理台:   http://127.0.0.1:18081/console/
+| 配置项 | 值 |
+|---|---|
+| Base URL | `http://127.0.0.1:18080/v1` |
+| API Key | 任意非空值（转发时会被替换为真实 Key） |
+
+默认监听地址：
+
+```
+代理入口   http://127.0.0.1:18080
+管理 API   http://127.0.0.1:18081
+管理台     http://127.0.0.1:18081/console/
 ```
 
-客户端配置方式：
+## 架构概览
 
-- Base URL 填 `http://127.0.0.1:18080/v1`。
-- 客户端 API key 填任意非空值即可。
-- ModelMux 转发到上游时会替换成当前 provider key 池里选中的真实 key。
+```
+┌─────────────┐
+│   Client    │  任意 OpenAI 兼容客户端
+└──────┬──────┘
+       │  http://127.0.0.1:18080/v1
+       ▼
+┌──────────────────────────────────────────┐
+│              ModelMux Proxy              │
+│                                          │
+│  ┌──────────┐  ┌──────────┐             │
+│  │ Provider │  │ Provider │  ...         │
+│  │   A      │  │   B      │             │
+│  │ ┌──┐┌──┐│  │ ┌──┐     │             │
+│  │ │K1││K2││  │ │K3│     │             │
+│  │ └──┘└──┘│  │ └──┘     │             │
+│  └──────────┘  └──────────┘             │
+│                                          │
+│  Key 状态机 · 重试策略 · 请求头改写     │
+└──────────────────────────────────────────┘
+       │
+       ▼
+   上游 Provider API
+```
 
-## 配置说明
+## Key 状态机
 
-推荐使用多 provider 配置：
+```
+          429 / Retry-After
+  active ──────────────────► cooling
+    │                          │
+    │ 401 / 余额不足          │ 冷却到期
+    ▼                          ▼
+ invalid                     active
+```
+
+| 事件 | 状态变化 | 重试预算 |
+|---|---|---|
+| `429` 速率限制 | → `cooling` | `max_retries` |
+| `401` / 余额不足 `403` | → `invalid` | `max_retries` |
+| 网络抖动 / 连接重置 | 临时 `cooling` | `max_transient_retries` |
+| 上游 `502/503/504` | 不改变 Key 状态 | `max_transient_retries` |
+
+`invalid` Key 不会自动恢复，需通过管理台重置、API 调用，或等下次启动超过 `invalid_ttl_hours` 后自动恢复。
+
+## 配置参考
+
+### Provider 配置
 
 ```json
 {
@@ -85,255 +139,180 @@ go build -trimpath -ldflags="-s -w" -o modelmux.exe .
   "providers": [
     {
       "id": "primary",
-      "target_url": "https://provider-a.example.com",
+      "target_url": "https://provider-a.com",
       "keys": ["sk-a1", "sk-a2"]
     },
     {
       "id": "backup",
-      "target_url": "https://provider-b.example.com",
+      "target_url": "https://provider-b.com",
       "keys": ["sk-b1"]
     }
   ]
 }
 ```
 
-兼容旧版单 provider 配置：
+兼容旧版单 Provider 格式——无 `providers` 字段时，顶层 `target_url` + `keys` 会被视为 `default` Provider。
 
-```json
-{
-  "target_url": "https://provider.example.com",
-  "keys": ["sk-1", "sk-2"]
-}
-```
-
-旧版配置会被视为 provider `default`。
-
-常用字段：
+### 运行参数
 
 | 字段 | 默认值 | 说明 |
-|---|---:|---|
+|---|---|---|
 | `listen` | `127.0.0.1:18080` | 代理服务监听地址 |
 | `admin_listen` | `127.0.0.1:18081` | 管理服务监听地址 |
-| `active_provider` | 第一个 provider | 当前使用的 provider ID |
-| `providers[].id` | 无 | provider 稳定 ID，不能重复 |
-| `providers[].target_url` | 无 | 上游服务根地址，必须是绝对 URL |
-| `providers[].keys` | 无 | 当前 provider 的 key 列表，至少一个 |
-| `cooling_seconds` | `60` | 429 未返回 `Retry-After` 时的冷却秒数 |
-| `max_retries` | `3` | key 级错误的换 key 重试预算 |
-| `max_transient_retries` | `1` | 网络/provider 临时故障重试预算 |
-| `request_timeout_seconds` | `120` | 单次上游请求总超时 |
-| `connect_timeout_seconds` | `5` | 建连和 TLS 握手超时 |
+| `active_provider` | 首个 Provider | 当前使用的 Provider ID |
+| `cooling_seconds` | `60` | 429 未返回 Retry-After 时的冷却时长 |
+| `max_retries` | `3` | Key 级错误换 Key 重试预算 |
+| `max_transient_retries` | `1` | 网络/Provider 临时故障重试预算 |
+| `request_timeout_seconds` | `120` | 上游请求总超时 |
+| `connect_timeout_seconds` | `5` | TCP 建连 + TLS 握手超时 |
 | `response_header_timeout_seconds` | `30` | 等待上游响应头超时 |
-| `transient_cooling_seconds` | `15` | 连接级临时故障后的短冷却 |
-| `wait_for_key_timeout_ms` | `1000` | 所有 key 仅 cooling 时最多短等多久 |
-| `max_body_bytes` | `33554432` | 请求体读取上限，默认 32 MiB |
-| `persist_state` | `true` | 是否持久化 key 状态 |
-| `state_file` | `state.json` | key 状态文件 |
-| `invalid_ttl_hours` | `24` | invalid 状态下次启动自动恢复前的保留小时数 |
+| `transient_cooling_seconds` | `15` | 连接级临时故障短冷却 |
+| `wait_for_key_timeout_ms` | `1000` | 所有 Key 仅 cooling 时最大等待时长 |
+| `max_body_bytes` | `33554432` | 请求体上限（默认 32 MiB） |
 
-日志字段：
+### 日志 & 持久化
 
 | 字段 | 默认值 | 说明 |
-|---|---:|---|
+|---|---|---|
 | `log_level` | `info` | `debug` / `info` / `warn` / `error` |
 | `log_format` | `text` | `text` / `json` |
 | `log_output` | `stdout` | `stdout` / `file` / `both` |
-| `log_file` | 空 | 文件日志路径 |
+| `log_file` | — | 文件日志路径 |
 | `log_max_size_mb` | `20` | 单日志文件最大 MB |
 | `log_max_backups` | `5` | 保留旧日志数量 |
 | `log_max_age_days` | `30` | 保留旧日志天数 |
 | `log_compress` | `false` | 是否压缩旧日志 |
+| `persist_state` | `true` | 持久化 Key 状态 |
+| `state_file` | `state.json` | Key 状态文件路径 |
+| `invalid_ttl_hours` | `24` | invalid Key 自动恢复保留时长 |
+
+### 调用统计
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `stats_enabled` | `true` | 启用调用明细持久化 |
+| `stats_dir` | `stats_data` | 统计文件目录 |
+| `stats_retention_days` | `30` | 统计文件保留天数 |
+| `stats_max_recent_records` | `10000` | 内存中最近记录上限 |
 
 ## 热重载
 
-保存配置文件后，ModelMux 会通过 `fsnotify` 自动 reload。也可以手动触发：
+保存 `config.json` 后自动 reload（`fsnotify`），也可手动触发：
 
 ```powershell
 Invoke-RestMethod -Method Post http://127.0.0.1:18081/admin/reload
 ```
 
-这些字段热生效：
+**热生效**：`active_provider` · `providers` · `cooling_seconds` · `max_retries` · 超时类参数 · `max_body_bytes`
 
-- `active_provider`
-- `providers`
-- `cooling_seconds`
-- `max_retries`
-- `max_transient_retries`
-- `request_timeout_seconds`
-- `connect_timeout_seconds`
-- `response_header_timeout_seconds`
-- `transient_cooling_seconds`
-- `wait_for_key_timeout_ms`
-- `max_body_bytes`
+**需重启**：`listen` · `admin_listen` · 日志类 · 持久化类 · 统计类
 
-这些字段需要重启才完全生效：
+## Admin API
 
-- `listen`
-- `admin_listen`
-- `log_level`
-- `log_format`
-- `log_output`
-- `log_file`
-- `log_max_size_mb`
-- `log_max_backups`
-- `log_max_age_days`
-- `log_compress`
-- `persist_state`
-- `state_file`
-- `invalid_ttl_hours`
+所有管理接口均挂在 `admin_listen` 地址下。
 
-## 管理台和 API
+### 运维
 
-管理台地址：
-
-```text
-http://127.0.0.1:18081/console/
-```
-
-常用接口：
-
-| 方法 | 路径 | 说明 |
+| Method | Path | 说明 |
 |---|---|---|
-| `GET` | `/admin/health` | 当前 active provider 是否还有可用 key |
-| `GET` | `/admin/status` | provider 和 key 池状态 |
+| `GET` | `/admin/health` | 当前 Provider 可用性 |
+| `GET` | `/admin/status` | Provider 与 Key 池状态 |
 | `POST` | `/admin/reload` | 手动重读配置 |
-| `GET` | `/admin/api/v1/dashboard` | 管理台首页数据 |
-| `GET` | `/admin/api/v1/providers` | provider 列表 |
-| `POST` | `/admin/api/v1/providers` | 新增 provider |
-| `GET` | `/admin/api/v1/providers/{id}` | provider 详情 |
-| `PUT` | `/admin/api/v1/providers/{id}` | 修改 provider 上游地址 |
-| `DELETE` | `/admin/api/v1/providers/{id}` | 删除非 active provider |
-| `POST` | `/admin/api/v1/providers/{id}/activate` | 切换 active provider |
-| `POST` | `/admin/api/v1/providers/{id}/keys:append` | 追加 keys |
-| `POST` | `/admin/api/v1/providers/{id}/keys:replace` | 替换 keys |
-| `POST` | `/admin/api/v1/providers/{id}/keys:delete` | 删除 keys |
-| `POST` | `/admin/api/v1/providers/{id}/keys/{key_id}/reset` | 重置单个 key 为 active |
-| `GET` | `/admin/api/v1/settings` | 当前配置和热重载边界 |
+
+### Provider 管理
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/admin/api/v1/providers` | Provider 列表 |
+| `POST` | `/admin/api/v1/providers` | 新增 Provider |
+| `GET` | `/admin/api/v1/providers/{id}` | Provider 详情 |
+| `PUT` | `/admin/api/v1/providers/{id}` | 修改上游地址 |
+| `DELETE` | `/admin/api/v1/providers/{id}` | 删除 Provider |
+| `POST` | `/admin/api/v1/providers/{id}/activate` | 切换为活跃 |
+
+### Key 管理
+
+| Method | Path | 说明 |
+|---|---|---|
+| `POST` | `/admin/api/v1/providers/{id}/keys:append` | 追加 Keys |
+| `POST` | `/admin/api/v1/providers/{id}/keys:replace` | 替换 Keys |
+| `POST` | `/admin/api/v1/providers/{id}/keys:delete` | 删除 Keys |
+| `POST` | `/admin/api/v1/providers/{id}/keys/{key_id}/reset` | 重置单个 Key |
+
+### 控制台 & 其他
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/admin/api/v1/dashboard` | 控制台首页数据 |
+| `GET` | `/admin/api/v1/settings` | 当前配置与热重载边界 |
 | `PUT` | `/admin/api/v1/settings` | 保存设置 |
 | `GET` | `/admin/api/v1/events` | 最近运行事件 |
-| `GET` | `/admin/api/v1/about` | 运行环境和版本信息 |
+| `GET` | `/admin/api/v1/about` | 运行环境与版本 |
 | `POST` | `/admin/api/v1/config/backup` | 导出配置 |
-| `POST` | `/admin/api/v1/state/backup` | 导出 key 状态 |
+| `POST` | `/admin/api/v1/state/backup` | 导出 Key 状态 |
 
-健康检查示例：
+## 项目结构
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:18081/admin/health
+```
+ModelMux/
+├── admin/     管理 API · 事件缓冲区 · 嵌入式控制台
+├── config/    JSON 配置读取 · 校验 · 热重载 · 原子写盘
+├── logx/      slog 字段 · 事件分类 · 密钥脱敏
+├── pool/      Provider 池 · Key 池状态机
+├── proxy/     反向代理 · 认证头改写 · 重试分类 · 流式透传
+├── state/     Key 状态持久化（SHA-256 哈希）
+├── web/       React + Vite 管理台（go:embed 嵌入）
+├── main.go    入口 · 信号处理 · 优雅关闭
+└── config.example.json
 ```
 
-## Key 状态和重试
-
-Key 状态：
-
-```text
-active --429--> cooling --到期--> active
-active --401--> invalid
-active --余额/额度不足 403--> invalid
-```
-
-重试规则：
-
-| 类型 | 触发 | key 状态变化 | 预算 |
-|---|---|---|---|
-| key 级失败 | `401`、`429`、余额/额度不足类 `403` | cooling 或 invalid | `max_retries` |
-| 连接级临时失败 | EOF、连接重置、响应头超时等 | 当前 key 短 cooling | `max_transient_retries` |
-| provider 级临时失败 | DNS、连接拒绝、TLS、上游 `502/503/504` | 不改变 key 状态 | `max_transient_retries` |
-
-`invalid` 在进程运行期间不会自动恢复。可以通过管理台重置、API 重置、更新 key 列表，或等下次启动时超过 `invalid_ttl_hours` 后恢复。
-
-## 开发和验证
-
-Go 版本以 `go.mod` 为准。
-
-常用命令：
+## 开发
 
 ```powershell
+# 后端
 go test ./...
 go vet ./...
-go test -race ./...
-go build -trimpath -ldflags="-s -w" -o modelmux.exe .
+
+# 前端
+cd web && npm ci && npm run build && cd ..
+
+# 前端开发模式（自动代理 /admin → 127.0.0.1:18081）
+cd web && npm run dev
+
+# 构建
+make build       # 当前平台
+make test        # 运行测试
+make run         # 构建并启动
 ```
 
-运行单个测试：
-
-```powershell
-go test ./pool/ -run TestRoundRobin -v
-```
-
-Makefile 快捷命令：
-
-```powershell
-make build
-make test
-make run
-```
-
-前端管理台在 `web/`，构建产物会输出到 `web/dist` 并被 Go 二进制嵌入：
-
-```powershell
-Set-Location web
-npm ci
-npm run build
-Set-Location ..
-```
-
-前端开发服务器会把 `/admin` 代理到本机 Go 管理服务 `127.0.0.1:18081`：
-
-```powershell
-Set-Location web
-npm run dev
-```
-
-如果只改 Go 代码，通常不需要重建前端。若改了 `web/`，发布或提交前要重新生成 `web/dist`。
-
-## 目录速览
-
-```text
-admin/   管理 API、事件缓冲区、嵌入式管理台挂载
-config/  JSON 配置读取、校验、默认值、热重载、原子写盘
-logx/    slog 字段、事件分类、密钥脱敏
-pool/    provider 池和每个 provider 内部的 key 池状态机
-proxy/   反向代理、认证头改写、重试分类、流式透传
-state/   key 状态持久化，只保存 key 哈希标识
-web/     React + Vite 管理台，dist 由 Go embed 打进二进制
-```
+改了 `web/` 目录后需重新 `npm run build`，产物会被 `go:embed` 打进二进制。
 
 ## 排障
 
-查看当前可用性：
+**请求返回 503：**
+- 当前 Provider 无可用 Key（全部 cooling / invalid）
+- 所有 Key 在 cooling 且 `wait_for_key_timeout_ms` 内无恢复
+- 上游地址 / DNS / TLS / 网络不可达
+- 配置变更后尚未成功 reload
+
+**配置修改未生效：**
+- 确认 `-config` 指向正确的文件
+- 调用 `POST /admin/reload` 检查错误
+- `listen` / `admin_listen` / 日志 / 持久化字段需重启
 
 ```powershell
+# 快速诊断
 Invoke-RestMethod http://127.0.0.1:18081/admin/health
-```
-
-查看 key 池状态：
-
-```powershell
 Invoke-RestMethod http://127.0.0.1:18081/admin/status
 ```
 
-请求返回 `503` 的常见原因：
+## 安全
 
-- 当前 `active_provider` 下没有 active key。
-- 所有 key 都在 cooling，且 `wait_for_key_timeout_ms` 内没有 key 恢复。
-- 所有 key 都被标记 invalid。
-- 上游地址、DNS、TLS 或网络不可用。
-- 当前 provider 配置错了，但还没成功 reload。
+- `admin_listen` 默认 `127.0.0.1:18081`，**不要暴露到公网**
+- 不要提交 `config.json`、`state.json`、日志文件到版本控制
+- 不要在日志、截图、Issue、PR 中暴露完整 API Key
+- 远程访问管理台请额外加网络隔离或反向代理鉴权
 
-配置修改没生效时：
+## License
 
-- 确认启动参数 `-config` 指向的就是你修改的文件。
-- 调用 `POST /admin/reload` 看是否有错误。
-- `listen`、`admin_listen`、日志和状态持久化相关字段需要重启。
-
-余额不足类错误反复出现时：
-
-- ModelMux 会把命中的 key 标为 invalid 并换 key。
-- 如果仍失败，通常是当前 provider 下所有可用 key 都额度不足，或它们共享同一个账户余额。
-
-## 安全提醒
-
-- `admin_listen` 默认是 `127.0.0.1:18081`，不要轻易改成公网监听。
-- 不要提交 `config.json`、`state.json`、日志文件或任何真实 API key。
-- 不要在日志、截图、issue、PR 里暴露完整 API key。
-- 如果必须远程访问管理台，请额外加网络隔离、认证或反向代理鉴权。
+MIT

@@ -1,14 +1,4 @@
 @media (max-width: 1180px) {
-  .console-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .console-header-status {
-    flex-basis: auto;
-    width: 100%;
-  }
-
   .console-header-metrics,
   .dashboard-stat-strip,
   .provider-card-stats-grid {
@@ -54,14 +44,18 @@
   }
 
   .section-heading,
-  .dashboard-section-head,
-  .console-header-status-row {
+  .dashboard-section-head {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .console-header-meta {
-    text-align: left;
+  .console-header-status {
+    flex-wrap: wrap;
+  }
+
+  .header-status-metrics {
+    flex-wrap: wrap;
+    gap: 8px 12px;
   }
 
   .provider-card-title-row,

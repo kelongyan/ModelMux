@@ -119,7 +119,7 @@ export function EventsPage(): JSX.Element {
   }
 
   return (
-    <Space direction="vertical" size={20} className="console-stack">
+    <Space direction="vertical" size={16} className="console-stack">
       <Card className="surface-card" bordered={false}>
         <div className="section-heading">
           <div>
@@ -127,9 +127,6 @@ export function EventsPage(): JSX.Element {
             <Typography.Title level={3} className="section-title">
               最近事件
             </Typography.Title>
-            <Typography.Paragraph className="dashboard-section-copy">
-              按级别、provider、request id 或模型快速过滤运行事件，优先服务于排障而不是日志观赏。
-            </Typography.Paragraph>
           </div>
           <Button onClick={() => void eventsQuery.refetch()}>刷新</Button>
         </div>

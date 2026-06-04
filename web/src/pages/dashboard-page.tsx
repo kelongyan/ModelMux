@@ -91,7 +91,7 @@ export function DashboardPage(): JSX.Element {
   return (
     <>
       {contextHolder}
-      <Space direction="vertical" size={18} className="console-stack">
+      <Space direction="vertical" size={16} className="console-stack">
         <Card className="surface-card dashboard-overview-card" bordered={false}>
           <div className="section-heading">
             <div>
@@ -99,9 +99,6 @@ export function DashboardPage(): JSX.Element {
               <Typography.Title level={3} className="section-title">
                 控制台总览
               </Typography.Title>
-              <Typography.Paragraph className="dashboard-overview-copy">
-                聚焦当前活跃 provider、key 池健康度和最近事件，优先支持值守与排障。
-              </Typography.Paragraph>
             </div>
             <Space wrap>
               <span className="dashboard-updated-at">{`更新于 ${lastUpdated}`}</span>
@@ -146,9 +143,6 @@ export function DashboardPage(): JSX.Element {
               <Typography.Title level={3} className="section-title">
                 Provider 列表
               </Typography.Title>
-              <Typography.Paragraph className="dashboard-section-copy">
-                每个 provider 维护独立 key 池与状态；只有 active provider 会承接流量。
-              </Typography.Paragraph>
             </div>
           </div>
 
@@ -181,9 +175,6 @@ export function DashboardPage(): JSX.Element {
               <Typography.Title level={3} className="section-title">
                 最近事件
               </Typography.Title>
-              <Typography.Paragraph className="dashboard-section-copy">
-                优先展示异常和关键运行事件，便于快速判断是否需要深入排查。
-              </Typography.Paragraph>
             </div>
             <Button size="small" onClick={() => navigate("/events")}>
               查看全部

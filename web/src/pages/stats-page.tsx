@@ -176,7 +176,7 @@ export function StatsPage(): JSX.Element {
   const recent = recentQuery.data?.records ?? [];
 
   return (
-    <Space direction="vertical" size={20} className="console-stack">
+    <Space direction="vertical" size={16} className="console-stack">
       <Card className="surface-card" bordered={false}>
         <div className="section-heading">
           <div>
@@ -184,9 +184,6 @@ export function StatsPage(): JSX.Element {
             <Typography.Title level={3} className="section-title">
               调用统计
             </Typography.Title>
-            <Typography.Paragraph className="dashboard-section-copy">
-              聚焦调用量、成功率、token 使用和最近调用，优先让趋势与异常一眼可见。
-            </Typography.Paragraph>
           </div>
           <Space wrap>
             <Segmented
