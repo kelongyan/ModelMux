@@ -19,6 +19,10 @@ import type {
 } from "../types/admin";
 import { requestDownload, requestJSON, saveDownloadBlob } from "./http";
 
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
 // fetchDashboard 拉取控制台首页聚合数据，并用于定时轮询刷新。
 export function fetchDashboard(): Promise<AdminDashboardResponse> {
   return requestJSON<AdminDashboardResponse>("/admin/api/v1/dashboard");
@@ -31,7 +35,7 @@ export function fetchProviders(): Promise<AdminProvidersResponse> {
 
 // fetchProviderDetail 拉取单个 provider 的 key 详情与运行状态。
 export function fetchProviderDetail(providerID: string): Promise<AdminProviderDetailResponse> {
-  return requestJSON<AdminProviderDetailResponse>(`/admin/api/v1/providers/${providerID}`);
+  return requestJSON<AdminProviderDetailResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}`);
 }
 
 // createProvider 提交一个新 provider 到配置文件并触发 reload。
@@ -47,7 +51,7 @@ export function createProvider(payload: AdminProviderCreatePayload): Promise<Adm
 
 // updateProvider 更新 provider 的基础信息，当前阶段只编辑 target_url。
 export function updateProvider(providerID: string, payload: AdminProviderUpdatePayload): Promise<AdminChangeResponse> {
-  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${providerID}`, {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -58,21 +62,21 @@ export function updateProvider(providerID: string, payload: AdminProviderUpdateP
 
 // deleteProvider 删除一个非活跃 provider。
 export function deleteProvider(providerID: string): Promise<AdminChangeResponse> {
-  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${providerID}`, {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}`, {
     method: "DELETE",
   });
 }
 
 // activateProvider 把某个 provider 切换为当前活跃目标。
 export function activateProvider(providerID: string): Promise<AdminChangeResponse> {
-  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${providerID}/activate`, {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/activate`, {
     method: "POST",
   });
 }
 
 // appendProviderKeys 追加 keys 到指定 provider。
 export function appendProviderKeys(providerID: string, payload: AdminKeysPayload): Promise<AdminChangeResponse> {
-  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${providerID}/keys:append`, {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/keys:append`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -83,7 +87,7 @@ export function appendProviderKeys(providerID: string, payload: AdminKeysPayload
 
 // replaceProviderKeys 全量替换 provider 的 keys。
 export function replaceProviderKeys(providerID: string, payload: AdminKeysPayload): Promise<AdminChangeResponse> {
-  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${providerID}/keys:replace`, {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/keys:replace`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -94,7 +98,7 @@ export function replaceProviderKeys(providerID: string, payload: AdminKeysPayloa
 
 // deleteProviderKeys 按 key_id 删除 provider 中的 keys。
 export function deleteProviderKeys(providerID: string, payload: AdminDeleteKeysPayload): Promise<AdminChangeResponse> {
-  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${providerID}/keys:delete`, {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/keys:delete`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -105,9 +109,12 @@ export function deleteProviderKeys(providerID: string, payload: AdminDeleteKeysP
 
 // resetProviderKey 手动把某个 key 恢复为 active。
 export function resetProviderKey(providerID: string, keyID: string): Promise<AdminReloadResponse> {
-  return requestJSON<AdminReloadResponse>(`/admin/api/v1/providers/${providerID}/keys/${keyID}/reset`, {
+  return requestJSON<AdminReloadResponse>(
+    `/admin/api/v1/providers/${pathSegment(providerID)}/keys/${pathSegment(keyID)}/reset`,
+    {
     method: "POST",
-  });
+    },
+  );
 }
 
 // fetchRecentEvents 拉取最近事件，供 dashboard 摘要与后续事件页复用。

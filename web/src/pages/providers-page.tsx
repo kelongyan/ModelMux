@@ -101,17 +101,20 @@ export function ProvidersPage(): JSX.Element {
   // syncSelectionFromURL 让 Dashboard 卡片"详情 →"跳转过来时能直接打开对应 drawer。
   useEffect(() => {
     const fromUrl = searchParams.get("provider");
-    if (fromUrl && fromUrl !== selectedProviderID) {
+    if (fromUrl !== selectedProviderID) {
       setSelectedProviderID(fromUrl);
     }
   }, [searchParams, selectedProviderID]);
 
-  const clearProviderInURL = () => {
-    if (searchParams.get("provider")) {
-      const next = new URLSearchParams(searchParams);
+  const setSelectedProvider = (providerID: string | null) => {
+    setSelectedProviderID(providerID);
+    const next = new URLSearchParams(searchParams);
+    if (providerID) {
+      next.set("provider", providerID);
+    } else {
       next.delete("provider");
-      setSearchParams(next, { replace: true });
     }
+    setSearchParams(next, { replace: true });
   };
 
   const invalidateAdminQueries = async (providerID?: string) => {
@@ -154,10 +157,10 @@ export function ProvidersPage(): JSX.Element {
 
   const deleteProviderMutation = useMutation({
     mutationFn: deleteProvider,
-    onSuccess: async () => {
+    onSuccess: async (_, providerID) => {
       messageApi.success("已删除 provider");
-      if (selectedProviderID) {
-        setSelectedProviderID(null);
+      if (selectedProviderID === providerID) {
+        setSelectedProvider(null);
       }
       await invalidateAdminQueries();
     },
@@ -237,9 +240,22 @@ export function ProvidersPage(): JSX.Element {
         dataIndex: "id",
         key: "id",
         render: (_: string, record) => (
-          <div>
-            <strong>{record.id}</strong>
+          <div className="provider-table-name">
+            <div className="provider-table-title-row">
+              <strong>{record.id}</strong>
+              {record.active ? <Tag color="green">当前活跃</Tag> : <Tag>待命</Tag>}
+            </div>
             <div className="table-subtext">{record.target_url}</div>
+            <div className="provider-table-pool">
+              <KeyPoolDots
+                active={record.active_keys}
+                cooling={record.cooling_keys}
+                invalid={record.invalid_keys}
+                max={18}
+                size="small"
+              />
+              <span>{`可用 ${record.active_keys} · 冷却 ${record.cooling_keys} · 失效 ${record.invalid_keys}`}</span>
+            </div>
           </div>
         ),
       },
@@ -247,7 +263,7 @@ export function ProvidersPage(): JSX.Element {
         title: "状态",
         dataIndex: "active",
         key: "active",
-        render: (active: boolean) => (active ? <Tag color="green">当前活跃</Tag> : <Tag>待命</Tag>),
+        render: (_active: boolean, record) => renderProviderState(record),
       },
       { title: "总 Key", dataIndex: "total_keys", key: "total_keys" },
       { title: "可用", dataIndex: "active_keys", key: "active_keys" },
@@ -258,7 +274,7 @@ export function ProvidersPage(): JSX.Element {
         key: "actions",
         render: (_: unknown, record) => (
           <Space wrap>
-            <Button size="small" onClick={() => setSelectedProviderID(record.id)}>
+            <Button size="small" onClick={() => setSelectedProvider(record.id)}>
               查看详情
             </Button>
             {!record.active ? (
@@ -377,6 +393,7 @@ export function ProvidersPage(): JSX.Element {
   }
 
   const providers = providersQuery.data.providers;
+  const providerSummary = summarizeProviders(providers);
 
   return (
     <>
@@ -385,17 +402,28 @@ export function ProvidersPage(): JSX.Element {
         <Card className="surface-card" bordered={false}>
           <div className="section-heading">
             <div>
-              <Typography.Text className="placeholder-kicker">Provider 管理</Typography.Text>
+              <Typography.Text className="placeholder-kicker">Providers</Typography.Text>
               <Typography.Title level={3} className="section-title">
                 Provider 列表
               </Typography.Title>
+              <Typography.Paragraph className="dashboard-section-copy">
+                用表格集中管理 provider 与 key 池状态，详情放到抽屉中处理，避免首页过度分散。
+              </Typography.Paragraph>
             </div>
             <Space wrap>
-              <Tag color="green">{`当前活跃：${providersQuery.data.active_provider}`}</Tag>
+              <Button onClick={() => void providersQuery.refetch()}>刷新</Button>
               <Button type="primary" onClick={openProviderCreate}>
                 新增 Provider
               </Button>
             </Space>
+          </div>
+          <div className="providers-summary-strip">
+            <span className="summary-pill">{`当前活跃：${providersQuery.data.active_provider}`}</span>
+            <span className="summary-pill">{`Provider ${providers.length}`}</span>
+            <span className="summary-pill">{`总 Key ${providerSummary.totalKeys}`}</span>
+            <span className="summary-pill">{`可用 ${providerSummary.activeKeys}`}</span>
+            <span className="summary-pill">{`冷却 ${providerSummary.coolingKeys}`}</span>
+            <span className="summary-pill">{`失效 ${providerSummary.invalidKeys}`}</span>
           </div>
           {providers.length === 0 ? (
             <Empty description="当前没有 provider 配置" />
@@ -406,6 +434,8 @@ export function ProvidersPage(): JSX.Element {
               dataSource={providers}
               pagination={false}
               rowKey="id"
+              rowClassName={(record) => (record.active ? "provider-table-row--active" : "")}
+              scroll={{ x: 920 }}
             />
           )}
         </Card>
@@ -425,8 +455,11 @@ export function ProvidersPage(): JSX.Element {
           <Form.Item
             label="Provider ID"
             name="id"
-            rules={[{ required: true, message: "请输入 provider id" }]}
-            extra={providerModal.mode === "edit" ? "阶段 3 暂不支持修改 provider id" : "建议使用稳定且易识别的 id。"}
+            rules={[
+              { required: true, message: "请输入 provider id" },
+              { pattern: /^[A-Za-z0-9_.-]+$/, message: "仅支持字母、数字、点、下划线和短横线" },
+            ]}
+            extra={providerModal.mode === "edit" ? "阶段 3 暂不支持修改 provider id" : "建议使用稳定且易识别的 id，仅使用字母、数字、点、下划线和短横线。"}
           >
             <Input disabled={providerModal.mode === "edit"} placeholder="例如 primary 或 backup" />
           </Form.Item>
@@ -478,12 +511,9 @@ export function ProvidersPage(): JSX.Element {
 
       <Drawer
         open={selectedProviderID !== null}
-        width={920}
+        width={860}
         title={selectedProvider ? `Provider 详情：${selectedProvider.id}` : "Provider 详情"}
-        onClose={() => {
-          setSelectedProviderID(null);
-          clearProviderInURL();
-        }}
+        onClose={() => setSelectedProvider(null)}
       >
         {detailLoading ? (
           <div className="console-loading">
@@ -687,6 +717,19 @@ function ProviderDetailContent({
 }
 
 // renderKeyState 把后端 key 状态映射为更易识别的标签。
+function renderProviderState(provider: AdminProviderSummary): JSX.Element {
+  if (provider.active) {
+    return <Tag color="green">当前活跃</Tag>;
+  }
+  if (provider.active_keys === 0 && provider.cooling_keys === 0) {
+    return <Tag color="red">不可用</Tag>;
+  }
+  if (provider.cooling_keys > 0 || provider.invalid_keys > 0) {
+    return <Tag color="gold">波动中</Tag>;
+  }
+  return <Tag color="blue">待命</Tag>;
+}
+
 function renderKeyState(state: AdminKeyStatus["state"]): JSX.Element {
   switch (state) {
     case "active":
@@ -704,4 +747,21 @@ function splitKeysText(input: string): string[] {
     .split(/\r?\n/g)
     .map((key) => key.trim())
     .filter((key) => key.length > 0);
+}
+
+function summarizeProviders(providers: AdminProviderSummary[]) {
+  return providers.reduce(
+    (summary, provider) => ({
+      totalKeys: summary.totalKeys + provider.total_keys,
+      activeKeys: summary.activeKeys + provider.active_keys,
+      coolingKeys: summary.coolingKeys + provider.cooling_keys,
+      invalidKeys: summary.invalidKeys + provider.invalid_keys,
+    }),
+    {
+      totalKeys: 0,
+      activeKeys: 0,
+      coolingKeys: 0,
+      invalidKeys: 0,
+    }
+  );
 }

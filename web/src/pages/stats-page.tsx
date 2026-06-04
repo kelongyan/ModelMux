@@ -4,6 +4,7 @@ import type { TableColumnsType } from "antd";
 import { useMemo, useState } from "react";
 
 import { fetchStatsModels, fetchStatsRecent, fetchStatsSummary } from "../api/admin";
+import { formatDateTime } from "../components/format-time";
 import type { AdminCallRecord, AdminModelStats, AdminStatsSummary, AdminStatsWindow } from "../types/admin";
 
 const windowOptions: Array<{ label: string; value: AdminStatsWindow }> = [
@@ -183,6 +184,9 @@ export function StatsPage(): JSX.Element {
             <Typography.Title level={3} className="section-title">
               调用统计
             </Typography.Title>
+            <Typography.Paragraph className="dashboard-section-copy">
+              聚焦调用量、成功率、token 使用和最近调用，优先让趋势与异常一眼可见。
+            </Typography.Paragraph>
           </div>
           <Space wrap>
             <Segmented
@@ -192,6 +196,13 @@ export function StatsPage(): JSX.Element {
             />
             <Button onClick={() => void refetchAll()}>刷新</Button>
           </Space>
+        </div>
+
+        <div className="events-summary-row">
+          <span className="summary-pill">{`窗口 ${windowLabel(window)}`}</span>
+          <span className="summary-pill">{`模型 ${models.length}`}</span>
+          <span className="summary-pill">{`最近记录 ${recent.length}`}</span>
+          <span className="summary-pill">{`成功 ${summary.success_calls} / 失败 ${summary.failed_calls}`}</span>
         </div>
 
         <Row gutter={[14, 14]}>
@@ -330,10 +341,6 @@ function formatPercent(part: number, total: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN").format(value);
-}
-
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
 
 function windowLabel(value: AdminStatsWindow): string {

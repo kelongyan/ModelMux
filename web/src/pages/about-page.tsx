@@ -64,11 +64,20 @@ export function AboutPage(): JSX.Element {
                   <Typography.Title level={3} className="section-title">
                     运行信息
                   </Typography.Title>
+                  <Typography.Paragraph className="dashboard-section-copy">
+                    用于确认当前进程、监听地址、版本和导出入口，适合作为交付前的最终核对页。
+                  </Typography.Paragraph>
                 </div>
                 <Space wrap>
                   <Tag color="green">{about.version}</Tag>
                   <Tag>{about.platform}</Tag>
                 </Space>
+              </div>
+
+              <div className="events-summary-row">
+                <span className="summary-pill">{`活跃 Provider：${about.active_provider || "未配置"}`}</span>
+                <span className="summary-pill">{`Provider 数量：${about.provider_count}`}</span>
+                <span className="summary-pill">{`管理监听：${about.admin_listen}`}</span>
               </div>
 
               <Descriptions

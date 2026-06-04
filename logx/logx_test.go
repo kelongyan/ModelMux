@@ -9,7 +9,8 @@ func TestMaskSecret(t *testing.T) {
 		want string
 	}{
 		{name: "empty", in: "", want: ""},
-		{name: "short", in: "abc", want: "***abc"},
+		{name: "short", in: "abc", want: "***"},
+		{name: "six_chars", in: "abcdef", want: "***"},
 		{name: "long", in: "sk-123456789", want: "***456789"},
 	}
 

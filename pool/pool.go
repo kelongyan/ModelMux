@@ -71,11 +71,21 @@ func (p *Pool) Next() (*Key, error) {
 
 // Update 用新 key 列表更新 key 池；已存在 key 会保留状态和统计，新 key 从 active 开始。
 func (p *Pool) Update(newValues []string) {
+	nextKeys := p.updatedKeys(newValues)
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.keys = nextKeys
+	p.cursor.Store(0)
+}
+
+func (p *Pool) updatedKeys(newValues []string) []*Key {
+	p.mu.RLock()
+	existingKeys := append([]*Key(nil), p.keys...)
+	p.mu.RUnlock()
 
 	existing := make(map[string]*Key, len(p.keys))
-	for _, k := range p.keys {
+	for _, k := range existingKeys {
 		existing[k.Value] = k
 	}
 
@@ -87,9 +97,7 @@ func (p *Pool) Update(newValues []string) {
 			newKeys = append(newKeys, newKey(v))
 		}
 	}
-
-	p.keys = newKeys
-	p.cursor.Store(0)
+	return newKeys
 }
 
 // ResetKeyByID 按 key 哈希标识恢复对应 key 为 active，便于管理台手动解除摘除状态。

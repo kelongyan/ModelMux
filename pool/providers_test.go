@@ -118,3 +118,41 @@ func TestProviderPoolsSnapshotAndRestore(t *testing.T) {
 		t.Fatalf("CoolingKeys = %d, want 1", statuses[0].CoolingKeys)
 	}
 }
+
+func TestProviderPoolsUpdateDoesNotMutatePreviouslyHeldPool(t *testing.T) {
+	pools, err := NewProviderPools([]ProviderSpec{
+		{ID: "p1", Keys: []string{"k1"}},
+	}, "p1")
+	if err != nil {
+		t.Fatalf("NewProviderPools() error = %v", err)
+	}
+
+	_, heldPool, err := pools.Active()
+	if err != nil {
+		t.Fatalf("Active() error = %v", err)
+	}
+	if heldPool.TotalCount() != 1 {
+		t.Fatalf("heldPool.TotalCount() = %d, want 1", heldPool.TotalCount())
+	}
+
+	if err := pools.Update([]ProviderSpec{
+		{ID: "p1", Keys: []string{"k2", "k3"}},
+	}, "p1"); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if heldPool.TotalCount() != 1 {
+		t.Fatalf("heldPool.TotalCount() = %d, want 1 after update", heldPool.TotalCount())
+	}
+
+	_, nextPool, err := pools.Active()
+	if err != nil {
+		t.Fatalf("Active() error = %v", err)
+	}
+	if nextPool.TotalCount() != 2 {
+		t.Fatalf("nextPool.TotalCount() = %d, want 2", nextPool.TotalCount())
+	}
+	if heldPool == nextPool {
+		t.Fatal("heldPool and nextPool should differ after update")
+	}
+}

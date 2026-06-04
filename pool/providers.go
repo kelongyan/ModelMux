@@ -84,7 +84,9 @@ func (p *ProviderPools) Update(specs []ProviderSpec, activeID string) error {
 	for _, spec := range normalized {
 		keyPool, ok := p.providers[spec.ID]
 		if ok {
-			keyPool.Update(spec.Keys)
+			keyPool = &Pool{
+				keys: keyPool.updatedKeys(spec.Keys),
+			}
 		} else {
 			keyPool = New(spec.Keys)
 		}

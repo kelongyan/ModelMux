@@ -1,5 +1,7 @@
 package logx
 
+import "regexp"
+
 const (
 	CategoryAdmin     = "admin"
 	CategoryConfig    = "config"
@@ -77,6 +79,12 @@ type Event struct {
 	Data            map[string]any `json:"data,omitempty"`
 }
 
+var redactionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(authorization\s*:\s*bearer\s+)[^\s"']+`),
+	regexp.MustCompile(`(?i)(x-api-key\s*:\s*)[^\s"']+`),
+	regexp.MustCompile(`(?i)(api[_-]?key\s*[=:]\s*)[^\s"'&]+`),
+}
+
 // Attrs returns slog attributes matching the same event shape exposed through the admin API.
 func (e Event) Attrs() []any {
 	fields := Fields(e.Category, e.Event)
@@ -118,7 +126,15 @@ func MaskSecret(secret string) string {
 		return ""
 	}
 	if len(secret) <= 6 {
-		return "***" + secret
+		return "***"
 	}
 	return "***" + secret[len(secret)-6:]
+}
+
+func RedactSensitiveText(text string) string {
+	redacted := text
+	for _, pattern := range redactionPatterns {
+		redacted = pattern.ReplaceAllString(redacted, `${1}[REDACTED]`)
+	}
+	return redacted
 }

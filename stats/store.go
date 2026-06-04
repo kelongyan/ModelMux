@@ -212,6 +212,9 @@ func (s *Store) loadRecentRecords() error {
 		return fmt.Errorf("scan stats files: %w", err)
 	}
 	sort.Strings(files)
+	sort.SliceStable(files, func(i, j int) bool {
+		return files[i] > files[j]
+	})
 
 	cutoff := cutoffDate(s.now().UTC(), s.retentionDays)
 	records := make([]CallRecord, 0)
@@ -225,6 +228,9 @@ func (s *Store) loadRecentRecords() error {
 		}); err != nil {
 			return err
 		}
+		if s.maxRecentRecords > 0 && len(records) >= s.maxRecentRecords {
+			break
+		}
 	}
 	sort.SliceStable(records, func(i, j int) bool {
 		return records[i].At.Before(records[j].At)
@@ -232,6 +238,39 @@ func (s *Store) loadRecentRecords() error {
 	s.records = records
 	s.capRecentLocked()
 	return nil
+}
+
+func (s *Store) recordsSinceFromFiles(since time.Time) ([]CallRecord, error) {
+	if s == nil {
+		return nil, nil
+	}
+
+	files, err := filepath.Glob(filepath.Join(s.dir, callFilePrefix+"*"+callFileSuffix))
+	if err != nil {
+		return nil, fmt.Errorf("scan stats files: %w", err)
+	}
+	sort.Strings(files)
+
+	records := make([]CallRecord, 0)
+	for _, file := range files {
+		fileDate, ok := parseCallFileDate(filepath.Base(file))
+		if !ok {
+			continue
+		}
+		if fileDate.Add(24 * time.Hour).Before(since) {
+			continue
+		}
+		if err := loadRecordsFromFile(file, func(record CallRecord) {
+			if record.At.IsZero() || record.At.Before(since) {
+				return
+			}
+			records = append(records, record)
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	return records, nil
 }
 
 func loadRecordsFromFile(path string, add func(CallRecord)) error {

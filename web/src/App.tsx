@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Spin, Layout, Space, Tag, Tooltip, Typography, message } from "antd";
+import { Spin, Layout, Typography, message } from "antd";
 import { lazy, Suspense, useCallback, useMemo } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
@@ -30,7 +30,6 @@ const navigationItems: NavigationItem[] = [
   { key: "/about", label: "关于", hint: "g a" },
 ];
 
-// App 渲染控制台主框架，并把各个功能页挂到统一的路由容器中。
 export function App(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
@@ -89,20 +88,16 @@ export function App(): JSX.Element {
       </aside>
       <Layout className="console-main">
         <header className="console-header">
-          <div>
+          <div className="console-header-copy">
             <Typography.Text className="console-header-label">当前页面</Typography.Text>
             <Typography.Title level={2} className="console-header-title">
               {resolveRouteTitle(location.pathname)}
             </Typography.Title>
+            <Typography.Paragraph className="console-header-subtitle">
+              {resolveRouteDescription(location.pathname)}
+            </Typography.Paragraph>
           </div>
-          <Space size="middle" wrap>
-            <Tooltip title="Ctrl / ⌘ + R 触发后端 reload">
-              <Tag color="cyan">⌘R 重载</Tag>
-            </Tooltip>
-            <Tooltip title="先按 g 再按 d / p / t / s / e / a 切换页面">
-              <Tag color="gold">g + d/p/t/s/e/a 切页</Tag>
-            </Tooltip>
-          </Space>
+          <HeaderSnapshot data={dashboardQuery.data} loading={dashboardQuery.isLoading} />
         </header>
         <main className="console-content">
           <Suspense fallback={<RouteFallback />}>
@@ -122,13 +117,13 @@ export function App(): JSX.Element {
   );
 }
 
-// ConsoleBrand 渲染控制台品牌区，保持侧边栏的视觉锚点。
 function ConsoleBrand(): JSX.Element {
   return (
     <div className="console-brand">
       <p className="console-kicker">ModelMux</p>
       <h1>控制台</h1>
-      <span>本地优先的模型提供商编排界面</span>
+      <span>本地模型代理的控制平面</span>
+      <small className="console-brand-meta">单 Provider 轮换 · 本地优先 · 内嵌管理台</small>
     </div>
   );
 }
@@ -139,7 +134,6 @@ type SidebarHealth = {
   hint: string;
 };
 
-// SidebarHealthBadge 把当前 active provider 和健康度提升到侧边栏顶部，无需打开总览也能感知状态。
 function SidebarHealthBadge({ state, label, hint }: SidebarHealth): JSX.Element {
   return (
     <div className={`sidebar-health sidebar-health--${state}`}>
@@ -154,49 +148,109 @@ function SidebarHealthBadge({ state, label, hint }: SidebarHealth): JSX.Element 
   );
 }
 
-// computeSidebarHealth 把 dashboard 聚合响应折算为侧边栏徽章可消费的健康度。
+type HeaderSnapshotProps = {
+  data: AdminDashboardResponse | undefined;
+  loading: boolean;
+};
+
+function HeaderSnapshot({ data, loading }: HeaderSnapshotProps): JSX.Element {
+  const summary = computeSidebarHealth(data, loading);
+
+  return (
+    <div className="console-header-status">
+      <div className="console-header-status-row">
+        <div className="console-header-provider">
+          <HealthDot state={summary.state} pulse={summary.state === "active"} />
+          <div>
+            <span className="console-header-provider-label">当前活跃</span>
+            <strong className="console-header-provider-name" title={summary.label}>
+              {summary.label}
+            </strong>
+          </div>
+        </div>
+        <div className="console-header-meta">
+          <span>{loading ? "正在同步状态" : `${data?.provider_count ?? 0} 个 Provider`}</span>
+          <span>Ctrl / ⌘ + R 重载</span>
+        </div>
+      </div>
+      <div className="console-header-metrics">
+        <div className="console-header-metric">
+          <span>可用</span>
+          <strong>{data ? data.active_keys : "—"}</strong>
+        </div>
+        <div className="console-header-metric">
+          <span>冷却</span>
+          <strong>{data ? data.cooling_keys : "—"}</strong>
+        </div>
+        <div className="console-header-metric">
+          <span>失效</span>
+          <strong>{data ? data.invalid_keys : "—"}</strong>
+        </div>
+        <div className="console-header-metric">
+          <span>概览</span>
+          <strong>{summary.hint}</strong>
+        </div>
+      </div>
+      <p className="console-shortcut-hint">快捷键：先按 g，再按 d / p / t / s / e / a</p>
+    </div>
+  );
+}
+
 function computeSidebarHealth(data: AdminDashboardResponse | undefined, loading: boolean): SidebarHealth {
   if (loading || !data) {
-    return { state: "idle", label: "正在加载…", hint: "—" };
+    return { state: "idle", label: "正在加载…", hint: "等待控制面返回状态" };
   }
   if (!data.active_provider) {
-    return { state: "invalid", label: "未配置 Provider", hint: "请在提供商页面新增" };
+    return { state: "invalid", label: "未配置 Provider", hint: "请先在提供商页新增配置" };
   }
   if (data.active_keys === 0) {
     return {
       state: "invalid",
       label: data.active_provider,
-      hint: data.cooling_keys > 0 ? "无可用 Key（仅 cooling）" : "无可用 Key",
+      hint: data.cooling_keys > 0 ? "无可用 Key（仅剩 cooling）" : "无可用 Key",
     };
   }
   if (data.cooling_keys > 0 || data.invalid_keys > 0) {
     return {
       state: "cooling",
       label: data.active_provider,
-      hint: `可用 ${data.active_keys}  冷却 ${data.cooling_keys}  失效 ${data.invalid_keys}`,
+      hint: `可用 ${data.active_keys} · 冷却 ${data.cooling_keys} · 失效 ${data.invalid_keys}`,
     };
   }
   return {
     state: "active",
     label: data.active_provider,
-    hint: `可用 ${data.active_keys}  全员健康`,
+    hint: `可用 ${data.active_keys} · 当前运行稳定`,
   };
 }
 
-// RouteFallback 在路由切换时提供轻量加载态，避免空白页闪烁。
 function RouteFallback(): JSX.Element {
   return (
     <div className="console-loading">
-      <Space direction="vertical" align="center" size={12}>
-        <Spin size="large" />
-        <Typography.Text className="table-subtext">正在加载页面…</Typography.Text>
-      </Space>
+      <Typography.Text className="table-subtext">正在加载页面…</Typography.Text>
+      <Spin size="large" />
     </div>
   );
 }
 
-// resolveRouteTitle 根据当前路径返回页头标题，避免在多个页面中重复声明。
 function resolveRouteTitle(pathname: string): string {
   const matched = navigationItems.find((item) => pathname === item.key);
   return matched ? matched.label : "总览";
+}
+
+function resolveRouteDescription(pathname: string): string {
+  switch (pathname) {
+    case "/providers":
+      return "管理 provider、key 池和活跃切换，适合做容量与可用性维护。";
+    case "/stats":
+      return "查看调用量、模型使用和最近请求明细，观察流量与成本趋势。";
+    case "/settings":
+      return "维护运行参数、日志与状态持久化配置，并区分热生效与重启项。";
+    case "/events":
+      return "筛选运行事件与请求上下文，定位异常链路和 provider 问题。";
+    case "/about":
+      return "查看运行环境、版本信息与备份导出入口。";
+    default:
+      return "聚焦当前活跃 provider、key 池健康度和最近异常，适合日常值守。";
+  }
 }

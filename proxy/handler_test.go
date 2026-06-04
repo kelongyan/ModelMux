@@ -809,8 +809,8 @@ func TestRuntimeConfigUsesSplitTimeouts(t *testing.T) {
 	h, _ := mustHandler(t, cfg)
 
 	rt := h.snapshot()
-	if rt.client.Timeout != 11*time.Second {
-		t.Fatalf("client timeout = %v, want 11s", rt.client.Timeout)
+	if rt.requestTimeout != 11*time.Second {
+		t.Fatalf("requestTimeout = %v, want 11s", rt.requestTimeout)
 	}
 	if rt.transport.ResponseHeaderTimeout != 7*time.Second {
 		t.Fatalf("response header timeout = %v, want 7s", rt.transport.ResponseHeaderTimeout)
@@ -823,6 +823,89 @@ func TestRuntimeConfigUsesSplitTimeouts(t *testing.T) {
 	}
 	if rt.waitForKeyTimeout != 900*time.Millisecond {
 		t.Fatalf("waitForKeyTimeout = %v, want 900ms", rt.waitForKeyTimeout)
+	}
+}
+
+func TestServeHTTPStreamingRequestIgnoresFixedClientTimeout(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"slow\"}}]}\n\n"))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(1200 * time.Millisecond)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{
+			{ID: "primary", TargetURL: upstream.URL, Keys: []string{"k1"}},
+		},
+		RequestTimeoutSeconds: 1,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"stream-model","stream":true,"messages":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "data: [DONE]") {
+		t.Fatalf("body = %q, want completed streaming response", rr.Body.String())
+	}
+}
+
+func TestRequestDiagnosticEventRedactsUpstreamErrorExcerpt(t *testing.T) {
+	event := requestDiagnosticEvent(requestDiagnosticInput{
+		level:                "warn",
+		event:                logx.EventProxyRequestFailed,
+		message:              "upstream rejected request",
+		retryScope:           retryScopeNone,
+		upstreamErrorExcerpt: `Authorization: Bearer sk-secret-123456` + "\n" + `api_key=abc123`,
+	})
+
+	excerpt, _ := event.Data["upstream_error_excerpt"].(string)
+	if strings.Contains(excerpt, "sk-secret-123456") || strings.Contains(excerpt, "abc123") {
+		t.Fatalf("upstream_error_excerpt leaked secret: %q", excerpt)
+	}
+	if !strings.Contains(excerpt, "[REDACTED]") {
+		t.Fatalf("upstream_error_excerpt = %q, want redaction marker", excerpt)
+	}
+}
+
+func TestExtractRequestMetaParsesModelStreamAndToolsPresence(t *testing.T) {
+	meta := extractRequestMeta([]byte(`{"model":"gpt-4.1-mini","stream":true,"tools":[{"type":"function"}]}`))
+
+	if meta.model != "gpt-4.1-mini" {
+		t.Fatalf("model = %q, want gpt-4.1-mini", meta.model)
+	}
+	if !meta.stream {
+		t.Fatal("stream = false, want true")
+	}
+	if !meta.toolsPresent {
+		t.Fatal("toolsPresent = false, want true")
+	}
+}
+
+func TestExtractRequestMetaIgnoresInvalidJSON(t *testing.T) {
+	meta := extractRequestMeta([]byte(`{`))
+
+	if meta.model != "" {
+		t.Fatalf("model = %q, want empty", meta.model)
+	}
+	if meta.stream {
+		t.Fatal("stream = true, want false")
+	}
+	if meta.toolsPresent {
+		t.Fatal("toolsPresent = true, want false")
 	}
 }
 

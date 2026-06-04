@@ -1,0 +1,73 @@
+.settings-advanced-collapse {
+  margin: 4px 0 12px;
+}
+
+.settings-advanced-collapse .ant-collapse-header {
+  padding-left: 0 !important;
+}
+
+.settings-advanced-collapse .ant-collapse-content > .ant-collapse-content-box {
+  padding: 8px 0 0 !important;
+}
+
+.settings-hero-card .section-heading {
+  margin-bottom: 12px;
+}
+
+.settings-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.settings-section {
+  margin-top: 0;
+}
+
+.settings-section .ant-form-item {
+  margin-bottom: 14px;
+}
+
+.settings-section-head {
+  margin-bottom: 10px;
+}
+
+.settings-section-description {
+  margin-bottom: 0 !important;
+}
+
+.settings-summary-card {
+  background: #f8fafc !important;
+}
+
+.settings-summary-label {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 0.8rem;
+}
+
+.settings-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.settings-card-grid + .settings-card-grid {
+  margin-top: 18px;
+}
+
+.settings-card-grid--wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-card-grid .surface-card .ant-card-body {
+  height: 100%;
+}

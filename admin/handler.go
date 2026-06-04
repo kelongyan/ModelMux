@@ -108,21 +108,22 @@ func (h *Handler) reload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.cfgManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	if !h.requireConfigManager(w) {
 		return
 	}
-	if err := h.reloadFn(h.cfgManager.Path()); err != nil {
-		slog.Error("admin reload failed", logx.Fields(logx.CategoryAdmin, logx.EventAdminReloadFailed,
-			"err", err,
-		)...)
-		h.recordEvent("error", logx.CategoryAdmin, logx.EventAdminReloadFailed, "legacy reload failed", map[string]any{
-			"error": err.Error(),
-		})
+	if err := h.runReload(logx.CategoryAdmin, logx.EventAdminReloadFailed, "legacy reload failed", logx.EventAdminReloadOK, "legacy reload ok"); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
-	slog.Info("admin reload ok", logx.Fields(logx.CategoryAdmin, logx.EventAdminReloadOK)...)
-	h.recordEvent("info", logx.CategoryAdmin, logx.EventAdminReloadOK, "legacy reload ok", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) runReload(category, errorEvent, errorMessage, successEvent, successMessage string) error {
+	if err := h.reloadFn(h.cfgManager.Path()); err != nil {
+		slog.Error(errorMessage, logx.Fields(category, errorEvent, "err", err)...)
+		return err
+	}
+	slog.Info(successMessage, logx.Fields(category, successEvent)...)
+	h.recordEvent("info", category, successEvent, successMessage, nil)
+	return nil
 }

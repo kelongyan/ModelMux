@@ -35,7 +35,10 @@ func (s *Store) SummarySince(since time.Time) Summary {
 	if s == nil {
 		return Summary{}
 	}
-	records := s.recordsSince(since)
+	records, err := s.recordsSince(since)
+	if err != nil {
+		return Summary{}
+	}
 
 	var summary Summary
 	var latencyTotal int64
@@ -71,7 +74,10 @@ func (s *Store) ModelsSince(since time.Time) []ModelSummary {
 	if s == nil {
 		return nil
 	}
-	records := s.recordsSince(since)
+	records, err := s.recordsSince(since)
+	if err != nil {
+		return nil
+	}
 
 	type aggregate struct {
 		summary      ModelSummary
@@ -125,16 +131,6 @@ func (s *Store) ModelsSince(since time.Time) []ModelSummary {
 	return out
 }
 
-func (s *Store) recordsSince(since time.Time) []CallRecord {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	out := make([]CallRecord, 0, len(s.records))
-	for _, record := range s.records {
-		if record.At.IsZero() || record.At.Before(since) {
-			continue
-		}
-		out = append(out, record)
-	}
-	return out
+func (s *Store) recordsSince(since time.Time) ([]CallRecord, error) {
+	return s.recordsSinceFromFiles(since)
 }

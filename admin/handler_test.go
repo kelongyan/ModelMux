@@ -679,6 +679,36 @@ func TestStatsSummaryRejectsInvalidWindow(t *testing.T) {
 	}
 }
 
+func TestParseProviderActionRecognizesSupportedRoutes(t *testing.T) {
+	h, _, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+
+	cases := []struct {
+		path    string
+		id      string
+		action  string
+		keyID   string
+		ok      bool
+	}{
+		{path: "/admin/api/v1/providers/p1", id: "p1", action: "", keyID: "", ok: true},
+		{path: "/admin/api/v1/providers/p1/activate", id: "p1", action: "activate", keyID: "", ok: true},
+		{path: "/admin/api/v1/providers/p1/keys:append", id: "p1", action: "keys:append", keyID: "", ok: true},
+		{path: "/admin/api/v1/providers/p1/keys/abc/reset", id: "p1", action: "key:reset", keyID: "abc", ok: true},
+		{path: "/admin/api/v1/providers", ok: false},
+	}
+
+	for _, tc := range cases {
+		id, action, keyID, ok := h.parseProviderAction(tc.path)
+		if id != tc.id || action != tc.action || keyID != tc.keyID || ok != tc.ok {
+			t.Fatalf("parseProviderAction(%q) = (%q,%q,%q,%v), want (%q,%q,%q,%v)", tc.path, id, action, keyID, ok, tc.id, tc.action, tc.keyID, tc.ok)
+		}
+	}
+}
+
 func int64PtrAdmin(value int64) *int64 {
 	return &value
 }

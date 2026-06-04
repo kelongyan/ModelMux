@@ -167,6 +167,19 @@ func TestValidateRejectsDuplicateProviderIDs(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsProviderIDWithSlash(t *testing.T) {
+	cfg := &Config{
+		Providers: []ProviderConfig{
+			{ID: "bad/id", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+		ActiveProvider: "bad/id",
+	}
+
+	if err := cfg.validate(); err == nil {
+		t.Fatal("validate() error = nil, want invalid provider id error")
+	}
+}
+
 func TestValidateLegacyConfigStillWorks(t *testing.T) {
 	cfg := &Config{
 		TargetURL: "https://example.com",

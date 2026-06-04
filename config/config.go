@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -118,7 +119,10 @@ func Read(path string) (*Config, error) {
 func Get() *Config {
 	mu.RLock()
 	defer mu.RUnlock()
-	return current
+	if current == nil {
+		return nil
+	}
+	return current.Clone()
 }
 
 // SetCurrent 用一份已校验的配置替换当前快照，供热重载成功后原子提交。
@@ -159,6 +163,9 @@ func (c *Config) validate() error {
 	for i, provider := range providers {
 		if provider.ID == "" {
 			return fmt.Errorf("providers[%d].id is required", i)
+		}
+		if strings.ContainsAny(provider.ID, "/?#") {
+			return fmt.Errorf("providers[%d].id contains unsupported path characters", i)
 		}
 		if _, ok := seen[provider.ID]; ok {
 			return fmt.Errorf("duplicate provider id %q", provider.ID)

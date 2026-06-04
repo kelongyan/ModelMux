@@ -131,6 +131,22 @@ type apiAboutResponse struct {
 	BackupEndpoints []string `json:"backup_endpoints"`
 }
 
+func decodeJSONBody[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+		return false
+	}
+	return true
+}
+
+func (h *Handler) requireConfigManager(w http.ResponseWriter) bool {
+	if h.cfgManager != nil {
+		return true
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	return false
+}
+
 // registerAPIRoutes 注册管理台 API 路由。
 func (h *Handler) registerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/v1/dashboard", h.dashboard)
@@ -236,8 +252,7 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.cfgManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	if !h.requireConfigManager(w) {
 		return
 	}
 
@@ -313,30 +328,28 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.cfgManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	if !h.requireConfigManager(w) {
 		return
 	}
 
 	var req apiProviderCreatePayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
 	result, err := h.cfgManager.Update(func(cfg *config.Config) error {
 		keys := normalizeKeys(req.Keys)
 		if req.ID == "" {
-			return errorf("provider id is required")
+			return fmt.Errorf("provider id is required")
 		}
 		if req.TargetURL == "" {
-			return errorf("target_url is required")
+			return fmt.Errorf("target_url is required")
 		}
 		if len(keys) == 0 {
-			return errorf("at least one key is required")
+			return fmt.Errorf("at least one key is required")
 		}
 		if _, exists := findProviderConfig(cfg.Providers, req.ID); exists {
-			return errorf("provider %q already exists", req.ID)
+			return fmt.Errorf("provider %q already exists", req.ID)
 		}
 		cfg.Providers = append(cfg.Providers, config.ProviderConfig{
 			ID:        req.ID,
@@ -371,24 +384,22 @@ func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request, id stri
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.cfgManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	if !h.requireConfigManager(w) {
 		return
 	}
 
 	var req apiProviderUpdatePayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
 	result, err := h.cfgManager.Update(func(cfg *config.Config) error {
 		if req.TargetURL == "" {
-			return errorf("target_url is required")
+			return fmt.Errorf("target_url is required")
 		}
 		idx := findProviderIndex(cfg.Providers, id)
 		if idx < 0 {
-			return errorf("provider not found")
+			return fmt.Errorf("provider not found")
 		}
 		cfg.Providers[idx].TargetURL = req.TargetURL
 		return nil
@@ -419,21 +430,20 @@ func (h *Handler) deleteProvider(w http.ResponseWriter, r *http.Request, id stri
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.cfgManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	if !h.requireConfigManager(w) {
 		return
 	}
 
 	result, err := h.cfgManager.Update(func(cfg *config.Config) error {
 		if cfg.ActiveProvider == id {
-			return errorf("cannot delete active provider")
+			return fmt.Errorf("cannot delete active provider")
 		}
 		if len(cfg.Providers) <= 1 {
-			return errorf("cannot delete the last provider")
+			return fmt.Errorf("cannot delete the last provider")
 		}
 		idx := findProviderIndex(cfg.Providers, id)
 		if idx < 0 {
-			return errorf("provider not found")
+			return fmt.Errorf("provider not found")
 		}
 		cfg.Providers = append(cfg.Providers[:idx], cfg.Providers[idx+1:]...)
 		return nil
@@ -467,7 +477,7 @@ func (h *Handler) appendProviderKeys(w http.ResponseWriter, r *http.Request, id 
 
 	result, err := h.updateProviderKeys(id, r, func(existing []string, incoming []string) ([]string, error) {
 		if len(incoming) == 0 {
-			return nil, errorf("at least one key is required")
+			return nil, fmt.Errorf("at least one key is required")
 		}
 		return mergeKeys(existing, incoming), nil
 	})
@@ -495,7 +505,7 @@ func (h *Handler) replaceProviderKeys(w http.ResponseWriter, r *http.Request, id
 
 	result, err := h.updateProviderKeys(id, r, func(_ []string, incoming []string) ([]string, error) {
 		if len(incoming) == 0 {
-			return nil, errorf("at least one key is required")
+			return nil, fmt.Errorf("at least one key is required")
 		}
 		return incoming, nil
 	})
@@ -520,14 +530,12 @@ func (h *Handler) deleteProviderKeys(w http.ResponseWriter, r *http.Request, id 
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.cfgManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	if !h.requireConfigManager(w) {
 		return
 	}
 
 	var req apiDeleteKeysPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	if len(req.KeyIDs) == 0 {
@@ -546,7 +554,7 @@ func (h *Handler) deleteProviderKeys(w http.ResponseWriter, r *http.Request, id 
 	result, err := h.cfgManager.Update(func(cfg *config.Config) error {
 		idx := findProviderIndex(cfg.Providers, id)
 		if idx < 0 {
-			return errorf("provider not found")
+			return fmt.Errorf("provider not found")
 		}
 
 		nextKeys := make([]string, 0, len(cfg.Providers[idx].Keys))
@@ -557,10 +565,10 @@ func (h *Handler) deleteProviderKeys(w http.ResponseWriter, r *http.Request, id 
 			nextKeys = append(nextKeys, key)
 		}
 		if len(nextKeys) == len(cfg.Providers[idx].Keys) {
-			return errorf("no matching keys were found")
+			return fmt.Errorf("no matching keys were found")
 		}
 		if len(nextKeys) == 0 {
-			return errorf("provider must keep at least one key")
+			return fmt.Errorf("provider must keep at least one key")
 		}
 		cfg.Providers[idx].Keys = nextKeys
 		return nil
@@ -675,8 +683,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req apiSettingsPayload
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -764,18 +771,16 @@ func (h *Handler) apiReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if h.cfgManager == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+	if !h.requireConfigManager(w) {
 		return
 	}
-	if err := h.reloadFn(h.cfgManager.Path()); err != nil {
+	if err := h.runReload(logx.CategoryConfig, "config.reload_failed", "manual reload failed", "config.reloaded", "manual reload ok"); err != nil {
 		h.recordEvent("error", logx.CategoryConfig, "config.reload_failed", "manual reload failed", map[string]any{
 			"error": err.Error(),
 		})
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
-	h.recordEvent("info", logx.CategoryConfig, "config.reloaded", "manual reload ok", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -999,22 +1004,22 @@ func findProviderIndex(providers []config.ProviderConfig, id string) int {
 // updateProviderKeys 统一处理 key 载荷解析与配置更新，避免 append/replace 重复逻辑。
 func (h *Handler) updateProviderKeys(id string, r *http.Request, mutator func(existing []string, incoming []string) ([]string, error)) (*config.UpdateResult, error) {
 	if h.cfgManager == nil {
-		return nil, errorf("config manager is not ready")
+		return nil, fmt.Errorf("config manager is not ready")
 	}
 	if mutator == nil {
-		return nil, errorf("key mutator is required")
+		return nil, fmt.Errorf("key mutator is required")
 	}
 
 	var req apiKeysPayload
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return nil, errorf("invalid json body")
+		return nil, fmt.Errorf("invalid json body")
 	}
 	incoming := normalizeKeys(req.Keys)
 
 	return h.cfgManager.Update(func(cfg *config.Config) error {
 		idx := findProviderIndex(cfg.Providers, id)
 		if idx < 0 {
-			return errorf("provider not found")
+			return fmt.Errorf("provider not found")
 		}
 		nextKeys, err := mutator(append([]string(nil), cfg.Providers[idx].Keys...), incoming)
 		if err != nil {
@@ -1069,11 +1074,6 @@ func (h *Handler) toChangeResponse(result *config.UpdateResult) apiChangeRespons
 		HotReloadedFields:     result.HotReloadedFields,
 		RestartRequiredFields: result.RestartRequiredFields,
 	}
-}
-
-// errorf 统一创建管理台面向用户的格式化错误。
-func errorf(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
 }
 
 // listEvents 返回事件缓冲区中的最近事件。

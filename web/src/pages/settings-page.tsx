@@ -5,8 +5,6 @@ import {
   Card,
   Checkbox,
   Col,
-  Collapse,
-  Divider,
   Form,
   Input,
   InputNumber,
@@ -62,7 +60,6 @@ const fieldLabels: Record<string, string> = {
   stats_max_recent_records: "最近记录内存上限",
 };
 
-// SettingsPage 渲染运行配置编辑页，并明确区分热生效与需重启的设置项。
 export function SettingsPage(): JSX.Element {
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
@@ -129,16 +126,18 @@ export function SettingsPage(): JSX.Element {
       <Space direction="vertical" size={20} className="console-stack">
         {saveSummary ? <SaveSummaryBanner summary={saveSummary} /> : null}
 
-        <Card className="surface-card" bordered={false}>
+        <Card className="surface-card settings-hero-card" bordered={false}>
           <div className="section-heading">
             <div>
               <Typography.Text className="placeholder-kicker">Settings</Typography.Text>
               <Typography.Title level={3} className="section-title">
                 运行配置
               </Typography.Title>
+              <Typography.Paragraph className="dashboard-section-copy">
+                将设置分成核心运行、网络与日志、状态持久化、调用统计几类，优先把生效方式讲清楚。
+              </Typography.Paragraph>
             </div>
             <Space wrap>
-              <Tag color="green">{`当前活跃：${settingsQuery.data.settings.active_provider}`}</Tag>
               <Button onClick={() => resetFormFromServer(settingsQuery.data)}>重置为服务端配置</Button>
               <Button
                 type="primary"
@@ -149,40 +148,45 @@ export function SettingsPage(): JSX.Element {
               </Button>
             </Space>
           </div>
-
-          <Form<AdminSettingsPayload> form={form} layout="vertical" onFinish={(values) => updateSettingsMutation.mutate(values)}>
-            <SettingSection title="核心运行参数" fields={settingGroups.coreFields} />
-
-            <Collapse
-              ghost
-              className="settings-advanced-collapse"
-              items={[
-                {
-                  key: "advanced",
-                  label: (
-                    <Space size={8}>
-                      <Typography.Text strong>高级重试与超时</Typography.Text>
-                      <Tag color="gold">高级</Tag>
-                    </Space>
-                  ),
-                  children: <SettingSection fields={settingGroups.advancedFields} />,
-                },
-              ]}
-            />
-
-            <Divider />
-
-            <SettingSection title="网络监听与日志" fields={settingGroups.serverAndLogFields} />
-
-            <Divider />
-
-            <SettingSection title="状态持久化" fields={settingGroups.stateFields} />
-
-            <Divider />
-
-            <SettingSection title="调用统计" fields={settingGroups.statsFields} />
-          </Form>
+          <div className="settings-hero-meta">
+            <span className="settings-meta-chip">{`当前活跃：${settingsQuery.data.settings.active_provider}`}</span>
+            <span className="settings-meta-chip">保存后自动写入 config.json</span>
+            <span className="settings-meta-chip">热生效与重启项已按分组标注</span>
+          </div>
         </Card>
+
+        <Form<AdminSettingsPayload> form={form} layout="vertical" onFinish={(values) => updateSettingsMutation.mutate(values)}>
+          <div className="settings-card-grid settings-card-grid--wide">
+            <SettingSectionCard
+              title="核心运行参数"
+              note="最常调的运行参数：重试、超时、请求体限制。"
+              fields={settingGroups.coreFields}
+            />
+            <SettingSectionCard
+              title="高级重试与超时"
+              note="处理 provider 临时故障、响应头超时和 cooling 等边界行为。"
+              fields={settingGroups.advancedFields}
+            />
+          </div>
+
+          <div className="settings-card-grid">
+            <SettingSectionCard
+              title="网络监听与日志"
+              note="监听地址和日志输出需要更谨慎，部分改动需重启才能完全生效。"
+              fields={settingGroups.serverAndLogFields}
+            />
+            <SettingSectionCard
+              title="状态持久化"
+              note="控制 key 状态文件、invalid 恢复窗口和运行状态落盘。"
+              fields={settingGroups.stateFields}
+            />
+            <SettingSectionCard
+              title="调用统计"
+              note="控制 JSONL 明细、保留天数与内存中的最近记录窗口。"
+              fields={settingGroups.statsFields}
+            />
+          </div>
+        </Form>
       </Space>
     </>
   );
@@ -197,7 +201,6 @@ type SaveSummaryBannerProps = {
   summary: SaveSummary;
 };
 
-// SaveSummaryBanner 在保存后集中展示本次变更的字段及其生效方式。
 function SaveSummaryBanner({ summary }: SaveSummaryBannerProps): JSX.Element {
   if (summary.changedFields.length === 0) {
     return <Alert type="success" showIcon message="已保存，但没有检测到字段变化" />;
@@ -268,7 +271,26 @@ type SettingSectionProps = {
   fields: SettingFieldMeta[];
 };
 
-// SettingSection 按语义分组渲染设置字段，并在每一项旁边标注生效方式。
+type SettingSectionCardProps = {
+  title: string;
+  note: string;
+  fields: SettingFieldMeta[];
+};
+
+function SettingSectionCard({ title, note, fields }: SettingSectionCardProps): JSX.Element {
+  return (
+    <Card className="surface-card" bordered={false}>
+      <div className="settings-section-head">
+        <Typography.Title level={4} className="section-title">
+          {title}
+        </Typography.Title>
+        <Typography.Paragraph className="settings-section-description">{note}</Typography.Paragraph>
+      </div>
+      <SettingSection fields={fields} />
+    </Card>
+  );
+}
+
 function SettingSection({ title, fields }: SettingSectionProps): JSX.Element {
   return (
     <div className="settings-section">
@@ -309,7 +331,6 @@ function SettingSection({ title, fields }: SettingSectionProps): JSX.Element {
   );
 }
 
-// buildSettingGroups 把设置页字段拆成核心运行、高级重试、网络日志、状态和统计几组。
 function buildSettingGroups(response: AdminSettingsResponse): {
   coreFields: SettingFieldMeta[];
   advancedFields: SettingFieldMeta[];
@@ -560,7 +581,6 @@ function buildSettingGroups(response: AdminSettingsResponse): {
   };
 }
 
-// buildFieldRules 为设置页字段生成基础校验规则，避免提交无意义空值。
 function buildFieldRules(field: keyof AdminSettingsPayload) {
   const requiredMessage = `请填写${fieldToLabel(field)}`;
   switch (field) {
@@ -579,7 +599,6 @@ function buildFieldRules(field: keyof AdminSettingsPayload) {
   }
 }
 
-// toSaveSummary 把后端保存响应规范化为前端结果摘要。
 function toSaveSummary(result: AdminChangeResponse): SaveSummary {
   return {
     changedFields: result.changed_fields ?? [],
@@ -588,7 +607,6 @@ function toSaveSummary(result: AdminChangeResponse): SaveSummary {
   };
 }
 
-// fieldToLabel 把字段名转换成设置页更适合展示的中文标签。
 function fieldToLabel(field: string): string {
   return fieldLabels[field] ?? field;
 }

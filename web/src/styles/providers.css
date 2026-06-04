@@ -1,0 +1,240 @@
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.provider-card {
+  gap: 14px;
+  padding: 18px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.provider-card:hover {
+  transform: none;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.07) !important;
+}
+
+.provider-card--current {
+  border-color: rgba(15, 118, 110, 0.28) !important;
+  box-shadow: 0 14px 36px rgba(15, 118, 110, 0.08) !important;
+  background: #ffffff !important;
+}
+
+.provider-card--cooling {
+  border-color: rgba(181, 71, 8, 0.24) !important;
+}
+
+.provider-card--invalid {
+  border-color: rgba(180, 35, 24, 0.22) !important;
+}
+
+.provider-card-head {
+  gap: 8px;
+}
+
+.provider-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-card-title {
+  gap: 8px;
+}
+
+.provider-card-title h3 {
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.provider-card-url {
+  color: #667085;
+  font-size: 0.8rem;
+}
+
+.provider-card-pool {
+  gap: 12px;
+}
+
+.provider-card-pool-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-card-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #d0d5dd;
+  background: #f8fafc;
+  color: #344054;
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.provider-card-state--active {
+  border-color: rgba(21, 128, 61, 0.2);
+  color: #166534;
+}
+
+.provider-card-state--cooling {
+  border-color: rgba(181, 71, 8, 0.22);
+  color: #b54708;
+}
+
+.provider-card-state--invalid {
+  border-color: rgba(180, 35, 24, 0.18);
+  color: #b42318;
+}
+
+.provider-card-state--idle {
+  border-color: #d0d5dd;
+  color: #344054;
+}
+
+.provider-card-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provider-card-stat {
+  padding: 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #eaecf0;
+}
+
+.provider-card-stat span {
+  display: block;
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 0.76rem;
+}
+
+.provider-card-stat strong {
+  color: #0f172a;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-card-issue {
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fffaf0;
+  border: 1px solid #f5d7a1;
+}
+
+.provider-card-issue-label {
+  flex: 0 0 auto;
+  color: #b54708;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.provider-card-issue-msg {
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.provider-card-issue-time {
+  margin-left: auto;
+  color: #667085;
+  font-size: 0.74rem;
+}
+
+.provider-card-actions {
+  gap: 10px;
+}
+
+.provider-card-actions > .ant-btn {
+  min-width: 0;
+}
+
+.provider-card--add {
+  min-height: 170px;
+  border-style: dashed !important;
+  background: rgba(248, 250, 252, 0.8) !important;
+  color: #475467;
+}
+
+.provider-card--add:hover {
+  border-color: rgba(15, 118, 110, 0.3) !important;
+  color: #0f766e;
+  background: #ffffff !important;
+}
+
+.providers-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.provider-table .ant-table {
+  background: transparent;
+}
+
+.provider-table .ant-table-thead > tr > th {
+  background: #f8fafc;
+  color: #475467;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.provider-table .ant-table-tbody > tr > td {
+  background: transparent;
+  font-size: 0.84rem;
+  vertical-align: top;
+}
+
+.provider-table-row--active > td {
+  background: rgba(15, 118, 110, 0.03) !important;
+}
+
+.provider-table-name {
+  min-width: 0;
+}
+
+.provider-table-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.provider-table-pool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #667085;
+  font-size: 0.78rem;
+}
+
+.provider-detail-pool {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #eaecf0;
+}
+
+.provider-detail-pool-summary {
+  color: #475467;
+  font-size: 0.84rem;
+}
+
+.provider-detail-descriptions .ant-descriptions-item-label {
+  color: #667085;
+}

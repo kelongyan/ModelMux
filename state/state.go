@@ -68,20 +68,6 @@ func (s *Store) Load() (*File, error) {
 	return &file, nil
 }
 
-// ProviderRecords 返回按 provider 分组的状态；旧版状态会映射到指定 provider。
-func (f *File) ProviderRecords(defaultProviderID string) []ProviderRecord {
-	if len(f.Providers) > 0 {
-		return append([]ProviderRecord(nil), f.Providers...)
-	}
-	if len(f.Keys) == 0 {
-		return nil
-	}
-	return []ProviderRecord{{
-		ID:   defaultProviderID,
-		Keys: append([]KeyRecord(nil), f.Keys...),
-	}}
-}
-
 // VersionedProviderRecords 返回向后兼容后的 provider 分组状态。
 func (f *File) VersionedProviderRecords(activeProviderID string) []ProviderRecord {
 	if len(f.Providers) > 0 {

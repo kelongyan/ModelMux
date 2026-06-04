@@ -47,3 +47,8 @@ export function formatClockShort(timestamp: number): string {
   }
   return new Date(timestamp).toLocaleTimeString("zh-CN", { hour12: false });
 }
+
+// formatDateTime 把 ISO 时间字符串格式化为本地日期时间。
+export function formatDateTime(value: string): string {
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}

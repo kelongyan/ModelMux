@@ -144,6 +144,40 @@ func TestStoreCleansExpiredFilesAndCapsRecentRecords(t *testing.T) {
 	}
 }
 
+func TestStoreLoadsRecentRecordsFromNewestFilesFirst(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "calls-2026-05-30.jsonl"), []byte(
+		"{\"id\":\"old-one\",\"at\":\"2026-05-30T10:00:00Z\"}\n"+
+			"{\"id\":\"old-two\",\"at\":\"2026-05-30T11:00:00Z\"}\n",
+	), 0600); err != nil {
+		t.Fatalf("write old fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "calls-2026-06-01.jsonl"), []byte(
+		"{\"id\":\"new-one\",\"at\":\"2026-06-01T10:00:00Z\"}\n"+
+			"{\"id\":\"new-two\",\"at\":\"2026-06-01T11:00:00Z\"}\n",
+	), 0600); err != nil {
+		t.Fatalf("write new fixture: %v", err)
+	}
+
+	store, err := NewStore(Options{
+		Dir:              dir,
+		RetentionDays:    30,
+		MaxRecentRecords: 2,
+		Now:              func() time.Time { return time.Date(2026, 6, 1, 13, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	recent := store.Recent(10)
+	if len(recent) != 2 {
+		t.Fatalf("len(Recent) = %d, want 2", len(recent))
+	}
+	if recent[0].ID != "new-one" || recent[1].ID != "new-two" {
+		t.Fatalf("Recent IDs = %q, %q; want new-one, new-two", recent[0].ID, recent[1].ID)
+	}
+}
+
 func int64Ptr(value int64) *int64 {
 	return &value
 }

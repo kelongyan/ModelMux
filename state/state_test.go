@@ -95,3 +95,21 @@ func TestVersionedProviderRecordsMapsLegacyKeysToActiveProvider(t *testing.T) {
 		t.Fatalf("len(Keys) = %d, want 1", len(records[0].Keys))
 	}
 }
+
+func TestVersionedProviderRecordsFallsBackToDefaultProviderID(t *testing.T) {
+	file := &File{
+		Version: 1,
+		Keys: []KeyRecord{{
+			KeyID: KeyID("sk-test"),
+			State: "active",
+		}},
+	}
+
+	records := file.VersionedProviderRecords("")
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	if records[0].ID != "default" {
+		t.Fatalf("provider ID = %q, want default", records[0].ID)
+	}
+}

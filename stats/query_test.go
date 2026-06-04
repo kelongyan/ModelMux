@@ -118,6 +118,99 @@ func TestStoreModelsSinceAggregatesByModel(t *testing.T) {
 	}
 }
 
+func TestStoreSummarySinceReadsBeyondRecentCache(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	store, err := NewStore(Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 2,
+		Now:              func() time.Time { return base },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	for i := 0; i < 4; i++ {
+		mustAppendRecord(t, store, CallRecord{
+			At:          base.Add(time.Duration(-i) * 10 * time.Minute),
+			Model:       "model-a",
+			Success:     true,
+			LatencyMs:   100,
+			TotalTokens: int64Ptr(10),
+			UsageSource: UsageSourceUpstream,
+		})
+	}
+
+	if got := len(store.Recent(10)); got != 2 {
+		t.Fatalf("len(Recent) = %d, want 2 due to recent cap", got)
+	}
+
+	summary := store.SummarySince(base.Add(-1 * time.Hour))
+	if summary.TotalCalls != 4 {
+		t.Fatalf("TotalCalls = %d, want 4 from files not recent cache", summary.TotalCalls)
+	}
+	if summary.TotalTokens != 40 {
+		t.Fatalf("TotalTokens = %d, want 40", summary.TotalTokens)
+	}
+}
+
+func TestStoreModelsSinceReadsBeyondRecentCache(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	store, err := NewStore(Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 2,
+		Now:              func() time.Time { return base },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-50 * time.Minute),
+		Model:       "model-a",
+		Success:     true,
+		LatencyMs:   100,
+		TotalTokens: int64Ptr(10),
+		UsageSource: UsageSourceUpstream,
+	})
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-40 * time.Minute),
+		Model:       "model-b",
+		Success:     true,
+		LatencyMs:   100,
+		TotalTokens: int64Ptr(20),
+		UsageSource: UsageSourceUpstream,
+	})
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-30 * time.Minute),
+		Model:       "model-a",
+		Success:     false,
+		LatencyMs:   200,
+		UsageSource: UsageSourceUnknown,
+	})
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-20 * time.Minute),
+		Model:       "model-c",
+		Success:     true,
+		LatencyMs:   150,
+		TotalTokens: int64Ptr(5),
+		UsageSource: UsageSourceUpstream,
+	})
+
+	if got := len(store.Recent(10)); got != 2 {
+		t.Fatalf("len(Recent) = %d, want 2 due to recent cap", got)
+	}
+
+	models := store.ModelsSince(base.Add(-1 * time.Hour))
+	if len(models) != 3 {
+		t.Fatalf("len(ModelsSince) = %d, want 3 from files not recent cache", len(models))
+	}
+	if models[0].Model != "model-a" || models[0].Calls != 2 {
+		t.Fatalf("models[0] = %+v, want model-a with 2 calls", models[0])
+	}
+}
+
 func mustAppendRecord(t *testing.T, store *Store, record CallRecord) {
 	t.Helper()
 	if err := store.Append(record); err != nil {

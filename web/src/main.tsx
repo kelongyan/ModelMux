@@ -28,24 +28,31 @@ ReactDOM.createRoot(rootElement).render(
         token: {
           colorPrimary: "#0f766e",
           colorInfo: "#0f766e",
-          // 控件圆角分三级，避免单一 borderRadius 让按钮/输入变成胶囊。
-          borderRadius: 10,
-          borderRadiusLG: 20,
-          borderRadiusSM: 6,
-          borderRadiusXS: 4,
-          // 按钮和输入再厚 4px，给"扎实"的感觉。
-          controlHeight: 36,
-          controlHeightSM: 28,
+          colorSuccess: "#15803d",
+          colorWarning: "#b54708",
+          colorError: "#b42318",
+          colorText: "#0f172a",
+          colorTextSecondary: "#475467",
+          colorBorder: "#d0d5dd",
+          colorBorderSecondary: "#e4e7ec",
+          colorBgBase: "#f5f7fa",
+          colorBgLayout: "#f5f7fa",
+          colorBgContainer: "#ffffff",
+          borderRadius: 12,
+          borderRadiusLG: 16,
+          borderRadiusSM: 10,
+          borderRadiusXS: 8,
+          controlHeight: 38,
+          controlHeightSM: 30,
           controlHeightLG: 44,
           fontFamily: '"Aptos", "Segoe UI", "Microsoft YaHei UI", sans-serif',
         },
         components: {
           Button: {
-            // 主按钮稍微更柔和的阴影，避免和卡片底色硬碰硬。
-            primaryShadow: "0 6px 14px rgba(15, 118, 110, 0.18)",
+            primaryShadow: "0 2px 6px rgba(15, 118, 110, 0.14)",
           },
           Tag: {
-            borderRadiusSM: 6,
+            borderRadiusSM: 999,
           },
         },
       }}
@@ -59,7 +66,6 @@ ReactDOM.createRoot(rootElement).render(
   </React.StrictMode>
 );
 
-// normalizeBaseName 把 Vite 的 BASE_URL 规范为 BrowserRouter 可以识别的 basename。
 function normalizeBaseName(baseUrl: string): string {
   if (!baseUrl || baseUrl === "/") {
     return "/";

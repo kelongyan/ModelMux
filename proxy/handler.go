@@ -63,6 +63,7 @@ type runtimeConfig struct {
 	keyPool                 *pool.Pool
 	client                  *http.Client
 	transport               *http.Transport
+	requestTimeout          time.Duration
 	stripTools              bool
 	coolingSeconds          int
 	maxRetries              int
@@ -229,7 +230,6 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 		ResponseHeaderTimeout: time.Duration(responseHeaderTimeoutSeconds) * time.Second,
 	}
 	client := &http.Client{
-		Timeout: time.Duration(requestTimeoutSeconds) * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -242,6 +242,7 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 		keyPool:                 keyPool,
 		client:                  client,
 		transport:               transport,
+		requestTimeout:          time.Duration(requestTimeoutSeconds) * time.Second,
 		stripTools:              provider.StripTools,
 		coolingSeconds:          effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
 		maxRetries:              effectiveInt(cfg.MaxRetries, config.DefaultMaxRetries),
@@ -324,9 +325,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestModel := extractRequestModel(body)
-	requestStream := extractRequestStream(body)
-	toolsPresent := extractToolFieldsPresent(body)
+	requestMeta := extractRequestMeta(body)
+	requestModel := requestMeta.model
+	requestStream := requestMeta.stream
+	toolsPresent := requestMeta.toolsPresent
 	toolsStripped := rt.stripTools && toolsPresent
 
 	callRecord := stats.CallRecord{
@@ -390,7 +392,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		status, retryAfter, scope, usage, upstreamErrorExcerpt, err := h.forward(w, r, rt, key, body)
+		status, retryAfter, scope, usage, upstreamErrorExcerpt, err := h.forward(w, r, rt, key, body, requestStream)
 		key.FinishRequest()
 		callRecord.Attempts = attempt + 1
 		callRecord.Status = status
@@ -429,7 +431,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"path", r.URL.Path,
 				"attempt", attempt+1,
 				"provider_id", rt.providerID,
-				"key_id", logx.MaskSecret(key.Value),
+				"key_hint", logx.MaskSecret(key.Value),
 			)...)
 			return
 		}
@@ -474,7 +476,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("key rate-limited, cooling", logx.Fields(logx.CategoryRetry, logx.EventKeyCooling,
 					"attempt", attempt+1,
 					"provider_id", rt.providerID,
-					"key_id", logx.MaskSecret(key.Value),
+					"key_hint", logx.MaskSecret(key.Value),
 					"cooling_s", cooling.Seconds(),
 				)...)
 			case http.StatusUnauthorized:
@@ -483,7 +485,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("key invalid, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyInvalid,
 					"attempt", attempt+1,
 					"provider_id", rt.providerID,
-					"key_id", logx.MaskSecret(key.Value),
+					"key_hint", logx.MaskSecret(key.Value),
 				)...)
 			case http.StatusForbidden:
 				if !errors.Is(err, errKeyQuotaExhausted) {
@@ -500,7 +502,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("key quota exhausted, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyQuotaExhausted,
 					"attempt", attempt+1,
 					"provider_id", rt.providerID,
-					"key_id", logx.MaskSecret(key.Value),
+					"key_hint", logx.MaskSecret(key.Value),
 				)...)
 			default:
 				slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
@@ -541,7 +543,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("key transient failure, cooling", logx.Fields(logx.CategoryRetry, logx.EventKeyTransientFailure,
 				"attempt", attempt+1,
 				"provider_id", rt.providerID,
-				"key_id", logx.MaskSecret(key.Value),
+				"key_hint", logx.MaskSecret(key.Value),
 				"status", status,
 				"scope", scope.String(),
 				"cooling_s", cooling.Seconds(),
@@ -555,7 +557,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("provider transient failure", logx.Fields(logx.CategoryRetry, logx.EventProviderTransient,
 				"attempt", attempt+1,
 				"provider_id", rt.providerID,
-				"key_id", logx.MaskSecret(key.Value),
+				"key_hint", logx.MaskSecret(key.Value),
 				"status", status,
 				"scope", scope.String(),
 				"transient_failures", transientFailures,
@@ -672,12 +674,17 @@ func (h *Handler) waitForCoolingKey(ctx context.Context, rt *runtimeConfig, budg
 
 // forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
 // 成功时返回状态码和 nil；429、401 和余额不足类 403 返回可重试错误；其他错误会在本函数内写出响应。
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte) (int, time.Duration, retryScope, stats.Usage, string, error) {
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte, requestStream bool) (int, time.Duration, retryScope, stats.Usage, string, error) {
 	unknownUsage := stats.Usage{Source: stats.UsageSourceUnknown}
 	outReq, err := buildRequest(rt, r, key, body)
 	if err != nil {
 		writeProxyError(w, http.StatusInternalServerError, "failed to build request")
 		return http.StatusInternalServerError, 0, retryScopeNone, unknownUsage, "", err
+	}
+	if rt.requestTimeout > 0 && !requestStream {
+		ctx, cancel := context.WithTimeout(outReq.Context(), rt.requestTimeout)
+		defer cancel()
+		outReq = outReq.WithContext(ctx)
 	}
 
 	upstreamStart := time.Now()
@@ -690,7 +697,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		slog.Error("upstream unreachable", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnreachable,
 			"path", r.URL.Path,
 			"provider_id", rt.providerID,
-			"key_id", logx.MaskSecret(key.Value),
+			"key_hint", logx.MaskSecret(key.Value),
 			"scope", scope.String(),
 			"err", err,
 		)...)
@@ -734,7 +741,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 			"path", r.URL.Path,
 			"status", resp.StatusCode,
 			"provider_id", rt.providerID,
-			"key_id", logx.MaskSecret(key.Value),
+			"key_hint", logx.MaskSecret(key.Value),
 			"err", err,
 		)...)
 		return resp.StatusCode, 0, retryScopeNone, unknownUsage, "", fmt.Errorf("%w: %v", errStreamFailed, err)
@@ -782,46 +789,33 @@ func applyUsageToRecord(record *stats.CallRecord, usage stats.Usage) {
 	record.TotalTokens = usage.TotalTokens
 }
 
-func extractRequestModel(body []byte) string {
+func extractRequestMeta(body []byte) requestMeta {
 	if len(bytes.TrimSpace(body)) == 0 {
-		return ""
+		return requestMeta{}
 	}
 	var payload struct {
-		Model string `json:"model"`
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return ""
+		return requestMeta{}
 	}
-	return strings.TrimSpace(payload.Model)
-}
+	meta := requestMeta{
+		model:  strings.TrimSpace(payload.Model),
+		stream: payload.Stream,
+	}
 
-func extractRequestStream(body []byte) bool {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return false
-	}
-	var payload struct {
-		Stream bool `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return false
-	}
-	return payload.Stream
-}
-
-func extractToolFieldsPresent(body []byte) bool {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return false
-	}
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return false
+	var payloadMap map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payloadMap); err != nil {
+		return meta
 	}
 	for _, field := range toolFieldNames {
-		if _, ok := payload[field]; ok {
-			return true
+		if _, ok := payloadMap[field]; ok {
+			meta.toolsPresent = true
+			break
 		}
 	}
-	return false
+	return meta
 }
 
 type captureReader struct {
@@ -876,13 +870,19 @@ type requestDiagnosticInput struct {
 	upstreamErrorExcerpt string
 }
 
+type requestMeta struct {
+	model        string
+	stream       bool
+	toolsPresent bool
+}
+
 func requestDiagnosticEvent(input requestDiagnosticInput) logx.Event {
 	data := map[string]any{
 		"tools_present":  input.toolsPresent,
 		"tools_stripped": input.toolsStripped,
 	}
 	if input.upstreamErrorExcerpt != "" {
-		data["upstream_error_excerpt"] = input.upstreamErrorExcerpt
+		data["upstream_error_excerpt"] = logx.RedactSensitiveText(input.upstreamErrorExcerpt)
 	}
 
 	event := logx.Event{

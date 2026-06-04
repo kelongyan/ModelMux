@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Empty, Result, Space, Spin, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, Empty, Result, Space, Spin, Typography, message } from "antd";
 import { startTransition } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -11,7 +11,6 @@ import type { AdminDashboardResponse, AdminEvent, AdminProviderSummary } from ".
 
 const dashboardQueryKey = ["dashboard"];
 
-// DashboardPage 使用左右两栏布局：左侧 provider 卡片矩阵，右侧 KPI + 实时事件流。
 export function DashboardPage(): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -92,16 +91,20 @@ export function DashboardPage(): JSX.Element {
   return (
     <>
       {contextHolder}
-      <div className="dashboard-grid">
-        <section className="dashboard-left">
-          <div className="dashboard-section-head">
+      <Space direction="vertical" size={18} className="console-stack">
+        <Card className="surface-card dashboard-overview-card" bordered={false}>
+          <div className="section-heading">
             <div>
-              <Typography.Text className="placeholder-kicker">Providers</Typography.Text>
+              <Typography.Text className="placeholder-kicker">Dashboard</Typography.Text>
               <Typography.Title level={3} className="section-title">
-                提供商矩阵
+                控制台总览
               </Typography.Title>
+              <Typography.Paragraph className="dashboard-overview-copy">
+                聚焦当前活跃 provider、key 池健康度和最近事件，优先支持值守与排障。
+              </Typography.Paragraph>
             </div>
             <Space wrap>
+              <span className="dashboard-updated-at">{`更新于 ${lastUpdated}`}</span>
               <Button
                 type="primary"
                 loading={reloadMutation.isPending}
@@ -109,14 +112,48 @@ export function DashboardPage(): JSX.Element {
               >
                 立即重载
               </Button>
-              <Button onClick={() => void dashboardQuery.refetch()}>手动刷新</Button>
+              <Button onClick={() => void dashboardQuery.refetch()}>刷新</Button>
             </Space>
+          </div>
+          <div className="dashboard-overview-grid">
+            <div className="dashboard-active-panel">
+              <span className="dashboard-panel-label">当前活跃 Provider</span>
+              <div className="dashboard-active-provider-row">
+                <HealthDot state={computeOverviewState(dashboard)} pulse={dashboard.active_keys > 0} />
+                <strong className="dashboard-active-provider-name" title={dashboard.active_provider}>
+                  {dashboard.active_provider || "未配置"}
+                </strong>
+              </div>
+              <p className="table-subtext">
+                {dashboard.provider_count === 0
+                  ? "还没有配置 provider，先去提供商页面新增上游。"
+                  : `当前共 ${dashboard.provider_count} 个 provider，切换操作会直接写回配置。`}
+              </p>
+            </div>
+            <div className="dashboard-stat-strip">
+              <OverviewStat label="可用 Key" value={dashboard.active_keys} tone="green" />
+              <OverviewStat label="冷却中" value={dashboard.cooling_keys} tone="amber" />
+              <OverviewStat label="已失效" value={dashboard.invalid_keys} tone="red" />
+              <OverviewStat label="Provider" value={dashboard.provider_count} tone="teal" />
+            </div>
+          </div>
+        </Card>
+
+        <Card className="surface-card" bordered={false}>
+          <div className="section-heading">
+            <div>
+              <Typography.Text className="placeholder-kicker">Providers</Typography.Text>
+              <Typography.Title level={3} className="section-title">
+                Provider 列表
+              </Typography.Title>
+              <Typography.Paragraph className="dashboard-section-copy">
+                每个 provider 维护独立 key 池与状态；只有 active provider 会承接流量。
+              </Typography.Paragraph>
+            </div>
           </div>
 
           {dashboard.providers.length === 0 ? (
-            <Card className="surface-card" bordered={false}>
-              <Empty description="还未配置任何 provider" />
-            </Card>
+            <Empty description="还未配置任何 provider" />
           ) : (
             <div className="provider-grid">
               {dashboard.providers.map((provider) => (
@@ -135,14 +172,62 @@ export function DashboardPage(): JSX.Element {
               </button>
             </div>
           )}
-        </section>
+        </Card>
 
-        <aside className="dashboard-right">
-          <KpiBlock dashboard={dashboard} lastUpdated={lastUpdated} />
-          <EventsRail events={events.slice(0, 12)} onViewAll={() => navigate("/events")} />
-        </aside>
-      </div>
+        <Card className="surface-card events-rail-card" bordered={false}>
+          <div className="section-heading">
+            <div>
+              <Typography.Text className="placeholder-kicker">Recent Events</Typography.Text>
+              <Typography.Title level={3} className="section-title">
+                最近事件
+              </Typography.Title>
+              <Typography.Paragraph className="dashboard-section-copy">
+                优先展示异常和关键运行事件，便于快速判断是否需要深入排查。
+              </Typography.Paragraph>
+            </div>
+            <Button size="small" onClick={() => navigate("/events")}>
+              查看全部
+            </Button>
+          </div>
+          {events.length === 0 ? (
+            <Empty description="暂无事件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <ul className="events-rail-list events-rail-list--full">
+              {events.slice(0, 12).map((event) => (
+                <li key={`${event.seq}-${event.event}`} className={`events-rail-item events-rail-item--${event.level}`}>
+                  <span className="events-rail-time">{formatClockShort(new Date(event.at).getTime())}</span>
+                  <span className={`events-rail-level events-rail-level--${event.level}`}>{event.level}</span>
+                  <div className="events-rail-content">
+                    <span className="events-rail-msg" title={event.message}>
+                      {event.message}
+                    </span>
+                    <span className="events-rail-meta">
+                      {event.provider_id ? `Provider ${event.provider_id}` : event.category}
+                      {event.status ? ` · 状态 ${event.status}` : ""}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </Space>
     </>
+  );
+}
+
+type OverviewStatProps = {
+  label: string;
+  value: number;
+  tone: "green" | "amber" | "red" | "teal";
+};
+
+function OverviewStat({ label, value, tone }: OverviewStatProps): JSX.Element {
+  return (
+    <div className={`dashboard-stat-card dashboard-stat-card--${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -154,17 +239,19 @@ type ProviderCardProps = {
   onOpenDetail: () => void;
 };
 
-// ProviderCard 渲染左栏的单个 provider，是 Dashboard 最高频的交互单元。
 function ProviderCard({ provider, recentIssue, activating, onActivate, onOpenDetail }: ProviderCardProps): JSX.Element {
   const tone = computeCardTone(provider);
   const className = `provider-card provider-card--${tone}${provider.active ? " provider-card--current" : ""}`;
+
   return (
     <article className={className}>
       <header className="provider-card-head">
-        <div className="provider-card-title">
-          <HealthDot state={tone} pulse={provider.active && tone === "active"} />
-          <h3>{provider.id}</h3>
-          {provider.active ? <Tag color="green">当前活跃</Tag> : <Tag>待命</Tag>}
+        <div className="provider-card-title-row">
+          <div className="provider-card-title">
+            <HealthDot state={tone} pulse={provider.active && tone === "active"} />
+            <h3>{provider.id}</h3>
+          </div>
+          <span className={`provider-card-state provider-card-state--${tone}`}>{providerStateLabel(provider, tone)}</span>
         </div>
         <a className="provider-card-url" href={provider.target_url} target="_blank" rel="noreferrer">
           {provider.target_url}
@@ -172,29 +259,33 @@ function ProviderCard({ provider, recentIssue, activating, onActivate, onOpenDet
       </header>
 
       <div className="provider-card-pool">
-        <KeyPoolDots
-          active={provider.active_keys}
-          cooling={provider.cooling_keys}
-          invalid={provider.invalid_keys}
-          max={32}
-        />
-        <div className="provider-card-stats">
-          <span>
-            <strong>{provider.active_keys}</strong> 可用
-          </span>
-          <span>
-            <strong>{provider.cooling_keys}</strong> 冷却
-          </span>
-          <span>
-            <strong>{provider.invalid_keys}</strong> 失效
-          </span>
-          <span className="provider-card-stats-total">{`总 ${provider.total_keys}`}</span>
+        <div className="provider-card-pool-indicator">
+          <KeyPoolDots active={provider.active_keys} cooling={provider.cooling_keys} invalid={provider.invalid_keys} max={24} />
+          <span className="table-subtext">Key 池健康度</span>
+        </div>
+        <div className="provider-card-stats-grid">
+          <div className="provider-card-stat">
+            <span>可用</span>
+            <strong>{provider.active_keys}</strong>
+          </div>
+          <div className="provider-card-stat">
+            <span>冷却</span>
+            <strong>{provider.cooling_keys}</strong>
+          </div>
+          <div className="provider-card-stat">
+            <span>失效</span>
+            <strong>{provider.invalid_keys}</strong>
+          </div>
+          <div className="provider-card-stat">
+            <span>总量</span>
+            <strong>{provider.total_keys}</strong>
+          </div>
         </div>
       </div>
 
       {recentIssue ? (
         <div className="provider-card-issue" title={recentIssue.message}>
-          <Tag color={levelColor(recentIssue.level)}>{recentIssue.level}</Tag>
+          <span className="provider-card-issue-label">最近异常</span>
           <span className="provider-card-issue-msg">{recentIssue.message}</span>
           <span className="provider-card-issue-time">{formatRelativeTime(recentIssue.at)}</span>
         </div>
@@ -202,106 +293,44 @@ function ProviderCard({ provider, recentIssue, activating, onActivate, onOpenDet
 
       <footer className="provider-card-actions">
         {provider.active ? (
-          <Tooltip title="已是当前活跃 provider">
-            <Button disabled>已活跃</Button>
-          </Tooltip>
+          <Button disabled>已活跃</Button>
         ) : (
           <Button type="primary" loading={activating} onClick={onActivate}>
-            设为活跃
+            切换为活跃
           </Button>
         )}
-        <Button onClick={onOpenDetail}>详情 →</Button>
+        <Button onClick={onOpenDetail}>查看详情</Button>
       </footer>
     </article>
   );
 }
 
-type KpiBlockProps = {
-  dashboard: AdminDashboardResponse;
-  lastUpdated: string;
-};
-
-// KpiBlock 渲染右栏顶部的 KPI 大字，做主数据速读。
-function KpiBlock({ dashboard, lastUpdated }: KpiBlockProps): JSX.Element {
-  return (
-    <Card className="surface-card kpi-card" bordered={false}>
-      <div className="dashboard-section-head">
-        <div>
-          <Typography.Text className="placeholder-kicker">LIVE</Typography.Text>
-          <Typography.Title level={4} className="section-title">
-            当前 Provider 概况
-          </Typography.Title>
-        </div>
-        <Tag>{lastUpdated}</Tag>
-      </div>
-      <div className="kpi-active-row">
-        <HealthDot state={dashboard.active_keys > 0 ? "active" : "invalid"} pulse />
-        <strong className="kpi-active-name" title={dashboard.active_provider}>
-          {dashboard.active_provider || "未配置"}
-        </strong>
-      </div>
-      <div className="kpi-grid">
-        <div className="kpi-cell kpi-cell--green">
-          <span className="kpi-label">可用</span>
-          <strong className="kpi-value">{dashboard.active_keys}</strong>
-        </div>
-        <div className="kpi-cell kpi-cell--amber">
-          <span className="kpi-label">冷却</span>
-          <strong className="kpi-value">{dashboard.cooling_keys}</strong>
-        </div>
-        <div className="kpi-cell kpi-cell--red">
-          <span className="kpi-label">失效</span>
-          <strong className="kpi-value">{dashboard.invalid_keys}</strong>
-        </div>
-        <div className="kpi-cell kpi-cell--teal">
-          <span className="kpi-label">Provider</span>
-          <strong className="kpi-value">{dashboard.provider_count}</strong>
-        </div>
-      </div>
-    </Card>
-  );
+function providerStateLabel(provider: AdminProviderSummary, tone: "active" | "cooling" | "invalid" | "idle"): string {
+  if (provider.active) {
+    return "当前活跃";
+  }
+  if (tone === "invalid") {
+    return "不可用";
+  }
+  if (tone === "cooling") {
+    return "波动中";
+  }
+  return "待命";
 }
 
-type EventsRailProps = {
-  events: AdminEvent[];
-  onViewAll: () => void;
-};
-
-// EventsRail 渲染右栏滚动事件列表，提供"最近发生了什么"的速读。
-function EventsRail({ events, onViewAll }: EventsRailProps): JSX.Element {
-  return (
-    <Card className="surface-card events-rail-card" bordered={false}>
-      <div className="dashboard-section-head">
-        <div>
-          <Typography.Text className="placeholder-kicker">Recent Events</Typography.Text>
-          <Typography.Title level={4} className="section-title">
-            最近事件
-          </Typography.Title>
-        </div>
-        <Button size="small" onClick={onViewAll}>
-          全部 →
-        </Button>
-      </div>
-      {events.length === 0 ? (
-        <Empty description="暂无事件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-      ) : (
-        <ul className="events-rail-list">
-          {events.map((event) => (
-            <li key={`${event.seq}-${event.event}`} className={`events-rail-item events-rail-item--${event.level}`}>
-              <span className="events-rail-time">{formatClockShort(new Date(event.at).getTime())}</span>
-              <Tag color={levelColor(event.level)}>{event.level}</Tag>
-              <span className="events-rail-msg" title={event.message}>
-                {event.message}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
+function computeOverviewState(dashboard: AdminDashboardResponse): "active" | "cooling" | "invalid" | "idle" {
+  if (!dashboard.active_provider) {
+    return "idle";
+  }
+  if (dashboard.active_keys === 0) {
+    return dashboard.cooling_keys > 0 ? "cooling" : "invalid";
+  }
+  if (dashboard.cooling_keys > 0 || dashboard.invalid_keys > 0) {
+    return "cooling";
+  }
+  return "active";
 }
 
-// applyOptimisticActivate 在乐观更新阶段把 provider 卡片切换到目标项，避免等待轮询。
 function applyOptimisticActivate(prev: AdminDashboardResponse, providerID: string): AdminDashboardResponse {
   const target = prev.providers.find((p) => p.id === providerID);
   if (!target) {
@@ -318,7 +347,6 @@ function applyOptimisticActivate(prev: AdminDashboardResponse, providerID: strin
   };
 }
 
-// computeCardTone 把 provider 概况折算为卡片的色调，控制点位与边框。
 function computeCardTone(provider: AdminProviderSummary): "active" | "cooling" | "invalid" | "idle" {
   if (provider.active_keys === 0 && provider.cooling_keys === 0) {
     return "invalid";
@@ -332,7 +360,6 @@ function computeCardTone(provider: AdminProviderSummary): "active" | "cooling" |
   return provider.active ? "active" : "idle";
 }
 
-// findRecentIssue 在事件流中找一条与 provider 匹配的最近异常，作为卡片底部一句话。
 function findRecentIssue(events: AdminEvent[], providerID: string): AdminEvent | undefined {
   for (const event of events) {
     if (event.level === "info") {
@@ -344,15 +371,4 @@ function findRecentIssue(events: AdminEvent[], providerID: string): AdminEvent |
     }
   }
   return undefined;
-}
-
-// levelColor 把事件 level 映射成 Antd Tag 配色。
-function levelColor(level: string): string {
-  if (level === "error") {
-    return "red";
-  }
-  if (level === "warn") {
-    return "gold";
-  }
-  return "blue";
 }
