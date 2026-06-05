@@ -119,11 +119,11 @@ export function DashboardPage(): JSX.Element {
                   {dashboard.active_provider || "未配置"}
                 </strong>
               </div>
-              <p className="table-subtext">
+              <span className="dashboard-panel-desc">
                 {dashboard.provider_count === 0
                   ? "还没有配置 provider，先去提供商页面新增上游。"
                   : `当前共 ${dashboard.provider_count} 个 provider，切换操作会直接写回配置。`}
-              </p>
+              </span>
             </div>
             <div className="dashboard-stat-strip">
               <OverviewStat label="可用 Key" value={dashboard.active_keys} tone="green" />

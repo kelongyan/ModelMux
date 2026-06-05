@@ -24,9 +24,7 @@ body {
   min-height: 100vh;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
-  background:
-    radial-gradient(circle at top left, rgba(22, 119, 255, 0.14), transparent 34vw),
-    linear-gradient(135deg, #f8fbff 0%, #eef6ff 48%, #f7fbff 100%);
+  background: #ffffff;
   color: #0f172a;
 }
 

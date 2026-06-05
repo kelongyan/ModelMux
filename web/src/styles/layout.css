@@ -85,7 +85,7 @@
 
 .console-nav-link.is-active {
   border-color: rgba(22, 119, 255, 0.24);
-  background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+  background: #eff6ff;
   color: #0b63ce;
   box-shadow:
     inset 3px 0 0 #1677ff,

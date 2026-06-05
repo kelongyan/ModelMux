@@ -1,8 +1,8 @@
-import { Button, Card, Descriptions, Empty, Popconfirm, Space, Table, Tag, Typography } from "antd";
+import { Button, Card, Empty, Popconfirm, Space, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 
 import type { AdminKeyStatus, AdminProviderDetailResponse } from "../../types/admin";
-import { renderKeyState, StateText } from "./provider-utils";
+import { renderKeyState } from "./provider-utils";
 
 type ProviderDetailContentProps = {
   detail: AdminProviderDetailResponse;
@@ -85,30 +85,21 @@ export function ProviderDetailContent({
           </div>
           <div className="detail-stat">
             <span>可用</span>
-            <strong style={{ color: "#16a34a" }}>{detail.active_keys}</strong>
+            <strong>{detail.active_keys}</strong>
           </div>
           <div className="detail-stat">
             <span>冷却</span>
-            <strong style={{ color: "#d97706" }}>{detail.cooling_keys}</strong>
+            <strong>{detail.cooling_keys}</strong>
           </div>
           <div className="detail-stat">
             <span>失效</span>
-            <strong style={{ color: "#dc2626" }}>{detail.invalid_keys}</strong>
+            <strong>{detail.invalid_keys}</strong>
           </div>
         </div>
-        <Descriptions
-          className="provider-detail-descriptions"
-          column={{ xs: 1, sm: 2 }}
-          items={[
-            { key: "id", label: "Provider ID", children: detail.id },
-            {
-              key: "active",
-              label: "状态",
-              children: detail.active ? <StateText color="green">当前活跃</StateText> : <StateText color="gray">待命</StateText>,
-            },
-            { key: "target", label: "Target URL", children: <a href={detail.target_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>{detail.target_url}</a> },
-          ]}
-        />
+        <div className="detail-target-url">
+          <span className="detail-target-label">Target URL</span>
+          <a href={detail.target_url} target="_blank" rel="noreferrer" className="detail-target-link">{detail.target_url}</a>
+        </div>
       </Card>
 
       <Card className="surface-card reveal-card reveal-delay-1" bordered={false}>
