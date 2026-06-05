@@ -3,16 +3,37 @@
 }
 
 .provider-table .ant-table-thead > tr > th {
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 0.78rem;
+  background: #f8fbff !important;
+  color: #1e40af;
+  font-size: 0.9rem;
   font-weight: 800;
+  line-height: 1.35 !important;
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+  white-space: nowrap;
 }
 
 .provider-table .ant-table-tbody > tr > td {
   background: transparent;
-  font-size: 0.84rem;
-  vertical-align: top;
+  font-size: 0.94rem;
+  line-height: 1.55 !important;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.provider-key-cell strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.98rem;
+  line-height: 1.4;
+}
+
+.provider-key-id {
+  margin-top: 3px;
+  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: nowrap;
 }
 
 .provider-table-row--active > td {

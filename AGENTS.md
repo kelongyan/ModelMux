@@ -1,35 +1,41 @@
-# Repository Guidelines
+# Repository Notes
 
-## Project Structure & Module Organization
+## Commands
 
-ModelMux is a Go reverse proxy with an embedded React/Vite admin console. Core backend entrypoint is `main.go`; packages are split by responsibility: `proxy/` for forwarding and retries, `pool/` for provider key rotation, `config/` for load/reload/write paths, `admin/` for REST and console mounting, `state/` for hash-only key persistence, `stats/` for JSONL call metrics, and `logx/` for structured logging helpers. Frontend source lives in `web/src/`; built assets in `web/dist/` are embedded by `web/embed.go`.
+- PowerShell is the expected shell. Use `go build -trimpath -ldflags="-s -w" -o modelmux.exe .` for the local binary.
+- Backend verification: `go test ./...`, then `go vet ./...`, then `go test -race ./...` before handoff for backend/concurrency changes.
+- Focused Go test: `go test ./proxy -run TestServeHTTPUsesOnlyActiveProvider -v` or swap package/name as needed.
+- Frontend install/build: `Push-Location web; npm ci; npm run build; Pop-Location`. `npm run build` runs `tsc -b` before Vite.
+- Frontend dev server: `Push-Location web; npm run dev; Pop-Location`; Vite serves on `127.0.0.1:5173` and proxies `/admin` to `127.0.0.1:18081`.
+- For frontend-only refactors/cleanup, `Push-Location web; npm run build; Pop-Location` is enough verification; do not rebuild/restart the Go service unless the user asks to serve the embedded UI.
+- After console/UI changes, use the handoff flow `Push-Location web; npm run build; Pop-Location`, then `go build -trimpath -ldflags="-s -w" -o modelmux.exe .`, then restart the running service so `/console/` serves the new embedded assets.
+- For automated restarts, do not use `.\start.ps1`; it may hang after opening the console. Stop the existing `modelmux.exe`, then start with `Start-Process -FilePath .\modelmux.exe -ArgumentList @("-config", "config.json") -WorkingDirectory (Get-Location) -WindowStyle Hidden` and poll `/admin/health`.
+- `.\start.ps1` requires `config.json`, builds `modelmux.exe` only if missing, starts it in the background, writes logs/PID under `logs/`, and opens `/console/`.
 
-## Build, Test, and Development Commands
+## Architecture
 
-Use PowerShell-friendly commands:
+- `main.go` starts two HTTP servers: proxy on `listen` default `127.0.0.1:18080`, admin/API/SPA on `admin_listen` default `127.0.0.1:18081`.
+- The admin console is React/Vite in `web/src`; production assets in `web/dist` are embedded by `web/embed.go` with `//go:embed all:dist` and served at `/console/`.
+- After any `web/src` or Vite change, rebuild `web/dist` before Go build/release or the binary will ship stale UI.
+- Package boundaries: `proxy/` forwards/retries/streams, `pool/` owns provider/key rotation and state, `config/` loads/watches/writes JSON config, `admin/` registers REST plus console, `state/` persists key state, `stats/` stores/query JSONL call records, `logx/` centralizes slog fields and secret masking.
 
-```powershell
-go build -trimpath -ldflags="-s -w" -o modelmux.exe .
-go test ./...
-go vet ./...
-go test -race ./...
-.\start.ps1
-```
+## Runtime Invariants
 
-`go build` creates the local binary, `go test ./...` runs backend tests, `go vet ./...` checks static diagnostics, and `go test -race ./...` verifies concurrency-sensitive code. `.\start.ps1` builds if needed, starts the service, and opens `/console/`. For frontend changes, run `cd web; npm install; npm run build` so `web/dist/` matches `web/src/`.
+- Provider key pools are isolated. Requests use only `active_provider`; do not add cross-provider failover unless explicitly asked.
+- `proxy.Handler.runtime` is an immutable snapshot in `atomic.Value`; reloads must build/validate the next snapshot and keep old in-flight requests on the old snapshot.
+- Streaming responses are copied in chunks and flushed; do not add response buffering or fixed proxy server `WriteTimeout`, because SSE can run for minutes.
+- Retry scopes are intentionally separate: 401/429/quota-403 affect keys, connection-level errors briefly cool keys, provider/DNS/TLS/502/503/504 failures must not poison keys.
+- State persistence is hash-only. `state.json` stores `state.KeyID` values, never raw keys.
 
-## Coding Style & Naming Conventions
+## Config And Admin
 
-Prefer standard-library Go patterns and keep dependencies minimal. Run `gofmt` on Go edits. Use package-local tests with `*_test.go` names and clear `TestXxx` functions. Logging must use `log/slog` via `logx.Fields(...)`; never log raw API keys. Preserve existing concurrency patterns: atomics for key counters/state, mutexes around mutable maps/slices, and immutable proxy runtime snapshots.
+- Preferred config shape is top-level `active_provider` plus `providers[]`; legacy top-level `target_url` + `keys` still maps to provider ID `default`.
+- `persist_state` and `stats_enabled` are `*bool` fields where nil means enabled; use `StatePersistenceEnabled()` and `StatsCollectionEnabled()`.
+- Hot reload handles `active_provider`, `providers`, retry/timeout/body-limit fields. `listen`, `admin_listen`, log settings, persistence settings, and stats settings require restart.
+- Admin endpoints include legacy `/admin/health`, `/admin/status`, `/admin/reload` plus `/admin/api/v1/*` for dashboard, providers, settings, events, about, reload, backups, and stats including `/stats/logs`.
 
-## Testing Guidelines
+## Security And Files
 
-Backend tests use Go’s standard `testing` package, `httptest`, temp directories, and table-driven cases where helpful. Add or update tests when changing retry behavior, config validation, admin APIs, state persistence, stats aggregation, or frontend embedding. Before handoff for backend changes, run `go test ./...`, `go vet ./...`, and `go test -race ./...`; for frontend changes, run `npm run build` in `web/`.
-
-## Commit & Pull Request Guidelines
-
-Recent history uses short conventional prefixes such as `feat:`, `fix:`, `docs:`, `refactor:`, and `chore:`. Keep commit subjects concise and explain the user-visible reason. Pull requests should summarize changes, list validation commands run, note config or security impacts, and include screenshots for console UI updates.
-
-## Security & Configuration Tips
-
-Do not commit `config.json`, `state.json`, `logs/`, `stats_data/`, `modelmux.exe`, or `web/node_modules/`. State persistence must remain hash-only; use `state.KeyID` or `logx.MaskSecret` for key identifiers. Admin defaults should stay loopback-only, and provider key pools must remain isolated unless explicitly requested.
+- Never log raw API keys. Use `logx.MaskSecret(value)` for display or `state.KeyID(value)` for stable identifiers.
+- Keep admin loopback-only by default; do not change defaults to `0.0.0.0`.
+- Do not commit `config.json`, `state.json`, `logs/`, `stats_data/`, `modelmux.exe`, generated `web/*.tsbuildinfo`, or `web/node_modules/`.

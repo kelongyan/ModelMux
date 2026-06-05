@@ -4,11 +4,10 @@ import { startTransition } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { activateProvider, fetchDashboard, triggerReload } from "../api/admin";
+import { queryKeys } from "../api/query-keys";
 import { formatClockShort } from "../components/format-time";
 import { HealthDot } from "../components/health-dot";
 import type { AdminDashboardResponse, AdminProviderSummary } from "../types/admin";
-
-const dashboardQueryKey = ["dashboard"];
 
 export function DashboardPage(): JSX.Element {
   const queryClient = useQueryClient();
@@ -16,7 +15,7 @@ export function DashboardPage(): JSX.Element {
   const [messageApi, contextHolder] = message.useMessage();
 
   const dashboardQuery = useQuery({
-    queryKey: dashboardQueryKey,
+    queryKey: queryKeys.dashboard,
     queryFn: fetchDashboard,
     refetchInterval: 5000,
   });
@@ -26,7 +25,7 @@ export function DashboardPage(): JSX.Element {
     onSuccess: async () => {
       messageApi.success("已触发配置重载");
       startTransition(() => {
-        void queryClient.invalidateQueries({ queryKey: dashboardQueryKey });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
       });
     },
     onError: (error: Error) => {
@@ -37,25 +36,25 @@ export function DashboardPage(): JSX.Element {
   const activateMutation = useMutation({
     mutationFn: activateProvider,
     onMutate: async (providerID) => {
-      await queryClient.cancelQueries({ queryKey: dashboardQueryKey });
-      const previous = queryClient.getQueryData<AdminDashboardResponse>(dashboardQueryKey);
+      await queryClient.cancelQueries({ queryKey: queryKeys.dashboard });
+      const previous = queryClient.getQueryData<AdminDashboardResponse>(queryKeys.dashboard);
       if (previous) {
         const next = applyOptimisticActivate(previous, providerID);
-        queryClient.setQueryData(dashboardQueryKey, next);
+        queryClient.setQueryData(queryKeys.dashboard, next);
       }
       return { previous };
     },
     onSuccess: async (_, providerID) => {
       messageApi.success(`已切换到 ${providerID}`);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: dashboardQueryKey }),
-        queryClient.invalidateQueries({ queryKey: ["providers"] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.providers }),
       ]);
     },
     onError: (error: Error, _id, context) => {
       messageApi.error(`切换失败：${error.message}`);
       if (context?.previous) {
-        queryClient.setQueryData(dashboardQueryKey, context.previous);
+        queryClient.setQueryData(queryKeys.dashboard, context.previous);
       }
     },
   });
@@ -90,7 +89,7 @@ export function DashboardPage(): JSX.Element {
     <>
       {contextHolder}
       <Space direction="vertical" size={16} className="console-stack">
-        <Card className="surface-card dashboard-overview-card" bordered={false}>
+        <Card className="surface-card dashboard-overview-card reveal-card reveal-delay-0" bordered={false}>
           <div className="section-heading">
             <div>
               <Typography.Text className="placeholder-kicker">Dashboard</Typography.Text>
@@ -135,7 +134,7 @@ export function DashboardPage(): JSX.Element {
           </div>
         </Card>
 
-        <Card className="surface-card" bordered={false}>
+        <Card className="surface-card reveal-card reveal-delay-1" bordered={false}>
           <div className="section-heading">
             <div>
               <Typography.Text className="placeholder-kicker">Providers</Typography.Text>

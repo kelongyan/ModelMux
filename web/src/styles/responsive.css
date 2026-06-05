@@ -4,6 +4,7 @@
   }
 
   .dashboard-overview-grid,
+  .events-summary-grid,
   .events-toolbar-grid {
     grid-template-columns: 1fr;
   }
@@ -77,6 +78,10 @@
   .events-rail-item {
     grid-template-columns: 1fr;
   }
+
+  .event-detail {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -123,5 +128,10 @@
 
   .detail-stat {
     flex: 1 1 calc(50% - 6px);
+  }
+
+  .event-detail-item {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }

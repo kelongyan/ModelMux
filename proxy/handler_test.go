@@ -60,6 +60,7 @@ func TestBuildRequestRewritesUpstreamAuthHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/messages?foo=bar", strings.NewReader(`{"x":1}`))
 	req.Header.Set("Authorization", "Bearer original")
 	req.Header.Set("X-Api-Key", "original-key")
+	req.Header.Set("Accept-Encoding", "br")
 	req.Header.Set("Content-Type", "application/json")
 
 	key, err := p.Next()
@@ -77,6 +78,9 @@ func TestBuildRequestRewritesUpstreamAuthHeaders(t *testing.T) {
 	}
 	if got := outReq.Header.Get("X-Api-Key"); got != "rotated-key" {
 		t.Fatalf("X-Api-Key = %q, want %q", got, "rotated-key")
+	}
+	if got := outReq.Header.Get("Accept-Encoding"); got != "" {
+		t.Fatalf("Accept-Encoding = %q, want empty so transport can decode upstream errors", got)
 	}
 	if got := outReq.URL.String(); got != "https://example.com/v1/messages?foo=bar" {
 		t.Fatalf("URL = %q", got)
@@ -1071,7 +1075,7 @@ func TestServeHTTPRetriesQuotaExhaustedForbiddenWithOriginalBody(t *testing.T) {
 				return
 			}
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"error":{"message":"预扣费额度失败, 用户剩余额度: 灵石0.288604, 需要预扣费额度: 灵石0.315356"}}`))
+			_, _ = w.Write([]byte(`{"error":{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}}`))
 		case 2:
 			secondBody = string(body)
 			if got := r.Header.Get("X-Api-Key"); got != "k2" {
@@ -1224,6 +1228,16 @@ func TestIsQuotaExhaustedBody(t *testing.T) {
 		{
 			name: "english quota code",
 			body: `{"type":"insufficient_quota","message":"quota exceeded"}`,
+			want: true,
+		},
+		{
+			name: "structured insufficient balance code",
+			body: `{"error":{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}}`,
+			want: true,
+		},
+		{
+			name: "insufficient account balance message",
+			body: `{"error":{"message":"Insufficient account balance"}}`,
 			want: true,
 		},
 		{

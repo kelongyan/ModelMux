@@ -21,6 +21,7 @@ type KeyRecord struct {
 	ErrCount       int64     `json:"err_count"`
 	TotalLatencyMs int64     `json:"total_latency_ms"`
 	Last401At      time.Time `json:"last_401_at,omitempty"`
+	InvalidReason  string    `json:"invalid_reason,omitempty"`
 }
 
 type ProviderRecord struct {

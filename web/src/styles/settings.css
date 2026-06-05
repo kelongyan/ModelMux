@@ -31,24 +31,55 @@
   margin-bottom: 14px;
 }
 
+.settings-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-field-hint {
+  color: #94a3b8;
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.settings-form-item--inactive {
+  opacity: 0.52;
+}
+
+.settings-form-item--inactive .settings-field-hint::after {
+  content: " 当前条件下不会生效。";
+  color: #d97706;
+}
+
 /* effect labels */
 .settings-effect-hot,
 .settings-effect-restart,
 .settings-effect-readonly {
-  font-size: 0.72rem;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .settings-effect-hot {
   color: #16a34a;
+  background: #ecfdf5;
 }
 
 .settings-effect-restart {
   color: #d97706;
+  background: #fffbeb;
 }
 
 .settings-effect-readonly {
   color: #94a3b8;
+  background: #f8fafc;
 }
 
 /* collapse for advanced settings */

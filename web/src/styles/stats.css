@@ -1,19 +1,20 @@
 /* ================================================================
-   Stats page — KPI, charts, tooltip, legend
+   Stats page — KPI cards + call log table
    ================================================================ */
 
 /* ── KPI cards ── */
 
 .stats-kpi {
-  min-height: 96px;
-  padding: 20px 22px;
-  border-radius: 16px;
+  min-height: 108px;
+  padding: 24px 28px;
+  border-radius: 14px;
   background: #ffffff;
   border: 1px solid #f1f5f9;
   border-left: 4px solid var(--kpi-accent, #6366f1);
   display: flex;
   flex-direction: column;
   justify-content: center;
+  gap: 8px;
   transition:
     transform 180ms ease,
     box-shadow 180ms ease;
@@ -26,144 +27,53 @@
 
 .stats-kpi span {
   display: block;
-  margin-bottom: 6px;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #94a3b8;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .stats-kpi strong {
   display: block;
-  font-size: 1.6rem;
+  font-size: 1.75rem;
   font-weight: 700;
   color: #1e293b;
-  line-height: 1.2;
+  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
-/* ── chart grid ── */
+/* ── call log table ── */
 
-.stats-chart-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-}
-
-@media (max-width: 960px) {
-  .stats-chart-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.stats-chart-card .ant-card-body {
-  padding: 20px 24px 16px !important;
-}
-
-.stats-chart-title {
-  display: block;
-  margin-bottom: 12px;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: #475569;
-}
-
-/* ── dark tooltip ── */
-
-.stats-tip {
-  padding: 14px 18px;
-  border-radius: 10px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-  font-size: 0.82rem;
-  line-height: 1.5;
-  min-width: 160px;
-}
-
-.stats-tip-label {
-  font-weight: 700;
-  font-size: 0.82rem;
-  color: #f1f5f9;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #334155;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 240px;
-}
-
-.stats-tip-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 3px 0;
-}
-
-.stats-tip-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.stats-tip-name {
-  color: #94a3b8;
-  font-size: 0.78rem;
-  flex: 1;
-}
-
-.stats-tip-val {
-  color: #f8fafc;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+.stats-model-name {
+  font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
   font-size: 0.84rem;
+  color: #334155;
 }
 
-/* ── legend ── */
-
-.stats-legend {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  padding: 8px 0 0;
+.stats-text-muted {
+  color: #cbd5e1;
 }
 
-.stats-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.76rem;
+.stats-text-error {
+  color: #ef4444;
+  font-size: 0.82rem;
+}
+
+.stats-latency-good {
+  color: #10b981;
   font-weight: 600;
-  color: #64748b;
+  font-variant-numeric: tabular-nums;
 }
 
-.stats-legend-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  flex-shrink: 0;
+.stats-latency-warn {
+  color: #f59e0b;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-/* ── kill Recharts focus ring once and for all ── */
-
-.recharts-wrapper,
-.recharts-wrapper:focus,
-.recharts-wrapper:focus-visible,
-.recharts-wrapper:active {
-  outline: none !important;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.recharts-surface {
-  outline: none !important;
-}
-
-.recharts-tooltip-wrapper {
-  outline: none !important;
-  pointer-events: none !important;
+.stats-latency-bad {
+  color: #ef4444;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }

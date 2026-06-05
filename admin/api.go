@@ -169,6 +169,7 @@ func (h *Handler) registerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/v1/stats/summary", h.statsSummary)
 	mux.HandleFunc("/admin/api/v1/stats/models", h.statsModels)
 	mux.HandleFunc("/admin/api/v1/stats/recent", h.statsRecent)
+	mux.HandleFunc("/admin/api/v1/stats/logs", h.statsLogs)
 	mux.HandleFunc("/admin/api/v1/config/backup", h.backupConfig)
 	mux.HandleFunc("/admin/api/v1/state/backup", h.backupState)
 }

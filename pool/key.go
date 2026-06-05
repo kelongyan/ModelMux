@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+const (
+	InvalidReasonUnauthorized   = "unauthorized"
+	InvalidReasonQuotaExhausted = "quota_exhausted"
+)
+
 type KeyState int32
 
 const (
@@ -19,6 +24,7 @@ type Key struct {
 	state          atomic.Int32
 	coolUntil      atomic.Int64 // unix nano
 	last401At      atomic.Int64 // unix nano
+	invalidReason  atomic.Value // string
 	ReqCount       atomic.Int64
 	ErrCount       atomic.Int64
 	inFlight       atomic.Int64
@@ -68,8 +74,14 @@ func (k *Key) MarkCooling(duration time.Duration) {
 
 // MarkInvalid 将 key 标记为失效状态，并记录最近一次 401 时间。
 func (k *Key) MarkInvalid() {
+	k.MarkInvalidWithReason(InvalidReasonUnauthorized)
+}
+
+// MarkInvalidWithReason 将 key 标记为失效状态，并记录失效原因。
+func (k *Key) MarkInvalidWithReason(reason string) {
 	k.state.Store(int32(StateInvalid))
 	k.last401At.Store(time.Now().UnixNano())
+	k.invalidReason.Store(reason)
 	k.ErrCount.Add(1)
 }
 
@@ -79,6 +91,7 @@ func (k *Key) ResetActive() {
 	defer k.mu.Unlock()
 	k.coolUntil.Store(0)
 	k.state.Store(int32(StateActive))
+	k.invalidReason.Store("")
 }
 
 // BeginRequest 记录一次进入上游的请求，并增加当前 key 的并发占用数。
@@ -135,4 +148,14 @@ func (k *Key) Last401At() time.Time {
 		return time.Time{}
 	}
 	return time.Unix(0, ns)
+}
+
+// InvalidReason 返回 key 最近一次被标记 invalid 的原因。
+func (k *Key) InvalidReason() string {
+	reason, _ := k.invalidReason.Load().(string)
+	return reason
+}
+
+func (k *Key) SetInvalidReason(reason string) {
+	k.invalidReason.Store(reason)
 }

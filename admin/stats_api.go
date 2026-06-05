@@ -110,3 +110,78 @@ func parseStatsLimit(raw string) int {
 	}
 	return limit
 }
+
+type apiStatsLogsResponse struct {
+	Window   string             `json:"window"`
+	Since    time.Time          `json:"since"`
+	Records  []stats.CallRecord `json:"records"`
+	Total    int                `json:"total"`
+	Page     int                `json:"page"`
+	PageSize int                `json:"page_size"`
+}
+
+func (h *Handler) statsLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	window, duration, ok := parseStatsWindow(r.URL.Query().Get("window"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "window must be one of: 1h, 24h, 7d, 30d"})
+		return
+	}
+	since := time.Now().UTC().Add(-duration)
+
+	model := r.URL.Query().Get("model")
+	status := r.URL.Query().Get("status")
+	page := parseStatsPage(r.URL.Query().Get("page"))
+	pageSize := parseStatsPageSize(r.URL.Query().Get("page_size"))
+
+	resp := apiStatsLogsResponse{
+		Window:   window,
+		Since:    since,
+		Page:     page,
+		PageSize: pageSize,
+	}
+	if h.statsStore != nil {
+		result := h.statsStore.QueryLogs(since, stats.CallLogFilter{
+			Model:    model,
+			Status:   status,
+			Page:     page,
+			PageSize: pageSize,
+		})
+		resp.Records = result.Records
+		resp.Total = result.Total
+		resp.Page = result.Page
+		resp.PageSize = result.PageSize
+	}
+	if resp.Records == nil {
+		resp.Records = []stats.CallRecord{}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func parseStatsPage(raw string) int {
+	if raw == "" {
+		return 1
+	}
+	page, err := strconv.Atoi(raw)
+	if err != nil || page <= 0 {
+		return 1
+	}
+	return page
+}
+
+func parseStatsPageSize(raw string) int {
+	if raw == "" {
+		return 20
+	}
+	size, err := strconv.Atoi(raw)
+	if err != nil || size <= 0 {
+		return 20
+	}
+	if size > 200 {
+		return 200
+	}
+	return size
+}

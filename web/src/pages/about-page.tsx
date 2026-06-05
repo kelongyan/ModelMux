@@ -3,11 +3,12 @@ import { Button, Card, Result, Space, Spin, Typography, message } from "antd";
 import { DownloadOutlined, FileProtectOutlined, CloudServerOutlined, BranchesOutlined } from "@ant-design/icons";
 
 import { downloadConfigBackup, downloadStateBackup, fetchAbout } from "../api/admin";
+import { queryKeys } from "../api/query-keys";
 
 export function AboutPage(): JSX.Element {
   const [messageApi, contextHolder] = message.useMessage();
   const aboutQuery = useQuery({
-    queryKey: ["about"],
+    queryKey: queryKeys.about,
     queryFn: fetchAbout,
   });
 
@@ -48,7 +49,7 @@ export function AboutPage(): JSX.Element {
       {contextHolder}
       <Space direction="vertical" size={16} className="console-stack">
         {/* ── Hero ── */}
-        <Card className="surface-card about-hero-card" bordered={false}>
+        <Card className="surface-card about-hero-card reveal-card reveal-delay-0" bordered={false}>
           <div className="about-hero">
             <div className="about-hero-left">
               <span className="about-hero-kicker">About</span>
@@ -67,7 +68,7 @@ export function AboutPage(): JSX.Element {
 
         {/* ── Info grid ── */}
         <div className="about-grid">
-          <Card className="surface-card" bordered={false}>
+          <Card className="surface-card reveal-card reveal-delay-1" bordered={false}>
             <div className="about-section-head">
               <CloudServerOutlined className="about-section-icon" />
               <span className="about-section-label">网络与服务</span>
@@ -80,7 +81,7 @@ export function AboutPage(): JSX.Element {
             </div>
           </Card>
 
-          <Card className="surface-card" bordered={false}>
+          <Card className="surface-card reveal-card reveal-delay-2" bordered={false}>
             <div className="about-section-head">
               <BranchesOutlined className="about-section-icon" />
               <span className="about-section-label">配置与状态</span>
@@ -95,7 +96,7 @@ export function AboutPage(): JSX.Element {
 
         {/* ── Features ── */}
         {about.features.length > 0 && (
-          <Card className="surface-card" bordered={false}>
+          <Card className="surface-card reveal-card reveal-delay-2" bordered={false}>
             <div className="about-section-head">
               <FileProtectOutlined className="about-section-icon" />
               <span className="about-section-label">已启用能力</span>
@@ -109,7 +110,7 @@ export function AboutPage(): JSX.Element {
         )}
 
         {/* ── Backup actions ── */}
-        <Card className="surface-card" bordered={false}>
+        <Card className="surface-card reveal-card reveal-delay-3" bordered={false}>
           <div className="about-section-head">
             <DownloadOutlined className="about-section-icon" />
             <span className="about-section-label">导出备份</span>

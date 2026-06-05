@@ -480,7 +480,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"cooling_s", cooling.Seconds(),
 				)...)
 			case http.StatusUnauthorized:
-				key.MarkInvalid()
+				key.MarkInvalidWithReason(pool.InvalidReasonUnauthorized)
 				h.notifyStateChanged(true)
 				slog.Warn("key invalid, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyInvalid,
 					"attempt", attempt+1,
@@ -497,7 +497,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					callRecord.Error = err.Error()
 					return
 				}
-				key.MarkInvalid()
+				key.MarkInvalidWithReason(pool.InvalidReasonQuotaExhausted)
 				h.notifyStateChanged(true)
 				slog.Warn("key quota exhausted, marking dead", logx.Fields(logx.CategoryRetry, logx.EventKeyQuotaExhausted,
 					"attempt", attempt+1,
@@ -1001,6 +1001,8 @@ var quotaExhaustedIndicators = []string{
 	"用户剩余额度",
 	"余额不足",
 	"额度不足",
+	"insufficient_balance",
+	"insufficient account balance",
 	"insufficient_quota",
 	"insufficient quota",
 	"quota_exceeded",
@@ -1015,6 +1017,10 @@ var quotaExhaustedIndicators = []string{
 
 // isQuotaExhaustedBody 判断 403 响应是否属于 key 级余额或额度不足。
 func isQuotaExhaustedBody(body []byte) bool {
+	if isQuotaExhaustedErrorCode(body) {
+		return true
+	}
+
 	normalized := strings.ToLower(string(body))
 	for _, indicator := range quotaExhaustedIndicators {
 		if strings.Contains(normalized, indicator) {
@@ -1022,6 +1028,23 @@ func isQuotaExhaustedBody(body []byte) bool {
 		}
 	}
 	return false
+}
+
+func isQuotaExhaustedErrorCode(body []byte) bool {
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(payload.Error.Code)) {
+	case "insufficient_balance", "insufficient_quota", "quota_exceeded":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildRequest 基于原请求构造上游请求，并覆盖认证头为当前选中的 key。
@@ -1224,6 +1247,7 @@ func writeProxyError(w http.ResponseWriter, code int, msg string) {
 }
 
 var hopByHopHeaders = map[string]bool{
+	"Accept-Encoding":     true,
 	"Connection":          true,
 	"Keep-Alive":          true,
 	"Proxy-Authenticate":  true,

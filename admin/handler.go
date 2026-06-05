@@ -24,6 +24,7 @@ type statsReader interface {
 	SummarySince(time.Time) stats.Summary
 	ModelsSince(time.Time) []stats.ModelSummary
 	Recent(limit int) []stats.CallRecord
+	QueryLogs(since time.Time, filter stats.CallLogFilter) stats.CallLogResult
 }
 
 // NewHandler 创建管理端处理器，并挂载配置管理器与事件缓冲区。
@@ -124,6 +125,6 @@ func (h *Handler) runReload(category, errorEvent, errorMessage, successEvent, su
 		return err
 	}
 	slog.Info(successMessage, logx.Fields(category, successEvent)...)
-	h.recordEvent("info", category, successEvent, successMessage, nil)
+	// reloadConfig 回调已成功记录 "config reloaded" 事件，这里不再重复。
 	return nil
 }

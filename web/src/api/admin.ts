@@ -14,6 +14,7 @@ import type {
   AdminReloadResponse,
   AdminSettingsPayload,
   AdminSettingsResponse,
+  AdminStatsLogsResponse,
   AdminStatsModelsResponse,
   AdminStatsRecentResponse,
   AdminStatsSummaryResponse,
@@ -178,6 +179,22 @@ export function fetchStatsModels(window: AdminStatsWindow): Promise<AdminStatsMo
 // fetchStatsRecent 拉取最近调用明细。
 export function fetchStatsRecent(limit = 100): Promise<AdminStatsRecentResponse> {
   return requestJSON<AdminStatsRecentResponse>(`/admin/api/v1/stats/recent?limit=${limit}`);
+}
+
+// fetchStatsLogs 查询调用日志（支持过滤和分页）。
+export function fetchStatsLogs(params: {
+  window: AdminStatsWindow;
+  model?: string;
+  status?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<AdminStatsLogsResponse> {
+  const qs = new URLSearchParams({ window: params.window });
+  if (params.model) qs.set("model", params.model);
+  if (params.status) qs.set("status", params.status);
+  if (params.page) qs.set("page", String(params.page));
+  if (params.page_size) qs.set("page_size", String(params.page_size));
+  return requestJSON<AdminStatsLogsResponse>(`/admin/api/v1/stats/logs?${qs.toString()}`);
 }
 
 // fetchAbout 拉取关于页所需的运行时信息。

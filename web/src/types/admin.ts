@@ -45,6 +45,7 @@ export type AdminKeyStatus = {
   avg_latency_ms: number;
   cool_until?: string;
   last_401_at?: string;
+  invalid_reason?: "unauthorized" | "quota_exhausted" | string;
 };
 
 // AdminProviderDetailResponse 对应 provider 详情接口的响应结构。
@@ -245,4 +246,14 @@ export type AdminModelsPayload = {
 export type AdminFetchModelsResponse = {
   models: string[];
   count: number;
+};
+
+// AdminStatsLogsResponse 对应调用日志查询接口（过滤+分页）。
+export type AdminStatsLogsResponse = {
+  window: AdminStatsWindow;
+  since: string;
+  records: AdminCallRecord[];
+  total: number;
+  page: number;
+  page_size: number;
 };

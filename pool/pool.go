@@ -132,6 +132,7 @@ func (p *Pool) Snapshot() []state.KeyRecord {
 			ErrCount:       k.ErrCount.Load(),
 			TotalLatencyMs: k.totalLatencyMs.Load(),
 			Last401At:      k.Last401At(),
+			InvalidReason:  k.InvalidReason(),
 		})
 	}
 	return records
@@ -158,6 +159,7 @@ func (p *Pool) Restore(records []state.KeyRecord, invalidTTL time.Duration) {
 		k.ErrCount.Store(record.ErrCount)
 		k.totalLatencyMs.Store(record.TotalLatencyMs)
 		k.last401At.Store(timeToUnixNano(record.Last401At))
+		k.SetInvalidReason(record.InvalidReason)
 		k.coolUntil.Store(0)
 		k.state.Store(int32(StateActive))
 
@@ -204,16 +206,17 @@ func timeToUnixNano(t time.Time) int64 {
 }
 
 type KeyStatus struct {
-	Index        int       `json:"index"`
-	KeyID        string    `json:"key_id"`
-	MaskedKey    string    `json:"masked_key"`
-	State        string    `json:"state"`
-	ReqCount     int64     `json:"req_count"`
-	ErrCount     int64     `json:"err_count"`
-	InFlight     int64     `json:"in_flight"`
-	AvgLatencyMs float64   `json:"avg_latency_ms"`
-	CoolUntil    time.Time `json:"cool_until,omitempty"`
-	Last401At    time.Time `json:"last_401_at,omitempty"`
+	Index         int       `json:"index"`
+	KeyID         string    `json:"key_id"`
+	MaskedKey     string    `json:"masked_key"`
+	State         string    `json:"state"`
+	ReqCount      int64     `json:"req_count"`
+	ErrCount      int64     `json:"err_count"`
+	InFlight      int64     `json:"in_flight"`
+	AvgLatencyMs  float64   `json:"avg_latency_ms"`
+	CoolUntil     time.Time `json:"cool_until,omitempty"`
+	Last401At     time.Time `json:"last_401_at,omitempty"`
+	InvalidReason string    `json:"invalid_reason,omitempty"`
 }
 
 func (p *Pool) Status() []KeyStatus {
@@ -224,14 +227,15 @@ func (p *Pool) Status() []KeyStatus {
 	out := make([]KeyStatus, len(keys))
 	for i, k := range keys {
 		s := KeyStatus{
-			Index:        i,
-			KeyID:        state.KeyID(k.Value),
-			MaskedKey:    logx.MaskSecret(k.Value),
-			ReqCount:     k.ReqCount.Load(),
-			ErrCount:     k.ErrCount.Load(),
-			InFlight:     k.InFlight(),
-			AvgLatencyMs: k.AvgLatencyMs(),
-			Last401At:    k.Last401At(),
+			Index:         i,
+			KeyID:         state.KeyID(k.Value),
+			MaskedKey:     logx.MaskSecret(k.Value),
+			ReqCount:      k.ReqCount.Load(),
+			ErrCount:      k.ErrCount.Load(),
+			InFlight:      k.InFlight(),
+			AvgLatencyMs:  k.AvgLatencyMs(),
+			Last401At:     k.Last401At(),
+			InvalidReason: k.InvalidReason(),
 		}
 		switch k.State() {
 		case StateActive:

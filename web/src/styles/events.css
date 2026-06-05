@@ -1,13 +1,80 @@
+.events-section-description {
+  display: block;
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.events-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 16px;
+}
+
+.events-summary-tile {
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.events-summary-tile--info {
+  border-color: #dbeafe;
+  background: #eff6ff;
+}
+
+.events-summary-tile--warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.events-summary-tile--error {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.events-summary-label {
+  display: block;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.events-summary-value {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 1.1rem;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .events-search,
-.events-level-select {
+.events-level-select,
+.events-filter-select {
   min-width: 0;
 }
 
 .events-toolbar-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 190px auto;
-  gap: 12px;
+  grid-template-columns: minmax(240px, 1fr) 132px 150px 150px auto;
+  gap: 10px;
   align-items: center;
+}
+
+.events-refresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: #64748b;
+  font-size: 0.82rem;
 }
 
 .events-table .ant-table {
@@ -28,12 +95,46 @@
   vertical-align: top;
 }
 
+.events-table .ant-table-tbody > tr {
+  cursor: pointer;
+}
+
+.events-table .ant-table-tbody > tr:hover > td {
+  background: #f8fbff !important;
+}
+
 .events-table-time {
   color: #64748b;
   font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+.events-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 24px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.events-status--success {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.events-status--warning {
+  color: #b45309;
+  background: #fffbeb;
+}
+
+.events-status--error {
+  color: #b91c1c;
+  background: #fff1f2;
 }
 
 .events-table .events-table-row--warn > td {
@@ -54,11 +155,126 @@
 
 .events-table-payload,
 .event-card-payload {
+  margin: 0;
   padding: 14px;
   border-radius: 14px;
   background: #f8fbff;
   border: 1px solid #dbeafe;
   color: #0f172a;
+}
+
+.event-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.event-detail-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.event-detail-drawer .ant-drawer-title {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-detail-group,
+.event-detail-raw {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.event-detail-raw {
+  grid-column: 1 / -1;
+}
+
+.event-detail-raw-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  margin-bottom: 0;
+  color: #334155;
+  cursor: pointer;
+  list-style: none;
+}
+
+.event-detail-raw-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.event-detail-raw-details summary::before {
+  content: ">";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 800;
+  line-height: 1;
+  transform-origin: center;
+  transition: transform 0.15s ease;
+}
+
+.event-detail-raw-details[open] summary {
+  margin-bottom: 10px;
+}
+
+.event-detail-raw-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.event-detail-title {
+  display: block;
+  color: #334155;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.event-detail-group .event-detail-title {
+  margin-bottom: 10px;
+}
+
+.event-detail-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.event-detail-item {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.event-detail-item dt {
+  color: #94a3b8;
+  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.event-detail-item dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 1.02rem;
+  line-height: 1.6;
 }
 
 .events-rail-card .ant-card-body {
