@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="web/public/ModelMux-icon.svg" width="80" height="80" alt="ModelMux" />
-</p>
-
 <h1 align="center">ModelMux</h1>
 
 <p align="center">
