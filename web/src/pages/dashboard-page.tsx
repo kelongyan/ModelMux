@@ -4,10 +4,9 @@ import { startTransition } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { activateProvider, fetchDashboard, triggerReload } from "../api/admin";
-import { formatClockShort, formatRelativeTime } from "../components/format-time";
+import { formatClockShort } from "../components/format-time";
 import { HealthDot } from "../components/health-dot";
-import { KeyPoolDots } from "../components/key-pool-dots";
-import type { AdminDashboardResponse, AdminEvent, AdminProviderSummary } from "../types/admin";
+import type { AdminDashboardResponse, AdminProviderSummary } from "../types/admin";
 
 const dashboardQueryKey = ["dashboard"];
 
@@ -85,7 +84,6 @@ export function DashboardPage(): JSX.Element {
   }
 
   const dashboard = dashboardQuery.data;
-  const events = dashboard.events ?? [];
   const lastUpdated = formatClockShort(dashboardQuery.dataUpdatedAt);
 
   return (
@@ -101,15 +99,16 @@ export function DashboardPage(): JSX.Element {
               </Typography.Title>
             </div>
             <Space wrap>
-              <span className="dashboard-updated-at">{`更新于 ${lastUpdated}`}</span>
+              <Typography.Text className="dashboard-updated-at">{`更新于 ${lastUpdated}`}</Typography.Text>
               <Button
+                size="small"
                 type="primary"
                 loading={reloadMutation.isPending}
                 onClick={() => reloadMutation.mutate()}
               >
                 立即重载
               </Button>
-              <Button onClick={() => void dashboardQuery.refetch()}>刷新</Button>
+              <Button size="small" onClick={() => void dashboardQuery.refetch()}>刷新</Button>
             </Space>
           </div>
           <div className="dashboard-overview-grid">
@@ -149,59 +148,24 @@ export function DashboardPage(): JSX.Element {
           {dashboard.providers.length === 0 ? (
             <Empty description="还未配置任何 provider" />
           ) : (
-            <div className="provider-grid">
+            <div className="provider-list">
               {dashboard.providers.map((provider) => (
-                <ProviderCard
+                <ProviderRow
                   key={provider.id}
                   provider={provider}
-                  recentIssue={findRecentIssue(events, provider.id)}
                   activating={activateMutation.isPending && activateMutation.variables === provider.id}
                   onActivate={() => activateMutation.mutate(provider.id)}
                   onOpenDetail={() => navigate(`/providers?provider=${encodeURIComponent(provider.id)}`)}
                 />
               ))}
-              <button type="button" className="provider-card provider-card--add" onClick={() => navigate("/providers")}>
-                <span className="provider-card-add-plus">+</span>
+              <button type="button" className="provider-row provider-row--add" onClick={() => navigate("/providers")}>
+                <span className="provider-row-add-plus">+</span>
                 <span>新增 Provider</span>
               </button>
             </div>
           )}
         </Card>
 
-        <Card className="surface-card events-rail-card" bordered={false}>
-          <div className="section-heading">
-            <div>
-              <Typography.Text className="placeholder-kicker">Recent Events</Typography.Text>
-              <Typography.Title level={3} className="section-title">
-                最近事件
-              </Typography.Title>
-            </div>
-            <Button size="small" onClick={() => navigate("/events")}>
-              查看全部
-            </Button>
-          </div>
-          {events.length === 0 ? (
-            <Empty description="暂无事件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-          ) : (
-            <ul className="events-rail-list events-rail-list--full">
-              {events.slice(0, 12).map((event) => (
-                <li key={`${event.seq}-${event.event}`} className={`events-rail-item events-rail-item--${event.level}`}>
-                  <span className="events-rail-time">{formatClockShort(new Date(event.at).getTime())}</span>
-                  <span className={`events-rail-level events-rail-level--${event.level}`}>{event.level}</span>
-                  <div className="events-rail-content">
-                    <span className="events-rail-msg" title={event.message}>
-                      {event.message}
-                    </span>
-                    <span className="events-rail-meta">
-                      {event.provider_id ? `Provider ${event.provider_id}` : event.category}
-                      {event.status ? ` · 状态 ${event.status}` : ""}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
       </Space>
     </>
   );
@@ -222,77 +186,46 @@ function OverviewStat({ label, value, tone }: OverviewStatProps): JSX.Element {
   );
 }
 
-type ProviderCardProps = {
+type ProviderRowProps = {
   provider: AdminProviderSummary;
-  recentIssue: AdminEvent | undefined;
   activating: boolean;
   onActivate: () => void;
   onOpenDetail: () => void;
 };
 
-function ProviderCard({ provider, recentIssue, activating, onActivate, onOpenDetail }: ProviderCardProps): JSX.Element {
+function ProviderRow({ provider, activating, onActivate, onOpenDetail }: ProviderRowProps): JSX.Element {
   const tone = computeCardTone(provider);
-  const className = `provider-card provider-card--${tone}${provider.active ? " provider-card--current" : ""}`;
+  const className = `provider-row provider-row--${tone}${provider.active ? " provider-row--current" : ""}`;
 
   return (
-    <article className={className}>
-      <header className="provider-card-head">
-        <div className="provider-card-title-row">
-          <div className="provider-card-title">
-            <HealthDot state={tone} pulse={provider.active && tone === "active"} />
-            <h3>{provider.id}</h3>
-          </div>
-          <span className={`provider-card-state provider-card-state--${tone}`}>{providerStateLabel(provider, tone)}</span>
-        </div>
-        <a className="provider-card-url" href={provider.target_url} target="_blank" rel="noreferrer">
+    <div className={className}>
+      <div className="provider-row-status">
+        <HealthDot state={tone} pulse={provider.active && tone === "active"} />
+        <span className={`provider-row-badge provider-row-badge--${tone}`}>{providerStateLabel(provider, tone)}</span>
+      </div>
+      <div className="provider-row-info">
+        <span className="provider-row-name">{provider.id}</span>
+        <a className="provider-row-url" href={provider.target_url} target="_blank" rel="noreferrer">
           {provider.target_url}
         </a>
-      </header>
-
-      <div className="provider-card-pool">
-        <div className="provider-card-pool-indicator">
-          <KeyPoolDots active={provider.active_keys} cooling={provider.cooling_keys} invalid={provider.invalid_keys} max={24} />
-          <span className="table-subtext">Key 池健康度</span>
-        </div>
-        <div className="provider-card-stats-grid">
-          <div className="provider-card-stat">
-            <span>可用</span>
-            <strong>{provider.active_keys}</strong>
-          </div>
-          <div className="provider-card-stat">
-            <span>冷却</span>
-            <strong>{provider.cooling_keys}</strong>
-          </div>
-          <div className="provider-card-stat">
-            <span>失效</span>
-            <strong>{provider.invalid_keys}</strong>
-          </div>
-          <div className="provider-card-stat">
-            <span>总量</span>
-            <strong>{provider.total_keys}</strong>
-          </div>
-        </div>
       </div>
-
-      {recentIssue ? (
-        <div className="provider-card-issue" title={recentIssue.message}>
-          <span className="provider-card-issue-label">最近异常</span>
-          <span className="provider-card-issue-msg">{recentIssue.message}</span>
-          <span className="provider-card-issue-time">{formatRelativeTime(recentIssue.at)}</span>
-        </div>
-      ) : null}
-
-      <footer className="provider-card-actions">
+      <div className="provider-row-keys">
+        <span className="provider-row-key-item provider-row-key-item--active">{provider.active_keys} 可用</span>
+        <span className="provider-row-key-item provider-row-key-item--cooling">{provider.cooling_keys} 冷却</span>
+        <span className="provider-row-key-item provider-row-key-item--invalid">{provider.invalid_keys} 失效</span>
+        <span className="provider-row-key-item provider-row-key-item--total">共 {provider.total_keys}</span>
+      </div>
+      <div className="provider-row-actions">
         {provider.active ? (
-          <Button disabled>已活跃</Button>
+          <span className="provider-row-active-label">已活跃</span>
         ) : (
-          <Button type="primary" loading={activating} onClick={onActivate}>
-            切换为活跃
+          <Button size="small" type="primary" loading={activating} onClick={onActivate}>
+            切换
           </Button>
         )}
-        <Button onClick={onOpenDetail}>查看详情</Button>
-      </footer>
-    </article>
+        <Button size="small" type="link" onClick={onOpenDetail}>详情</Button>
+      </div>
+    </div>
   );
 }
 
@@ -349,17 +282,4 @@ function computeCardTone(provider: AdminProviderSummary): "active" | "cooling" |
     return provider.active ? "cooling" : "idle";
   }
   return provider.active ? "active" : "idle";
-}
-
-function findRecentIssue(events: AdminEvent[], providerID: string): AdminEvent | undefined {
-  for (const event of events) {
-    if (event.level === "info") {
-      continue;
-    }
-    const eventProvider = event.provider_id ?? ((event.data?.provider_id as string | undefined) ?? "");
-    if (eventProvider === providerID) {
-      return event;
-    }
-  }
-  return undefined;
 }

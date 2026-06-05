@@ -1,11 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
-import { Button, Card, Col, Empty, Result, Row, Segmented, Space, Spin, Table, Tag, Typography } from "antd";
-import type { TableColumnsType } from "antd";
-import { useMemo, useState } from "react";
+import { Button, Card, Col, Result, Row, Segmented, Space, Spin, Typography } from "antd";
+import { useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
-import { fetchStatsModels, fetchStatsRecent, fetchStatsSummary } from "../api/admin";
-import { formatDateTime } from "../components/format-time";
-import type { AdminCallRecord, AdminModelStats, AdminStatsSummary, AdminStatsWindow } from "../types/admin";
+import { fetchStatsModels, fetchStatsSummary } from "../api/admin";
+import type { AdminStatsSummary, AdminStatsWindow } from "../types/admin";
 
 const windowOptions: Array<{ label: string; value: AdminStatsWindow }> = [
   { label: "1 小时", value: "1h" },
@@ -14,7 +22,7 @@ const windowOptions: Array<{ label: string; value: AdminStatsWindow }> = [
   { label: "30 天", value: "30d" },
 ];
 
-// StatsPage 展示调用明细持久化后的模型与 token 使用情况。
+// StatsPage 展示调用明细持久化后的 token 使用情况。
 export function StatsPage(): JSX.Element {
   const [window, setWindow] = useState<AdminStatsWindow>("24h");
 
@@ -23,135 +31,14 @@ export function StatsPage(): JSX.Element {
     queryFn: () => fetchStatsSummary(window),
     refetchInterval: 10000,
   });
+
   const modelsQuery = useQuery({
     queryKey: ["stats-models", window],
     queryFn: () => fetchStatsModels(window),
     refetchInterval: 10000,
   });
-  const recentQuery = useQuery({
-    queryKey: ["stats-recent", 100],
-    queryFn: () => fetchStatsRecent(100),
-    refetchInterval: 10000,
-  });
 
-  const modelColumns = useMemo<TableColumnsType<AdminModelStats>>(
-    () => [
-      {
-        title: "模型",
-        dataIndex: "model",
-        key: "model",
-        render: (model: string) => <strong>{displayModel(model)}</strong>,
-      },
-      {
-        title: "调用",
-        dataIndex: "calls",
-        key: "calls",
-        width: 92,
-        render: (value: number) => formatNumber(value),
-      },
-      {
-        title: "成功率",
-        key: "success_rate",
-        width: 110,
-        render: (_: unknown, record) => successRateTag(record.success_calls, record.calls),
-      },
-      {
-        title: "Token",
-        dataIndex: "total_tokens",
-        key: "total_tokens",
-        width: 120,
-        render: (value: number) => formatNumber(value),
-      },
-      {
-        title: "平均延迟",
-        dataIndex: "avg_latency_ms",
-        key: "avg_latency_ms",
-        width: 120,
-        render: (value: number) => `${Math.round(value)} ms`,
-      },
-    ],
-    [],
-  );
-
-  const recentColumns = useMemo<TableColumnsType<AdminCallRecord>>(
-    () => [
-      {
-        title: "时间",
-        dataIndex: "at",
-        key: "at",
-        width: 170,
-        render: (value: string) => <span className="stats-time">{formatDateTime(value)}</span>,
-      },
-      {
-        title: "模型",
-        dataIndex: "model",
-        key: "model",
-        render: (model: string | undefined) => displayModel(model),
-      },
-      {
-        title: "Provider",
-        dataIndex: "provider_id",
-        key: "provider_id",
-        width: 120,
-      },
-      {
-        title: "状态",
-        key: "status",
-        width: 100,
-        render: (_: unknown, record) => <Tag color={record.success ? "green" : "red"}>{record.status || "ERR"}</Tag>,
-      },
-      {
-        title: "模式",
-        key: "stream",
-        width: 92,
-        render: (_: unknown, record) => (record.stream ? <Tag color="blue">stream</Tag> : <Tag>normal</Tag>),
-      },
-      {
-        title: "Prompt",
-        dataIndex: "prompt_tokens",
-        key: "prompt_tokens",
-        width: 100,
-        render: (value: number | undefined) => tokenValue(value),
-      },
-      {
-        title: "Completion",
-        dataIndex: "completion_tokens",
-        key: "completion_tokens",
-        width: 120,
-        render: (value: number | undefined) => tokenValue(value),
-      },
-      {
-        title: "总 Token",
-        dataIndex: "total_tokens",
-        key: "total_tokens",
-        width: 110,
-        render: (value: number | undefined) => tokenValue(value),
-      },
-      {
-        title: "来源",
-        dataIndex: "usage_source",
-        key: "usage_source",
-        width: 100,
-        render: (value: string | undefined) => usageSourceTag(value),
-      },
-      {
-        title: "延迟",
-        dataIndex: "latency_ms",
-        key: "latency_ms",
-        width: 100,
-        render: (value: number) => `${value} ms`,
-      },
-      {
-        title: "尝试",
-        dataIndex: "attempts",
-        key: "attempts",
-        width: 80,
-      },
-    ],
-    [],
-  );
-
-  if (summaryQuery.isLoading || modelsQuery.isLoading || recentQuery.isLoading) {
+  if (summaryQuery.isLoading || modelsQuery.isLoading) {
     return (
       <div className="console-loading">
         <Spin size="large" />
@@ -159,8 +46,8 @@ export function StatsPage(): JSX.Element {
     );
   }
 
-  if (summaryQuery.isError || modelsQuery.isError || recentQuery.isError) {
-    const error = summaryQuery.error ?? modelsQuery.error ?? recentQuery.error;
+  if (summaryQuery.isError || modelsQuery.isError) {
+    const error = summaryQuery.error ?? modelsQuery.error;
     return (
       <Result
         status="error"
@@ -173,10 +60,9 @@ export function StatsPage(): JSX.Element {
 
   const summary = summaryQuery.data?.summary ?? emptySummary();
   const models = modelsQuery.data?.models ?? [];
-  const recent = recentQuery.data?.records ?? [];
 
   return (
-    <Space direction="vertical" size={16} className="console-stack">
+    <Space direction="vertical" size={12} className="console-stack">
       <Card className="surface-card" bordered={false}>
         <div className="section-heading">
           <div>
@@ -195,14 +81,7 @@ export function StatsPage(): JSX.Element {
           </Space>
         </div>
 
-        <div className="events-summary-row">
-          <span className="summary-pill">{`窗口 ${windowLabel(window)}`}</span>
-          <span className="summary-pill">{`模型 ${models.length}`}</span>
-          <span className="summary-pill">{`最近记录 ${recent.length}`}</span>
-          <span className="summary-pill">{`成功 ${summary.success_calls} / 失败 ${summary.failed_calls}`}</span>
-        </div>
-
-        <Row gutter={[14, 14]}>
+        <Row gutter={[12, 12]}>
           <StatsKPI label="调用数" value={formatNumber(summary.total_calls)} tone="teal" />
           <StatsKPI label="成功率" value={formatPercent(summary.success_calls, summary.total_calls)} tone="green" />
           <StatsKPI label="总 Token" value={formatNumber(summary.total_tokens)} tone="amber" />
@@ -213,65 +92,66 @@ export function StatsPage(): JSX.Element {
         </Row>
       </Card>
 
-      <Row gutter={[18, 18]}>
-        <Col xs={24} xl={10}>
-          <Card className="surface-card" bordered={false}>
-            <div className="section-heading">
-              <div>
-                <Typography.Text className="placeholder-kicker">Models</Typography.Text>
-                <Typography.Title level={3} className="section-title">
-                  模型排行
-                </Typography.Title>
-              </div>
-              <Tag>{windowLabel(window)}</Tag>
-            </div>
-            {models.length === 0 ? (
-              <Empty description="当前窗口暂无模型调用" />
-            ) : (
-              <Table
-                className="stats-table"
-                columns={modelColumns}
-                dataSource={models}
-                pagination={false}
-                size="small"
-                rowKey={(record) => record.model}
-              />
-            )}
-          </Card>
-        </Col>
+      {models.length > 0 && (
+        <div className="stats-chart-grid">
+          <ChartCard title="模型调用量">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={models} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="model" tick={{ fontSize: 12 }} tickFormatter={truncateLabel} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(v) => formatNumber(Number(v))} />
+                <Bar dataKey="calls" name="调用量" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
 
-        <Col xs={24} xl={14}>
-          <Card className="surface-card" bordered={false}>
-            <div className="section-heading">
-              <div>
-                <Typography.Text className="placeholder-kicker">Recent Calls</Typography.Text>
-                <Typography.Title level={3} className="section-title">
-                  最近调用
-                </Typography.Title>
-              </div>
-              <Tag>{`最近 ${recent.length} 条`}</Tag>
-            </div>
-            {recent.length === 0 ? (
-              <Empty description="暂无调用明细" />
-            ) : (
-              <Table
-                className="stats-table"
-                columns={recentColumns}
-                dataSource={[...recent].reverse()}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
-                scroll={{ x: 1210 }}
-                size="small"
-                rowKey={(record) => record.id}
-              />
-            )}
-          </Card>
-        </Col>
-      </Row>
+          <ChartCard title="成功 / 失败对比">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={models} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="model" tick={{ fontSize: 12 }} tickFormatter={truncateLabel} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(v) => formatNumber(Number(v))} />
+                <Legend />
+                <Bar dataKey="success_calls" name="成功" fill="#22c55e" radius={[4, 4, 0, 0]} stackId="a" />
+                <Bar dataKey="failed_calls" name="失败" fill="#ef4444" radius={[4, 4, 0, 0]} stackId="a" />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Token 用量">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={models} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="model" tick={{ fontSize: 12 }} tickFormatter={truncateLabel} />
+                <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                <Tooltip formatter={(v) => formatNumber(Number(v))} />
+                <Legend />
+                <Bar dataKey="prompt_tokens" name="Prompt" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="completion_tokens" name="Completion" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="平均延迟 (ms)">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={models} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="model" tick={{ fontSize: 12 }} tickFormatter={truncateLabel} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(v) => `${Math.round(Number(v))} ms`} />
+                <Bar dataKey="avg_latency_ms" name="平均延迟" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      )}
     </Space>
   );
 
   async function refetchAll() {
-    await Promise.all([summaryQuery.refetch(), modelsQuery.refetch(), recentQuery.refetch()]);
+    await Promise.all([summaryQuery.refetch(), modelsQuery.refetch()]);
   }
 }
 
@@ -305,30 +185,6 @@ function emptySummary(): AdminStatsSummary {
   };
 }
 
-function displayModel(model: string | undefined): string {
-  return model && model !== "unknown" ? model : "未知模型";
-}
-
-function tokenValue(value: number | undefined | null): JSX.Element {
-  if (value === undefined || value === null) {
-    return <Tag>未知</Tag>;
-  }
-  return <span>{formatNumber(value)}</span>;
-}
-
-function usageSourceTag(source: string | undefined): JSX.Element {
-  if (source === "upstream") {
-    return <Tag color="green">upstream</Tag>;
-  }
-  return <Tag color="gold">unknown</Tag>;
-}
-
-function successRateTag(success: number, total: number): JSX.Element {
-  const value = formatPercent(success, total);
-  const color = total === 0 || success === total ? "green" : success === 0 ? "red" : "gold";
-  return <Tag color={color}>{value}</Tag>;
-}
-
 function formatPercent(part: number, total: number): string {
   if (total <= 0) {
     return "0%";
@@ -340,6 +196,15 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN").format(value);
 }
 
-function windowLabel(value: AdminStatsWindow): string {
-  return windowOptions.find((item) => item.value === value)?.label ?? value;
+function truncateLabel(value: string): string {
+  return value.length > 14 ? value.slice(0, 12) + "…" : value;
+}
+
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <Card className="surface-card stats-chart-card" bordered={false}>
+      <Typography.Text className="stats-chart-title">{title}</Typography.Text>
+      {children}
+    </Card>
+  );
 }

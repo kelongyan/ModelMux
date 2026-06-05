@@ -88,7 +88,7 @@ export function EventsPage(): JSX.Element {
         dataIndex: "status",
         key: "status",
         width: 92,
-        render: (value: number | undefined) => (value ? <span className="summary-pill">{value}</span> : "-"),
+        render: (value: number | undefined) => (value ? String(value) : "-"),
       },
       {
         title: "消息",
@@ -140,10 +140,6 @@ export function EventsPage(): JSX.Element {
             placeholder="搜索 message / provider / request id / model"
           />
           <Select className="events-level-select" value={level} options={eventLevelOptions} onChange={setLevel} />
-          <div className="events-summary-row">
-            <span className="summary-pill">{`总数 ${eventsQuery.data.events.length}`}</span>
-            <span className="summary-pill">{`已筛选 ${filteredEvents.length}`}</span>
-          </div>
         </div>
 
         {filteredEvents.length === 0 ? (

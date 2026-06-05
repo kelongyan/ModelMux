@@ -1,14 +1,19 @@
 @media (max-width: 1180px) {
-  .console-header-metrics,
-  .dashboard-stat-strip,
-  .provider-card-stats-grid {
+  .dashboard-stat-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboard-overview-grid,
-  .events-toolbar-grid,
-  .settings-card-grid,
-  .settings-card-grid--wide {
+  .events-toolbar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-row-keys {
+    gap: 6px;
+    font-size: 0.72rem;
+  }
+
+  .about-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -22,7 +27,7 @@
     width: 100%;
     min-width: 100%;
     flex-basis: auto;
-    padding: 18px 16px;
+    padding: 22px 18px;
     border-right: none;
     border-bottom: 1px solid #e4e7ec;
   }
@@ -39,8 +44,8 @@
   .console-header,
   .console-content {
     width: 100%;
-    padding-left: 16px;
-    padding-right: 16px;
+    padding-left: 18px;
+    padding-right: 18px;
   }
 
   .section-heading,
@@ -55,13 +60,18 @@
 
   .header-status-metrics {
     flex-wrap: wrap;
+    gap: 8px 10px;
+  }
+
+  .provider-row {
+    flex-wrap: wrap;
     gap: 8px 12px;
   }
 
-  .provider-card-title-row,
-  .provider-card-pool-indicator {
-    flex-direction: column;
-    align-items: flex-start;
+  .provider-row-keys {
+    flex: 0 0 100%;
+    order: 10;
+    padding-left: 22px;
   }
 
   .events-rail-item {
@@ -70,18 +80,48 @@
 }
 
 @media (max-width: 640px) {
-  .console-nav-link,
-  .provider-card-actions > .ant-btn {
+  .console-nav-link {
     flex: 1 1 100%;
   }
 
-  .console-header-metrics,
-  .dashboard-stat-strip,
-  .provider-card-stats-grid {
+  .dashboard-stat-strip {
     grid-template-columns: 1fr;
   }
 
   .stats-kpi {
-    min-height: 88px;
+    min-height: 96px;
+  }
+
+  .provider-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .provider-row-keys {
+    padding-left: 0;
+  }
+
+  .provider-row-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .about-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .about-val--truncate {
+    max-width: 200px;
+  }
+
+  .detail-stats-row {
+    flex-wrap: wrap;
+  }
+
+  .detail-stat {
+    flex: 1 1 calc(50% - 6px);
   }
 }

@@ -13,7 +13,6 @@ import {
   Space,
   Spin,
   Table,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -35,7 +34,6 @@ import {
 } from "../api/admin";
 import { CooldownText } from "../components/cooldown-text";
 import { formatRelativeTime } from "../components/format-time";
-import { KeyPoolDots } from "../components/key-pool-dots";
 import type {
   AdminKeyStatus,
   AdminProviderDetailResponse,
@@ -240,23 +238,7 @@ export function ProvidersPage(): JSX.Element {
         dataIndex: "id",
         key: "id",
         render: (_: string, record) => (
-          <div className="provider-table-name">
-            <div className="provider-table-title-row">
-              <strong>{record.id}</strong>
-              {record.active ? <Tag color="green">当前活跃</Tag> : <Tag>待命</Tag>}
-            </div>
-            <div className="table-subtext">{record.target_url}</div>
-            <div className="provider-table-pool">
-              <KeyPoolDots
-                active={record.active_keys}
-                cooling={record.cooling_keys}
-                invalid={record.invalid_keys}
-                max={18}
-                size="small"
-              />
-              <span>{`可用 ${record.active_keys} · 冷却 ${record.cooling_keys} · 失效 ${record.invalid_keys}`}</span>
-            </div>
-          </div>
+          <div className="provider-table-id">{record.id}</div>
         ),
       },
       {
@@ -273,23 +255,28 @@ export function ProvidersPage(): JSX.Element {
         title: "操作",
         key: "actions",
         render: (_: unknown, record) => (
-          <Space wrap>
-            <Button size="small" onClick={() => setSelectedProvider(record.id)}>
-              查看详情
-            </Button>
+          <div className="provider-actions">
+            <button
+              className="provider-action provider-action--primary"
+              onClick={() => setSelectedProvider(record.id)}
+            >
+              详情
+            </button>
             {!record.active ? (
-              <Button
-                size="small"
-                type="primary"
-                loading={activateProviderMutation.isPending}
+              <button
+                className="provider-action provider-action--activate"
+                disabled={activateProviderMutation.isPending}
                 onClick={() => activateProviderMutation.mutate(record.id)}
               >
-                设为活跃
-              </Button>
+                激活
+              </button>
             ) : null}
-            <Button size="small" onClick={() => openProviderEdit(record)}>
+            <button
+              className="provider-action provider-action--edit"
+              onClick={() => openProviderEdit(record)}
+            >
               编辑
-            </Button>
+            </button>
             <Popconfirm
               title={`确认删除 provider ${record.id}？`}
               description="删除后将同时移除其全部 keys。"
@@ -297,11 +284,14 @@ export function ProvidersPage(): JSX.Element {
               cancelText="取消"
               onConfirm={() => deleteProviderMutation.mutate(record.id)}
             >
-              <Button danger size="small" loading={deleteProviderMutation.isPending}>
+              <button
+                className="provider-action provider-action--danger"
+                disabled={deleteProviderMutation.isPending}
+              >
                 删除
-              </Button>
+              </button>
             </Popconfirm>
-          </Space>
+          </div>
         ),
       },
     ],
@@ -393,7 +383,6 @@ export function ProvidersPage(): JSX.Element {
   }
 
   const providers = providersQuery.data.providers;
-  const providerSummary = summarizeProviders(providers);
 
   return (
     <>
@@ -413,14 +402,6 @@ export function ProvidersPage(): JSX.Element {
                 新增 Provider
               </Button>
             </Space>
-          </div>
-          <div className="providers-summary-strip">
-            <span className="summary-pill">{`当前活跃：${providersQuery.data.active_provider}`}</span>
-            <span className="summary-pill">{`Provider ${providers.length}`}</span>
-            <span className="summary-pill">{`总 Key ${providerSummary.totalKeys}`}</span>
-            <span className="summary-pill">{`可用 ${providerSummary.activeKeys}`}</span>
-            <span className="summary-pill">{`冷却 ${providerSummary.coolingKeys}`}</span>
-            <span className="summary-pill">{`失效 ${providerSummary.invalidKeys}`}</span>
           </div>
           {providers.length === 0 ? (
             <Empty description="当前没有 provider 配置" />
@@ -638,34 +619,37 @@ function ProviderDetailContent({
   deletingKeys,
 }: ProviderDetailContentProps): JSX.Element {
   return (
-    <Space direction="vertical" size={16} className="console-stack">
+    <Space direction="vertical" size={14} className="console-stack">
       <Card className="surface-card" bordered={false}>
-        <div className="provider-detail-pool">
-          <KeyPoolDots
-            active={detail.active_keys}
-            cooling={detail.cooling_keys}
-            invalid={detail.invalid_keys}
-            max={48}
-          />
-          <span className="provider-detail-pool-summary">
-            {`可用 ${detail.active_keys} · 冷却 ${detail.cooling_keys} · 失效 ${detail.invalid_keys} · 总 ${detail.total_keys}`}
-          </span>
+        <div className="detail-stats-row">
+          <div className="detail-stat">
+            <span>总 Key</span>
+            <strong>{detail.total_keys}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>可用</span>
+            <strong style={{ color: "#16a34a" }}>{detail.active_keys}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>冷却</span>
+            <strong style={{ color: "#d97706" }}>{detail.cooling_keys}</strong>
+          </div>
+          <div className="detail-stat">
+            <span>失效</span>
+            <strong style={{ color: "#dc2626" }}>{detail.invalid_keys}</strong>
+          </div>
         </div>
         <Descriptions
           className="provider-detail-descriptions"
-          column={{ xs: 1, md: 2 }}
+          column={{ xs: 1, sm: 2 }}
           items={[
             { key: "id", label: "Provider ID", children: detail.id },
             {
               key: "active",
               label: "状态",
-              children: detail.active ? <Tag color="green">当前活跃</Tag> : <Tag>待命</Tag>,
+              children: detail.active ? <StateText color="green">当前活跃</StateText> : <StateText color="gray">待命</StateText>,
             },
-            { key: "target", label: "Target URL", children: detail.target_url },
-            { key: "total", label: "总 Key", children: detail.total_keys },
-            { key: "active_keys", label: "可用 Key", children: detail.active_keys },
-            { key: "cooling_keys", label: "冷却 Key", children: detail.cooling_keys },
-            { key: "invalid_keys", label: "失效 Key", children: detail.invalid_keys },
+            { key: "target", label: "Target URL", children: <a href={detail.target_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>{detail.target_url}</a> },
           ]}
         />
       </Card>
@@ -679,8 +663,8 @@ function ProviderDetailContent({
             </Typography.Title>
           </div>
           <Space wrap>
-            <Button onClick={onOpenAppendKeys}>追加 Keys</Button>
-            <Button danger onClick={onOpenReplaceKeys}>
+            <Button size="small" onClick={onOpenAppendKeys}>追加 Keys</Button>
+            <Button size="small" danger onClick={onOpenReplaceKeys}>
               替换全部
             </Button>
             <Popconfirm
@@ -691,7 +675,7 @@ function ProviderDetailContent({
               onConfirm={onDeleteSelectedKeys}
               disabled={selectedKeyIDs.length === 0}
             >
-              <Button danger disabled={selectedKeyIDs.length === 0} loading={deletingKeys}>
+              <Button size="small" danger disabled={selectedKeyIDs.length === 0} loading={deletingKeys}>
                 删除选中
               </Button>
             </Popconfirm>
@@ -716,49 +700,44 @@ function ProviderDetailContent({
 // renderKeyState 把后端 key 状态映射为更易识别的标签。
 function renderProviderState(provider: AdminProviderSummary): JSX.Element {
   if (provider.active) {
-    return <Tag color="green">当前活跃</Tag>;
+    return <StateText color="green">当前活跃</StateText>;
   }
   if (provider.active_keys === 0 && provider.cooling_keys === 0) {
-    return <Tag color="red">不可用</Tag>;
+    return <StateText color="red">不可用</StateText>;
   }
   if (provider.cooling_keys > 0 || provider.invalid_keys > 0) {
-    return <Tag color="gold">波动中</Tag>;
+    return <StateText color="gold">波动中</StateText>;
   }
-  return <Tag color="blue">待命</Tag>;
+  return <StateText color="blue">待命</StateText>;
 }
 
 function renderKeyState(state: AdminKeyStatus["state"]): JSX.Element {
   switch (state) {
     case "active":
-      return <Tag color="green">可用</Tag>;
+      return <StateText color="green">可用</StateText>;
     case "cooling":
-      return <Tag color="gold">冷却中</Tag>;
+      return <StateText color="gold">冷却中</StateText>;
     default:
-      return <Tag color="red">失效</Tag>;
+      return <StateText color="red">失效</StateText>;
   }
 }
 
 // splitKeysText 把多行文本框内容解析成 key 数组，并忽略空行与前后空格。
+
+const stateColors: Record<string, string> = {
+  green: "#16a34a",
+  red: "#dc2626",
+  gold: "#d97706",
+  blue: "#2563eb",
+  gray: "#64748b",
+};
+
+function StateText({ color, children }: { color: string; children: React.ReactNode }): JSX.Element {
+  return <span style={{ color: stateColors[color] ?? "#475569", fontWeight: 600, fontSize: "0.82rem" }}>{children}</span>;
+}
 function splitKeysText(input: string): string[] {
   return input
     .split(/\r?\n/g)
     .map((key) => key.trim())
     .filter((key) => key.length > 0);
-}
-
-function summarizeProviders(providers: AdminProviderSummary[]) {
-  return providers.reduce(
-    (summary, provider) => ({
-      totalKeys: summary.totalKeys + provider.total_keys,
-      activeKeys: summary.activeKeys + provider.active_keys,
-      coolingKeys: summary.coolingKeys + provider.cooling_keys,
-      invalidKeys: summary.invalidKeys + provider.invalid_keys,
-    }),
-    {
-      totalKeys: 0,
-      activeKeys: 0,
-      coolingKeys: 0,
-      invalidKeys: 0,
-    }
-  );
 }

@@ -1,73 +1,87 @@
-.settings-advanced-collapse {
-  margin: 4px 0 12px;
+/* ── settings page layout ── */
+
+.settings-group {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #f1f5f9;
 }
 
-.settings-advanced-collapse .ant-collapse-header {
-  padding-left: 0 !important;
+.settings-group--last {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
-.settings-advanced-collapse .ant-collapse-content > .ant-collapse-content-box {
-  padding: 8px 0 0 !important;
+.settings-group-title {
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 2px;
 }
 
-.settings-hero-card .section-heading {
+.settings-group-desc {
+  display: block;
+  font-size: 0.78rem;
+  color: #94a3b8;
   margin-bottom: 12px;
 }
 
-.settings-hero-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.settings-section {
-  margin-top: 0;
-}
-
-.settings-section .ant-form-item {
+.settings-group .ant-form-item {
   margin-bottom: 14px;
 }
 
-.settings-section-head {
-  margin-bottom: 10px;
+/* effect labels */
+.settings-effect-hot,
+.settings-effect-restart,
+.settings-effect-readonly {
+  font-size: 0.72rem;
+  font-weight: 600;
 }
 
-.settings-section-description {
-  margin-bottom: 0 !important;
+.settings-effect-hot {
+  color: #16a34a;
 }
 
+.settings-effect-restart {
+  color: #d97706;
+}
+
+.settings-effect-readonly {
+  color: #94a3b8;
+}
+
+/* collapse for advanced settings */
+.settings-collapse {
+  margin-top: 4px;
+}
+
+.settings-collapse .ant-collapse-header {
+  padding: 8px 0 !important;
+  border-bottom: 1px solid #f1f5f9;
+  margin-bottom: 12px;
+}
+
+.settings-collapse .ant-collapse-content > .ant-collapse-content-box {
+  padding: 0 !important;
+}
+
+/* save summary */
 .settings-summary-card {
   background: #f8fafc !important;
 }
 
 .settings-summary-label {
-  display: inline-block;
-  margin-bottom: 6px;
-  color: #667085;
-  font-size: 0.8rem;
+  display: block;
+  margin-bottom: 2px;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
-.settings-tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.settings-card-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.settings-card-grid + .settings-card-grid {
-  margin-top: 18px;
-}
-
-.settings-card-grid--wide {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.settings-card-grid .surface-card .ant-card-body {
-  height: 100%;
+.settings-summary-fields {
+  display: block;
+  font-size: 0.84rem;
+  color: #334155;
+  line-height: 1.6;
 }

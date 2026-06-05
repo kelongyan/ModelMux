@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfigProvider } from "antd";
 import { BrowserRouter } from "react-router-dom";
+import "@fontsource-variable/inter";
 
 import { App } from "./App";
 import "./styles.css";
@@ -26,33 +27,46 @@ ReactDOM.createRoot(rootElement).render(
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: "#0f766e",
-          colorInfo: "#0f766e",
-          colorSuccess: "#15803d",
-          colorWarning: "#b54708",
-          colorError: "#b42318",
+          colorPrimary: "#1677ff",
+          colorInfo: "#1677ff",
+          colorSuccess: "#16a34a",
+          colorWarning: "#f59e0b",
+          colorError: "#ef4444",
           colorText: "#0f172a",
-          colorTextSecondary: "#475467",
-          colorBorder: "#d0d5dd",
-          colorBorderSecondary: "#e4e7ec",
-          colorBgBase: "#f5f7fa",
-          colorBgLayout: "#f5f7fa",
+          colorTextSecondary: "#64748b",
+          colorBorder: "#dbeafe",
+          colorBorderSecondary: "#e0edff",
+          colorBgBase: "#f5f9ff",
+          colorBgLayout: "#f5f9ff",
           colorBgContainer: "#ffffff",
-          borderRadius: 12,
-          borderRadiusLG: 16,
+          borderRadius: 14,
+          borderRadiusLG: 18,
           borderRadiusSM: 10,
           borderRadiusXS: 8,
-          controlHeight: 38,
-          controlHeightSM: 30,
-          controlHeightLG: 44,
-          fontFamily: '"Aptos", "Segoe UI", "Microsoft YaHei UI", sans-serif',
+          controlHeight: 42,
+          controlHeightSM: 34,
+          controlHeightLG: 48,
+          fontSize: 15,
+          fontSizeSM: 13,
+          lineHeight: 1.62,
+          padding: 18,
+          paddingSM: 14,
+          paddingXS: 10,
+          margin: 18,
+          marginSM: 14,
+          marginXS: 10,
+          fontFamily: '"Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif',
+          fontFamilyCode: '"Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
         },
         components: {
           Button: {
-            primaryShadow: "0 2px 6px rgba(15, 118, 110, 0.14)",
+            primaryShadow: "0 8px 18px rgba(22, 119, 255, 0.2)",
+            paddingInline: 18,
           },
           Tag: {
             borderRadiusSM: 999,
+            fontSizeSM: 13,
+            lineHeightSM: 1.8,
           },
         },
       }}

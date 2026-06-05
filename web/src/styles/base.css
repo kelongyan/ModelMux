@@ -1,10 +1,11 @@
 :root {
   color-scheme: light;
-  font-family: "Aptos", "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  font-size: 14px;
-  line-height: 1.45;
+  font-family: "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.62;
   font-weight: 400;
-  background: #f8fafc;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  background: #f5f9ff;
   color: #0f172a;
 }
 
@@ -21,10 +22,25 @@ body,
 
 body {
   min-height: 100vh;
-  background: #f8fafc;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(circle at top left, rgba(22, 119, 255, 0.14), transparent 34vw),
+    linear-gradient(135deg, #f8fbff 0%, #eef6ff 48%, #f7fbff 100%);
   color: #0f172a;
+}
+
+body::selection {
+  background: rgba(22, 119, 255, 0.18);
 }
 
 a {
   color: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }

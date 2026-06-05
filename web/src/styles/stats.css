@@ -1,38 +1,55 @@
 .stats-kpi {
-  min-height: 96px;
-  padding: 16px 18px;
-  border-radius: 14px;
+  min-height: 100px;
+  padding: 18px 20px;
+  border-radius: 18px;
   justify-content: center;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%) !important;
 }
 
 .stats-kpi span {
-  color: #667085;
+  display: block;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .stats-kpi strong {
-  font-size: 1.5rem;
-}
-
-.stats-time {
-  color: #667085;
-  font-family: "Aptos Mono", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  display: block;
+  font-size: 1.72rem;
+  color: #0b63ce;
+  line-height: 1.18;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
-  font-size: 0.8rem;
 }
 
-.stats-table .ant-table {
-  background: transparent;
+/* ── chart grid ── */
+
+.stats-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
 }
 
-.stats-table .ant-table-thead > tr > th {
-  background: #f8fafc;
-  color: #475467;
-  font-size: 0.78rem;
-  font-weight: 700;
+.stats-chart-card {
+  padding: 0 !important;
 }
 
-.stats-table .ant-table-tbody > tr > td {
-  background: transparent;
-  font-size: 0.84rem;
-  vertical-align: top;
+.stats-chart-card .ant-card-body {
+  padding: 16px 18px 12px !important;
 }
+
+.stats-chart-title {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+@media (max-width: 960px) {
+  .stats-chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

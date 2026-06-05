@@ -19,7 +19,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: rgba(16, 35, 31, 0.18);
+  background: #cbd5e1;
 }
 
 .key-pool-dots--small .key-pool-dot {
@@ -29,54 +29,57 @@
 
 .key-pool-dot--active {
   background: #16a34a;
-  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.18);
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
 }
 
 .key-pool-dot--cooling {
-  background: #d97706;
-  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.22);
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
 }
 
 .key-pool-dot--invalid {
-  background: #dc2626;
-  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.24);
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
 }
 
 .key-pool-dot--empty {
-  background: rgba(16, 35, 31, 0.18);
+  background: #cbd5e1;
 }
 
 .key-pool-dots-more {
   margin-left: 6px;
-  color: rgba(16, 35, 31, 0.6);
+  color: #64748b;
   font-size: 0.78rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .health-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: rgba(16, 35, 31, 0.32);
+  background: #cbd5e1;
   margin-right: 6px;
   vertical-align: middle;
 }
 
 .health-dot--active {
   background: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.14);
 }
 
 .health-dot--cooling {
-  background: #d97706;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
 }
 
 .health-dot--invalid {
-  background: #dc2626;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.16);
 }
 
 .health-dot--idle {
-  background: rgba(16, 35, 31, 0.32);
+  background: #94a3b8;
 }
 
 .health-dot--pulse {
@@ -95,6 +98,6 @@
 
 .cooldown-text {
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 700;
   color: #b45309;
 }

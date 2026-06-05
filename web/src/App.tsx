@@ -140,8 +140,11 @@ function HeaderStatus({ data, loading }: HeaderStatusProps): JSX.Element {
       </div>
       <div className="header-status-metrics">
         <span>可用 <strong>{data.active_keys}</strong></span>
+        <span className="header-metrics-sep" />
         <span>冷却 <strong>{data.cooling_keys}</strong></span>
+        <span className="header-metrics-sep" />
         <span>失效 <strong>{data.invalid_keys}</strong></span>
+        <span className="header-metrics-sep" />
         <span>Provider <strong>{data.provider_count}</strong></span>
       </div>
     </div>
