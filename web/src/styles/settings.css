@@ -3,7 +3,7 @@
 .settings-group {
   padding-bottom: 16px;
   margin-bottom: 16px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--mm-border-muted);
 }
 
 .settings-group--last {
@@ -16,14 +16,14 @@
   display: block;
   font-size: 0.92rem;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--mm-text-secondary);
   margin-bottom: 2px;
 }
 
 .settings-group-desc {
   display: block;
   font-size: 0.78rem;
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   margin-bottom: 12px;
 }
 
@@ -39,7 +39,7 @@
 }
 
 .settings-field-hint {
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   font-size: 0.76rem;
   line-height: 1.55;
 }
@@ -50,7 +50,7 @@
 
 .settings-form-item--inactive .settings-field-hint::after {
   content: " 当前条件下不会生效。";
-  color: #d97706;
+  color: var(--mm-warning);
 }
 
 /* effect labels */
@@ -68,18 +68,18 @@
 }
 
 .settings-effect-hot {
-  color: #16a34a;
-  background: #ecfdf5;
+  color: var(--mm-success-text);
+  background: var(--mm-success-soft);
 }
 
 .settings-effect-restart {
-  color: #d97706;
-  background: #fffbeb;
+  color: var(--mm-warning-text);
+  background: var(--mm-warning-soft);
 }
 
 .settings-effect-readonly {
-  color: #94a3b8;
-  background: #f8fafc;
+  color: var(--mm-text-subtle);
+  background: var(--mm-surface-muted);
 }
 
 /* collapse for advanced settings */
@@ -89,7 +89,7 @@
 
 .settings-collapse .ant-collapse-header {
   padding: 8px 0 !important;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--mm-border-muted);
   margin-bottom: 12px;
 }
 
@@ -99,13 +99,13 @@
 
 /* save summary */
 .settings-summary-card {
-  background: #f8fafc !important;
+  background: var(--mm-surface-muted) !important;
 }
 
 .settings-summary-label {
   display: block;
   margin-bottom: 2px;
-  color: #64748b;
+  color: var(--mm-text-muted);
   font-size: 0.76rem;
   font-weight: 700;
 }
@@ -113,6 +113,6 @@
 .settings-summary-fields {
   display: block;
   font-size: 0.84rem;
-  color: #334155;
+  color: var(--mm-text-secondary);
   line-height: 1.6;
 }

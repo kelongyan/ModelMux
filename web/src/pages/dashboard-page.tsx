@@ -157,10 +157,6 @@ export function DashboardPage(): JSX.Element {
                   onOpenDetail={() => navigate(`/providers?provider=${encodeURIComponent(provider.id)}`)}
                 />
               ))}
-              <button type="button" className="provider-row provider-row--add" onClick={() => navigate("/providers")}>
-                <span className="provider-row-add-plus">+</span>
-                <span>新增 Provider</span>
-              </button>
             </div>
           )}
         </Card>

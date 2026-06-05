@@ -14,7 +14,7 @@
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #1677ff;
+  color: var(--mm-primary);
   margin-bottom: 4px;
 }
 
@@ -23,7 +23,7 @@
   font-size: 1.5rem;
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: #0f172a;
+  color: var(--mm-text);
   line-height: 1.2;
 }
 
@@ -46,21 +46,21 @@
 }
 
 .about-tag--version {
-  background: #f0fdf4;
-  color: #166534;
-  border: 1px solid rgba(22, 163, 74, 0.2);
+  background: var(--mm-success-soft);
+  color: var(--mm-success-text);
+  border: 1px solid color-mix(in srgb, var(--mm-success) 28%, transparent);
 }
 
 .about-tag--platform {
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
+  background: var(--mm-primary-soft);
+  color: var(--mm-primary-text);
+  border: 1px solid var(--mm-primary-border);
 }
 
 .about-tag--go {
-  background: #f8fafc;
-  color: #475569;
-  border: 1px solid #e2e8f0;
+  background: var(--mm-surface-muted);
+  color: var(--mm-text-secondary);
+  border: 1px solid var(--mm-border-muted);
 }
 
 .about-hero-right {
@@ -69,7 +69,7 @@
 
 .about-hero-build {
   font-size: 0.76rem;
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   font-variant-numeric: tabular-nums;
 }
 
@@ -89,14 +89,14 @@
 }
 
 .about-section-icon {
-  color: #2563eb;
+  color: var(--mm-primary-text);
   font-size: 0.92rem;
 }
 
 .about-section-label {
   font-size: 0.84rem;
   font-weight: 750;
-  color: #334155;
+  color: var(--mm-text-secondary);
 }
 
 /* info rows */
@@ -112,7 +112,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 9px 0;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  border-bottom: 1px solid var(--mm-border-muted);
 }
 
 .about-row:last-child {
@@ -121,7 +121,7 @@
 
 .about-label {
   font-size: 0.8rem;
-  color: #64748b;
+  color: var(--mm-text-muted);
   font-weight: 600;
   flex: 0 0 auto;
   white-space: nowrap;
@@ -129,7 +129,7 @@
 
 .about-val {
   font-size: 0.84rem;
-  color: #0f172a;
+  color: var(--mm-text);
   font-weight: 600;
   text-align: right;
 }
@@ -154,7 +154,7 @@
 
 .about-features-text {
   font-size: 0.88rem;
-  color: #475569;
+  color: var(--mm-text-secondary);
   line-height: 1.7;
 }
 
@@ -174,17 +174,17 @@
 
 .about-backup-desc strong {
   font-size: 0.84rem;
-  color: #0f172a;
+  color: var(--mm-text);
 }
 
 .about-backup-desc span {
   font-size: 0.76rem;
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   line-height: 1.5;
 }
 
 .about-backup-divider {
   height: 1px;
-  background: rgba(226, 232, 240, 0.6);
+  background: var(--mm-border-muted);
   margin: 12px 0;
 }

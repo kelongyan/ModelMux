@@ -30,7 +30,7 @@
     flex-basis: auto;
     padding: 22px 18px;
     border-right: none;
-    border-bottom: 1px solid #e4e7ec;
+    border-bottom: 1px solid var(--mm-border-soft);
   }
 
   .console-nav {
@@ -62,6 +62,11 @@
   .header-status-metrics {
     flex-wrap: wrap;
     gap: 8px 10px;
+  }
+
+  .header-status-right {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .provider-row {
@@ -110,6 +115,11 @@
   .provider-row-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .theme-toggle {
+    width: 32px;
+    height: 32px;
   }
 
   .about-hero {

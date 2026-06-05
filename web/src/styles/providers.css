@@ -3,8 +3,8 @@
 }
 
 .provider-table .ant-table-thead > tr > th {
-  background: #f8fbff !important;
-  color: #1e40af;
+  background: var(--mm-primary-softer) !important;
+  color: var(--mm-primary-text);
   font-size: 0.9rem;
   font-weight: 800;
   line-height: 1.35 !important;
@@ -23,7 +23,7 @@
 
 .provider-key-cell strong {
   display: block;
-  color: #0f172a;
+  color: var(--mm-text);
   font-size: 0.98rem;
   line-height: 1.4;
 }
@@ -37,13 +37,13 @@
 }
 
 .provider-table-row--active > td {
-  background: rgba(22, 119, 255, 0.05) !important;
+  background: var(--mm-primary-softer) !important;
 }
 
 .provider-table-id {
   font-size: 1.05rem;
   font-weight: 700;
-  color: #1e293b;
+  color: var(--mm-text-secondary);
   text-align: center;
   letter-spacing: 0.01em;
 }
@@ -63,8 +63,8 @@
   align-items: center;
   padding: 8px 6px;
   border-radius: 8px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--mm-surface-muted);
+  border: 1px solid var(--mm-border-muted);
   transition:
     transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
     box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -72,14 +72,14 @@
 
 .detail-stat:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.08);
+  box-shadow: var(--mm-shadow-soft);
 }
 
 .detail-stat span {
   display: block;
   font-size: 0.72rem;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   margin-bottom: 2px;
 }
 
@@ -87,7 +87,7 @@
   font-size: 1.55rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: #0f172a;
+  color: var(--mm-text);
   line-height: 1.2;
 }
 
@@ -101,18 +101,18 @@
 .detail-target-label {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #64748b;
+  color: var(--mm-text-muted);
   white-space: nowrap;
 }
 
 .detail-target-link {
   font-size: 0.84rem;
-  color: #2563eb;
+  color: var(--mm-primary-text);
   word-break: break-all;
 }
 
 .detail-target-link:hover {
-  color: #1d4ed8;
+  color: var(--mm-primary-strong);
   text-decoration: underline;
 }
 
@@ -139,27 +139,27 @@
 }
 
 .provider-row:hover {
-  background: rgba(239, 246, 255, 0.7);
-  border-color: rgba(191, 219, 254, 0.6);
+  background: var(--mm-primary-softer);
+  border-color: var(--mm-border-soft);
   transform: translateX(3px);
 }
 
 .provider-row--current {
-  background: rgba(22, 119, 255, 0.04);
-  border-color: rgba(22, 119, 255, 0.16);
+  background: var(--mm-primary-softer);
+  border-color: var(--mm-primary-border);
 }
 
 .provider-row--current:hover {
-  background: rgba(22, 119, 255, 0.07);
-  border-color: rgba(22, 119, 255, 0.22);
+  background: var(--mm-primary-soft);
+  border-color: var(--mm-primary-border-strong);
 }
 
 .provider-row--cooling {
-  border-left: 3px solid rgba(245, 158, 11, 0.4);
+  border-left: 3px solid color-mix(in srgb, var(--mm-warning) 54%, transparent);
 }
 
 .provider-row--invalid {
-  border-left: 3px solid rgba(239, 68, 68, 0.32);
+  border-left: 3px solid color-mix(in srgb, var(--mm-error) 46%, transparent);
 }
 
 /* status column */
@@ -178,19 +178,19 @@
 }
 
 .provider-row-badge--active {
-  color: #166534;
+  color: var(--mm-success-text);
 }
 
 .provider-row-badge--cooling {
-  color: #b45309;
+  color: var(--mm-warning-text);
 }
 
 .provider-row-badge--invalid {
-  color: #b91c1c;
+  color: var(--mm-error-text);
 }
 
 .provider-row-badge--idle {
-  color: #64748b;
+  color: var(--mm-text-muted);
 }
 
 /* info column */
@@ -205,13 +205,13 @@
 .provider-row-name {
   font-size: 0.96rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--mm-text);
   line-height: 1.3;
 }
 
 .provider-row-url {
   font-size: 0.78rem;
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -219,7 +219,7 @@
 }
 
 .provider-row-url:hover {
-  color: #0b63ce;
+  color: var(--mm-primary-strong);
 }
 
 /* key counts */
@@ -237,22 +237,22 @@
 }
 
 .provider-row-key-item--active {
-  color: #16a34a;
+  color: var(--mm-success);
   font-weight: 600;
 }
 
 .provider-row-key-item--cooling {
-  color: #d97706;
+  color: var(--mm-warning);
   font-weight: 600;
 }
 
 .provider-row-key-item--invalid {
-  color: #dc2626;
+  color: var(--mm-error);
   font-weight: 600;
 }
 
 .provider-row-key-item--total {
-  color: #64748b;
+  color: var(--mm-text-muted);
 }
 
 /* actions */
@@ -265,7 +265,7 @@
 
 .provider-row-active-label {
   font-size: 0.78rem;
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   font-weight: 600;
   padding: 0 8px;
 }
@@ -273,9 +273,9 @@
 /* add row */
 .provider-row--add {
   cursor: pointer;
-  border: 1px dashed rgba(191, 219, 254, 0.8);
+  border: 1px dashed var(--mm-border);
   background: transparent;
-  color: #2563eb;
+  color: var(--mm-primary-text);
   font-size: 0.86rem;
   font-weight: 600;
   gap: 8px;
@@ -283,9 +283,9 @@
 }
 
 .provider-row--add:hover {
-  border-color: rgba(22, 119, 255, 0.5);
-  background: rgba(239, 246, 255, 0.5);
-  color: #0b63ce;
+  border-color: var(--mm-primary-border-strong);
+  background: var(--mm-primary-softer);
+  color: var(--mm-primary-strong);
 }
 
 .provider-row-add-plus {
@@ -319,39 +319,39 @@
 }
 
 .provider-action--primary {
-  color: #2563eb;
+  color: var(--mm-primary-text);
 }
 
 .provider-action--primary:hover {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--mm-primary-soft);
+  color: var(--mm-primary-strong);
 }
 
 .provider-action--activate {
-  color: #16a34a;
+  color: var(--mm-success);
 }
 
 .provider-action--activate:hover {
-  background: #f0fdf4;
-  color: #15803d;
+  background: var(--mm-success-soft);
+  color: var(--mm-success-text);
 }
 
 .provider-action--edit {
-  color: #64748b;
+  color: var(--mm-text-muted);
 }
 
 .provider-action--edit:hover {
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--mm-surface-muted);
+  color: var(--mm-text-secondary);
 }
 
 .provider-action--danger {
-  color: #dc2626;
+  color: var(--mm-error);
 }
 
 .provider-action--danger:hover {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--mm-error-soft);
+  color: var(--mm-error-text);
 }
 
 /* ── Model tags ── */
@@ -367,9 +367,9 @@
   font-family: "Cascadia Code", "Fira Code", "SF Mono", monospace;
   font-size: 0.78rem;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #334155;
+  border: 1px solid var(--mm-border-muted);
+  background: var(--mm-surface-muted);
+  color: var(--mm-text-secondary);
   padding: 2px 10px;
   line-height: 1.8;
 }

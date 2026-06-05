@@ -1,6 +1,6 @@
 .console-shell {
   min-height: 100vh;
-  background: transparent;
+  background: var(--mm-bg);
   display: flex !important;
   flex-direction: row !important;
   align-items: stretch;
@@ -11,13 +11,13 @@
   min-width: 248px;
   flex: 0 0 248px;
   padding: 26px 18px;
-  border-right: 1px solid rgba(191, 219, 254, 0.8);
-  background: rgba(255, 255, 255, 0.9);
+  border-right: 1px solid var(--mm-border-soft);
+  background: var(--mm-surface);
   backdrop-filter: blur(18px);
   display: flex;
   flex-direction: column;
   gap: 22px;
-  box-shadow: 12px 0 34px rgba(30, 64, 175, 0.06);
+  box-shadow: var(--mm-shadow-panel);
   position: sticky;
   top: 0;
   height: 100vh;
@@ -36,7 +36,7 @@
   font-size: 1.35rem;
   line-height: 1.1;
   letter-spacing: -0.04em;
-  color: #0f172a;
+  color: var(--mm-text);
 }
 
 .console-kicker,
@@ -48,7 +48,7 @@
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #1677ff;
+  color: var(--mm-primary);
 }
 
 .console-nav {
@@ -66,7 +66,7 @@
   text-decoration: none;
   background: transparent;
   border: 1px solid transparent;
-  color: #475569;
+  color: var(--mm-text-secondary);
   font-weight: 600;
   transition:
     background 160ms ease,
@@ -77,26 +77,26 @@
 }
 
 .console-nav-link:hover {
-  border-color: #bfdbfe;
-  background: #f8fbff;
-  color: #1d4ed8;
+  border-color: var(--mm-primary-border);
+  background: var(--mm-primary-softer);
+  color: var(--mm-primary-text);
   transform: translateX(2px);
 }
 
 .console-nav-link.is-active {
-  border-color: rgba(22, 119, 255, 0.24);
-  background: #eff6ff;
-  color: #0b63ce;
+  border-color: var(--mm-primary-border-strong);
+  background: var(--mm-primary-soft);
+  color: var(--mm-primary-strong);
   box-shadow:
-    inset 3px 0 0 #1677ff,
-    0 10px 24px rgba(22, 119, 255, 0.1);
+    inset 3px 0 0 var(--mm-primary),
+    var(--mm-shadow-soft);
 }
 
 .console-main {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: transparent;
+  background: var(--mm-bg);
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -110,8 +110,8 @@
 
 .console-header {
   padding: 12px 24px;
-  border-bottom: 1px solid rgba(191, 219, 254, 0.7);
-  background: rgba(255, 255, 255, 0.72);
+  border-bottom: 1px solid var(--mm-border-soft);
+  background: color-mix(in srgb, var(--mm-surface-solid) 72%, transparent);
   backdrop-filter: blur(16px);
   position: sticky;
   top: 0;
@@ -137,12 +137,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #0f172a;
+  color: var(--mm-text);
   font-size: 0.96rem;
 }
 
 .header-status-loading {
-  color: #64748b;
+  color: var(--mm-text-muted);
   font-size: 0.84rem;
 }
 
@@ -150,8 +150,16 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  color: #64748b;
+  color: var(--mm-text-muted);
   font-size: 0.82rem;
+}
+
+.header-status-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  min-width: 0;
 }
 
 .header-status-metrics span {
@@ -162,14 +170,63 @@
 .header-metrics-sep {
   width: 1px !important;
   height: 14px;
-  background: #cbd5e1;
+  background: var(--mm-divider);
   margin: 0 -2px;
 }
 
 .header-status-metrics strong {
-  color: #1e40af;
+  color: var(--mm-primary-text);
   font-variant-numeric: tabular-nums;
   margin-left: 4px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--mm-border-soft);
+  border-radius: 999px;
+  background: var(--mm-surface-muted);
+  color: var(--mm-primary-text);
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  border-color: var(--mm-primary-border-strong);
+  background: var(--mm-primary-soft);
+  color: var(--mm-primary-strong);
+  box-shadow: var(--mm-shadow-soft);
+}
+
+.theme-toggle:active {
+  transform: scale(0.96);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--mm-primary);
+  outline-offset: 2px;
+}
+
+.theme-toggle-icon {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .console-content {

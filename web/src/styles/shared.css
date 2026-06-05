@@ -19,7 +19,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #cbd5e1;
+  background: var(--mm-divider);
   transition:
     background 220ms ease,
     box-shadow 220ms ease;
@@ -31,27 +31,27 @@
 }
 
 .key-pool-dot--active {
-  background: #16a34a;
-  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
+  background: var(--mm-success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mm-success) 22%, transparent);
 }
 
 .key-pool-dot--cooling {
-  background: #f59e0b;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+  background: var(--mm-warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mm-warning) 24%, transparent);
 }
 
 .key-pool-dot--invalid {
-  background: #ef4444;
-  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
+  background: var(--mm-error);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mm-error) 24%, transparent);
 }
 
 .key-pool-dot--empty {
-  background: #cbd5e1;
+  background: var(--mm-divider);
 }
 
 .key-pool-dots-more {
   margin-left: 6px;
-  color: #64748b;
+  color: var(--mm-text-muted);
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -61,7 +61,7 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #cbd5e1;
+  background: var(--mm-divider);
   margin-right: 6px;
   vertical-align: middle;
   transition:
@@ -70,22 +70,22 @@
 }
 
 .health-dot--active {
-  background: #16a34a;
-  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.14);
+  background: var(--mm-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mm-success) 20%, transparent);
 }
 
 .health-dot--cooling {
-  background: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
+  background: var(--mm-warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mm-warning) 22%, transparent);
 }
 
 .health-dot--invalid {
-  background: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.16);
+  background: var(--mm-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mm-error) 22%, transparent);
 }
 
 .health-dot--idle {
-  background: #94a3b8;
+  background: var(--mm-text-subtle);
 }
 
 .health-dot--pulse {
@@ -105,5 +105,5 @@
 .cooldown-text {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  color: #b45309;
+  color: var(--mm-warning-text);
 }

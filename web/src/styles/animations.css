@@ -38,9 +38,9 @@
 }
 
 @keyframes anim-glow-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.35); }
-  50%  { box-shadow: 0 0 0 6px rgba(22, 163, 74, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mm-success) 38%, transparent); }
+  50%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--mm-success) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mm-success) 0%, transparent); }
 }
 
 @keyframes anim-shimmer {
@@ -91,8 +91,8 @@
 .card-lift:hover {
   transform: translateY(-3px);
   box-shadow:
-    0 24px 56px rgba(30, 64, 175, 0.1),
-    0 2px 0 rgba(255, 255, 255, 0.9) inset !important;
+    var(--mm-shadow-hover),
+    0 2px 0 color-mix(in srgb, var(--mm-surface-strong) 86%, transparent) inset !important;
 }
 
 /* ── Skeleton shimmer ── */
@@ -100,9 +100,9 @@
 .skeleton-shimmer {
   background: linear-gradient(
     110deg,
-    #eef2ff 30%,
-    #f5f9ff 50%,
-    #eef2ff 70%
+    var(--mm-surface-muted) 30%,
+    var(--mm-surface-soft) 50%,
+    var(--mm-surface-muted) 70%
   );
   background-size: 200% 100%;
   animation: anim-shimmer 1.6s ease-in-out infinite;

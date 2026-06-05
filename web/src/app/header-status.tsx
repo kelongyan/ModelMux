@@ -1,5 +1,6 @@
 import type { AdminDashboardResponse } from "../types/admin";
 import { HealthDot } from "../components/health-dot";
+import { ThemeToggle } from "./theme-toggle";
 
 type HeaderStatusProps = {
   data: AdminDashboardResponse | undefined;
@@ -11,6 +12,7 @@ export function HeaderStatus({ data, loading }: HeaderStatusProps): JSX.Element 
     return (
       <div className="console-header-status">
         <span className="header-status-loading">正在加载…</span>
+        <ThemeToggle />
       </div>
     );
   }
@@ -28,14 +30,17 @@ export function HeaderStatus({ data, loading }: HeaderStatusProps): JSX.Element 
           {data.active_provider || "未配置 Provider"}
         </strong>
       </div>
-      <div className="header-status-metrics">
-        <span>可用 <strong>{data.active_keys}</strong></span>
-        <span className="header-metrics-sep" />
-        <span>冷却 <strong>{data.cooling_keys}</strong></span>
-        <span className="header-metrics-sep" />
-        <span>失效 <strong>{data.invalid_keys}</strong></span>
-        <span className="header-metrics-sep" />
-        <span>Provider <strong>{data.provider_count}</strong></span>
+      <div className="header-status-right">
+        <div className="header-status-metrics">
+          <span>可用 <strong>{data.active_keys}</strong></span>
+          <span className="header-metrics-sep" />
+          <span>冷却 <strong>{data.cooling_keys}</strong></span>
+          <span className="header-metrics-sep" />
+          <span>失效 <strong>{data.invalid_keys}</strong></span>
+          <span className="header-metrics-sep" />
+          <span>Provider <strong>{data.provider_count}</strong></span>
+        </div>
+        <ThemeToggle />
       </div>
     </div>
   );

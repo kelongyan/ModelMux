@@ -9,8 +9,8 @@
 .dashboard-overview-card:hover {
   transform: translateY(-2px);
   box-shadow:
-    0 24px 56px rgba(30, 64, 175, 0.1),
-    0 1px 0 rgba(255, 255, 255, 0.9) inset !important;
+    var(--mm-shadow-hover),
+    0 1px 0 color-mix(in srgb, var(--mm-surface-strong) 86%, transparent) inset !important;
 }
 
 
@@ -26,7 +26,7 @@
 }
 
 .dashboard-updated-at {
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   font-size: 0.78rem;
   font-weight: 500;
 }
@@ -45,9 +45,9 @@
   gap: 6px;
   padding: 16px 18px;
   border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid rgba(147, 197, 253, 0.7);
-  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.06);
+  background: var(--mm-surface-solid);
+  border: 1px solid var(--mm-primary-border-strong);
+  box-shadow: var(--mm-shadow-soft);
   transition:
     transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
     box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -55,14 +55,14 @@
 
 .dashboard-active-panel:hover {
   transform: translateY(-1px);
-  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.1);
+  box-shadow: var(--mm-shadow-hover);
 }
 
 .dashboard-panel-label {
   font-size: 0.68rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #2563eb;
+  color: var(--mm-primary-text);
   font-weight: 800;
 }
 
@@ -77,12 +77,12 @@
   font-size: 1.45rem;
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: #0f172a;
+  color: var(--mm-text);
 }
 
 .dashboard-panel-desc {
   font-size: 0.74rem;
-  color: #94a3b8;
+  color: var(--mm-text-subtle);
   line-height: 1.5;
 }
 
@@ -96,8 +96,8 @@
 .dashboard-stat-card {
   padding: 10px 8px;
   border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: 1px solid var(--mm-border-muted);
+  background: var(--mm-surface-muted);
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -110,13 +110,13 @@
 
 .dashboard-stat-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.08);
+  box-shadow: var(--mm-shadow-soft);
 }
 
 .dashboard-stat-card span {
   display: block;
   margin-bottom: 2px;
-  color: #64748b;
+  color: var(--mm-text-muted);
   font-size: 0.82rem;
   line-height: 1.4;
   font-weight: 600;
@@ -124,7 +124,7 @@
 
 .dashboard-stat-card strong {
   display: block;
-  color: #0f172a;
+  color: var(--mm-text);
   font-size: 1.5rem;
   font-weight: 800;
   line-height: 1.2;
@@ -132,17 +132,17 @@
 }
 
 .dashboard-stat-card--green {
-  border-color: rgba(22, 163, 74, 0.22);
+  border-color: color-mix(in srgb, var(--mm-success) 28%, transparent);
 }
 
 .dashboard-stat-card--amber {
-  border-color: rgba(245, 158, 11, 0.22);
+  border-color: color-mix(in srgb, var(--mm-warning) 30%, transparent);
 }
 
 .dashboard-stat-card--red {
-  border-color: rgba(239, 68, 68, 0.20);
+  border-color: color-mix(in srgb, var(--mm-error) 28%, transparent);
 }
 
 .dashboard-stat-card--teal {
-  border-color: rgba(22, 119, 255, 0.22);
+  border-color: var(--mm-primary-border);
 }
