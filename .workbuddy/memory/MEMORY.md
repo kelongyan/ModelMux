@@ -1,0 +1,70 @@
+# ModelMux 项目记忆
+
+## 项目定位
+Go 实现的 LLM API 反向代理，内嵌 React/Vite 管理控制台。核心能力：多 provider 支持、key 轮询与自动摘除、配置热重载。
+
+## 架构速览
+
+```
+main.go ── 启动编排，组装所有组件
+├── proxy/     ── 请求转发、key 重试、流式透传、token 用量提取
+├── pool/      ── 多 provider key 池，round-robin + in-flight 感知
+├── config/    ── 配置加载、热重载、fsnotify 监听、原子写盘
+├── admin/     ── REST API (/admin/api/v1/*)、事件缓冲区、状态导出
+├── state/     ── key 状态 hash 持久化（SHA256 标识），原子写盘
+├── stats/     ── JSONL 调用统计，按天分文件，自动清理
+├── logx/      ── slog 封装，分类/事件常量，密钥脱敏
+└── web/       ── React+Vite 前端，构建产物由 embed.go 内嵌到二进制
+```
+
+## 关键设计
+
+1. **runtime 快照模式**：proxy.Handler 通过 atomic.Value 持有不可变 runtimeConfig，
+   UpdateConfig 原子替换，旧请求继续使用旧快照。
+2. **Key 轮询**：Pool.Next() 使用 atomic cursor + in-flight 感知的 round-robin，
+   跳过 cooling/invalid key，优先选 in-flight=0 的 key。
+3. **重试分级**：
+   - retryScopeKey：429(cooling)、401(invalid)、403(quota exhausted) → 换 key
+   - retryScopeConnection：网络超时等 → 短冷却换 key
+   - retryScopeProvider：DNS 错误、连接拒绝 → provider 级故障
+4. **防抖写盘**：stateSaver 使用合并窗口（2s），高 QPS 下不反复 reset timer。
+5. **配置热重载**：config.Manager.Update() 原子读-改-写-重载，失败自动回滚。
+6. **安全**：state 仅存 key hash (SHA256)，日志中 key 只显示末 6 位。
+7. **双服务架构**：proxy (用户请求) + admin (管理 API)，独立端口。
+
+## 开发命令
+
+```powershell
+go build -trimpath -ldflags="-s -w" -o modelmux.exe .
+go test ./...
+go vet ./...
+go test -race ./...
+.\start.ps1                    # 构建+启动+打开管理台
+cd web; npm run build          # 构建前端
+```
+
+## 配置要点
+- 默认监听：proxy 127.0.0.1:18080，admin 127.0.0.1:18081
+- 支持多 provider，每个 provider 独立 target_url + keys
+- HotReloadFields vs RestartRequiredFields 区分热生效和需重启字段
+- .gitignore: config.json, state.json, logs/, stats_data/, modelmux.exe, node_modules/
+
+## 前端结构
+- web/src/pages/: dashboard, providers, settings, stats, events, about
+- web/src/components/: cooldown-text, health-dot, key-pool-dots, page-transition, use-countdown, use-global-shortcuts
+- web/src/api/: admin.ts (API 调用), http.ts (HTTP 封装)
+- web/src/styles/: animations.css (动画定义), base.css, layout.css, surfaces.css, dashboard.css, providers.css, events.css, stats.css, settings.css, shared.css, about.css, responsive.css
+
+## 开发工作流 (龙哥要求)
+- 前端改动: npm run build (web/) → go build → 重启服务
+- 后端改动: go build → 重启服务
+- 不要直接调 vite，npm run build 更可靠 (Git Bash 下 .bin shim 有问题)
+
+## UI 动画系统
+- 零依赖，纯 CSS @keyframes + 1 个 React hook 组件
+- PageTransition: 页面入场 fade-slide-up 320ms
+- Staggered reveal: .stagger-0~8 交错 60ms 间隔
+- Card hover: translateY(-2px) + shadow elevate
+- Button press: scale(0.97)
+- HealthDot/KeyDot: 状态背景 transition 220-300ms
+- prefers-reduced-motion 全局尊重

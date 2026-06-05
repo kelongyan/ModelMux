@@ -1,6 +1,16 @@
 .dashboard-overview-card {
   overflow: hidden;
   position: relative;
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dashboard-overview-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 24px 56px rgba(30, 64, 175, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset !important;
 }
 
 .dashboard-overview-card::before {
@@ -46,6 +56,14 @@
   background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
   border: 1px solid rgba(147, 197, 253, 0.7);
   box-shadow: 0 8px 20px rgba(37, 99, 235, 0.06);
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dashboard-active-panel:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.1);
 }
 
 .dashboard-panel-label {
@@ -80,6 +98,14 @@
   border: 1px solid #dbeafe;
   background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 4px 14px rgba(30, 64, 175, 0.04);
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dashboard-stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(30, 64, 175, 0.09);
 }
 
 .dashboard-stat-card span {

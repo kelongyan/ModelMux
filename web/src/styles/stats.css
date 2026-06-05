@@ -1,25 +1,45 @@
+/* ================================================================
+   Stats page — KPI, charts, tooltip, legend
+   ================================================================ */
+
+/* ── KPI cards ── */
+
 .stats-kpi {
-  min-height: 100px;
-  padding: 18px 20px;
-  border-radius: 18px;
+  min-height: 96px;
+  padding: 20px 22px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #f1f5f9;
+  border-left: 4px solid var(--kpi-accent, #6366f1);
+  display: flex;
+  flex-direction: column;
   justify-content: center;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%) !important;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.stats-kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
 .stats-kpi span {
   display: block;
-  margin-bottom: 8px;
-  color: #64748b;
-  font-weight: 700;
-  line-height: 1.45;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .stats-kpi strong {
   display: block;
-  font-size: 1.72rem;
-  color: #0b63ce;
-  line-height: 1.18;
-  letter-spacing: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
 
@@ -31,25 +51,119 @@
   gap: 16px;
 }
 
-.stats-chart-card {
-  padding: 0 !important;
-}
-
-.stats-chart-card .ant-card-body {
-  padding: 16px 18px 12px !important;
-}
-
-.stats-chart-title {
-  display: block;
-  margin-bottom: 10px;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: #334155;
-}
-
 @media (max-width: 960px) {
   .stats-chart-grid {
     grid-template-columns: 1fr;
   }
 }
 
+.stats-chart-card .ant-card-body {
+  padding: 20px 24px 16px !important;
+}
+
+.stats-chart-title {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+/* ── dark tooltip ── */
+
+.stats-tip {
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  min-width: 160px;
+}
+
+.stats-tip-label {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #f1f5f9;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.stats-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.stats-tip-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.stats-tip-name {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  flex: 1;
+}
+
+.stats-tip-val {
+  color: #f8fafc;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.84rem;
+}
+
+/* ── legend ── */
+
+.stats-legend {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  padding: 8px 0 0;
+}
+
+.stats-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.stats-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* ── kill Recharts focus ring once and for all ── */
+
+.recharts-wrapper,
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+.recharts-wrapper:active {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.recharts-surface {
+  outline: none !important;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none !important;
+  pointer-events: none !important;
+}

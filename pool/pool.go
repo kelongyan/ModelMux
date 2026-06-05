@@ -294,6 +294,24 @@ func (p *Pool) TotalCount() int {
 	return len(p.keys)
 }
 
+// AnyKeyValue 返回池中第一个可用 key 的值，供管理接口调用上游 API 时使用。
+func (p *Pool) AnyKeyValue() string {
+	p.mu.RLock()
+	keys := p.keys
+	p.mu.RUnlock()
+
+	for _, k := range keys {
+		if k.IsAvailable() {
+			return k.Value
+		}
+	}
+	// 所有 key 都不可用时返回第一把 key 的值。
+	if len(keys) > 0 {
+		return keys[0].Value
+	}
+	return ""
+}
+
 // CoolingDuration 把冷却秒数转换为 time.Duration。
 func (p *Pool) CoolingDuration(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second

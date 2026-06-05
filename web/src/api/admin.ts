@@ -4,7 +4,9 @@ import type {
   AdminDashboardResponse,
   AdminDeleteKeysPayload,
   AdminEventsResponse,
+  AdminFetchModelsResponse,
   AdminKeysPayload,
+  AdminModelsPayload,
   AdminProviderCreatePayload,
   AdminProviderDetailResponse,
   AdminProvidersResponse,
@@ -115,6 +117,24 @@ export function resetProviderKey(providerID: string, keyID: string): Promise<Adm
     method: "POST",
     },
   );
+}
+
+// replaceProviderModels 替换 provider 的模型 ID 记录列表。
+export function replaceProviderModels(providerID: string, payload: AdminModelsPayload): Promise<AdminChangeResponse> {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/models:replace`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+// fetchProviderModels 从上游 API 拉取可用模型列表（不自动保存）。
+export function fetchProviderModels(providerID: string): Promise<AdminFetchModelsResponse> {
+  return requestJSON<AdminFetchModelsResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/models:fetch`, {
+    method: "POST",
+  });
 }
 
 // fetchRecentEvents 拉取最近事件，供 dashboard 摘要与后续事件页复用。

@@ -3,11 +3,14 @@ package admin
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
+	"context"
 	"time"
 
 	"github.com/kelongyan/ModelMux/config"
@@ -47,13 +50,14 @@ type apiSettingsPayload struct {
 }
 
 type apiProviderSummary struct {
-	ID          string `json:"id"`
-	Active      bool   `json:"active"`
-	TargetURL   string `json:"target_url"`
-	TotalKeys   int    `json:"total_keys"`
-	ActiveKeys  int    `json:"active_keys"`
-	CoolingKeys int    `json:"cooling_keys"`
-	InvalidKeys int    `json:"invalid_keys"`
+	ID          string   `json:"id"`
+	Active      bool     `json:"active"`
+	TargetURL   string   `json:"target_url"`
+	TotalKeys   int      `json:"total_keys"`
+	ActiveKeys  int      `json:"active_keys"`
+	CoolingKeys int      `json:"cooling_keys"`
+	InvalidKeys int      `json:"invalid_keys"`
+	Models      []string `json:"models"`
 }
 
 type apiProviderDetail struct {
@@ -65,6 +69,8 @@ type apiProviderDetail struct {
 	CoolingKeys int              `json:"cooling_keys"`
 	InvalidKeys int              `json:"invalid_keys"`
 	Keys        []pool.KeyStatus `json:"keys"`
+	Models      []string         `json:"models"`
+	StripTools  bool             `json:"strip_tools"`
 }
 
 type apiProviderCreatePayload struct {
@@ -83,6 +89,10 @@ type apiKeysPayload struct {
 
 type apiDeleteKeysPayload struct {
 	KeyIDs []string `json:"key_ids"`
+}
+
+type apiModelsPayload struct {
+	Models []string `json:"models"`
 }
 
 type apiDashboardResponse struct {
@@ -241,6 +251,10 @@ func (h *Handler) providersDetail(w http.ResponseWriter, r *http.Request) {
 		h.deleteProviderKeys(w, r, id)
 	case "key:reset":
 		h.resetProviderKey(w, r, id, keyID)
+	case "models:replace":
+		h.replaceProviderModels(w, r, id)
+	case "models:fetch":
+		h.fetchProviderModels(w, r, id)
 	default:
 		http.NotFound(w, r)
 	}
@@ -283,6 +297,8 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 		CoolingKeys: summary.CoolingKeys,
 		InvalidKeys: summary.InvalidKeys,
 		Keys:        keys,
+		Models:      safeModels(providerCfg.Models),
+		StripTools:  providerCfg.StripTools,
 	})
 }
 
@@ -616,6 +632,182 @@ func (h *Handler) resetProviderKey(w http.ResponseWriter, r *http.Request, id, k
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// replaceProviderModels 替换 provider 的模型 ID 记录列表。
+func (h *Handler) replaceProviderModels(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.requireConfigManager(w) {
+		return
+	}
+
+	var req apiModelsPayload
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	models := normalizeModels(req.Models)
+
+	result, err := h.cfgManager.Update(func(cfg *config.Config) error {
+		idx := findProviderIndex(cfg.Providers, id)
+		if idx < 0 {
+			return fmt.Errorf("provider not found")
+		}
+		cfg.Providers[idx].Models = models
+		return nil
+	})
+	if err != nil {
+		h.recordEvent("error", logx.CategoryAdmin, "admin.models_replace_failed", "replace provider models failed", map[string]any{
+			"provider_id": id,
+			"error":       err.Error(),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+
+	h.recordEvent("info", logx.CategoryAdmin, "admin.models_replaced", "provider models replaced", map[string]any{
+		"provider_id": id,
+		"count":       len(models),
+	})
+	writeJSON(w, http.StatusOK, h.toChangeResponse(result))
+}
+
+// fetchProviderModels 从上游 API 拉取可用模型列表并返回（不自动保存）。
+func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.requireConfigManager(w) {
+		return
+	}
+
+	cfg, err := h.cfgManager.Snapshot()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+		return
+	}
+	providerCfg, ok := findProviderConfig(cfg.ProviderConfigs(), id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "provider not found"})
+		return
+	}
+
+	keyPool, err := h.pools.Get(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": err.Error()})
+		return
+	}
+
+	// 取一把可用 key 用于认证上游请求。
+	keyValue := keyPool.AnyKeyValue()
+	if keyValue == "" && len(providerCfg.Keys) > 0 {
+		keyValue = providerCfg.Keys[0]
+	}
+	if keyValue == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "no available key for upstream request"})
+		return
+	}
+
+	modelsURL := strings.TrimRight(providerCfg.TargetURL, "/") + "/models"
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	reqHTTP, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("build request: %v", err)})
+		return
+	}
+	reqHTTP.Header.Set("Authorization", "Bearer "+keyValue)
+	reqHTTP.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(reqHTTP)
+	if err != nil {
+		h.recordEvent("warn", logx.CategoryAdmin, "admin.models_fetch_failed", "fetch upstream models failed", map[string]any{
+			"provider_id": id,
+			"url":         modelsURL,
+			"error":       err.Error(),
+		})
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": fmt.Sprintf("upstream request failed: %v", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		h.recordEvent("warn", logx.CategoryAdmin, "admin.models_fetch_failed", "fetch upstream models returned error", map[string]any{
+			"provider_id": id,
+			"status":      resp.StatusCode,
+		})
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"error":  fmt.Sprintf("upstream returned %d", resp.StatusCode),
+			"detail": string(body),
+		})
+		return
+	}
+
+	var modelsResp openAIModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": fmt.Sprintf("parse upstream response: %v", err)})
+		return
+	}
+
+	ids := make([]string, 0, len(modelsResp.Data))
+	for _, m := range modelsResp.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		}
+	}
+	sort.Strings(ids)
+
+	h.recordEvent("info", logx.CategoryAdmin, "admin.models_fetched", "fetched upstream models", map[string]any{
+		"provider_id": id,
+		"count":       len(ids),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"models": ids,
+		"count":  len(ids),
+	})
+}
+
+// openAIModelsResponse 是 OpenAI 兼容 /v1/models 接口的标准响应结构。
+type openAIModelsResponse struct {
+	Data []openAIModel `json:"data"`
+}
+
+type openAIModel struct {
+	ID string `json:"id"`
+}
+
+// normalizeModels 去重并排序模型 ID 列表，忽略空字符串。
+func normalizeModels(models []string) []string {
+	seen := make(map[string]struct{}, len(models))
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		trimmed := strings.TrimSpace(m)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// safeModels 返回模型列表的安全副本，nil 时返回空切片以避免前端处理 null。
+func safeModels(models []string) []string {
+	if models == nil {
+		return []string{}
+	}
+	return append([]string(nil), models...)
+}
+
 // settings 输出当前配置的管理台可编辑视图。
 func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -938,6 +1130,7 @@ func buildProviderSummary(providerCfg config.ProviderConfig, active bool, status
 		ID:        providerCfg.ID,
 		Active:    active,
 		TargetURL: providerCfg.TargetURL,
+		Models:    safeModels(providerCfg.Models),
 	}
 	for _, keyStatus := range statuses {
 		summary.TotalKeys++
@@ -968,6 +1161,9 @@ func (h *Handler) parseProviderAction(path string) (string, string, string, bool
 			return parts[0], "activate", "", true
 		}
 		if parts[1] == "keys:append" || parts[1] == "keys:replace" || parts[1] == "keys:delete" {
+			return parts[0], parts[1], "", true
+		}
+		if parts[1] == "models:replace" || parts[1] == "models:fetch" {
 			return parts[0], parts[1], "", true
 		}
 		return "", "", "", false

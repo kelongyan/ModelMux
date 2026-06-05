@@ -1,13 +1,24 @@
 .metric-card,
 .surface-card,
-.event-card,
-.stats-kpi {
+.event-card {
   border-radius: 18px !important;
   border: 1px solid rgba(191, 219, 254, 0.86) !important;
   background: rgba(255, 255, 255, 0.94) !important;
   box-shadow:
     0 18px 45px rgba(30, 64, 175, 0.07),
     0 1px 0 rgba(255, 255, 255, 0.85) inset !important;
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.metric-card:hover,
+.surface-card:hover,
+.event-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 22px 52px rgba(30, 64, 175, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset !important;
 }
 
 .metric-card .ant-card-body,
@@ -57,6 +68,16 @@
   gap: 8px;
   font-weight: 600;
   line-height: 1.35 !important;
+  transition:
+    transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ant-btn:active {
+  transform: scale(0.97);
 }
 
 .ant-btn-sm {

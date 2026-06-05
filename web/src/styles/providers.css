@@ -44,6 +44,14 @@
   border-radius: 10px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.detail-stat:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.08);
 }
 
 .detail-stat span {
@@ -81,12 +89,16 @@
   border-radius: 12px;
   border: 1px solid transparent;
   background: transparent;
-  transition: background 140ms ease, border-color 140ms ease;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .provider-row:hover {
   background: rgba(239, 246, 255, 0.7);
   border-color: rgba(191, 219, 254, 0.6);
+  transform: translateX(3px);
 }
 
 .provider-row--current {
@@ -297,4 +309,24 @@
 .provider-action--danger:hover {
   background: #fef2f2;
   color: #b91c1c;
+}
+
+/* ── Model tags ── */
+
+.model-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.model-tag {
+  font-family: "Cascadia Code", "Fira Code", "SF Mono", monospace;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  padding: 2px 10px;
+  line-height: 1.8;
 }

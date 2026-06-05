@@ -1,0 +1,136 @@
+/* ================================================================
+   Animations — all @keyframes + utility classes for ModelMux UI.
+   Zero JS dependency, pure CSS.
+   ================================================================ */
+
+/* ── Page transitions ── */
+
+@keyframes anim-fade-slide-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes anim-fade-slide-down {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes anim-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes anim-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Staggered content reveal ── */
+
+@keyframes anim-reveal {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Micro-interactions ── */
+
+@keyframes anim-press {
+  from { transform: scale(1); }
+  to   { transform: scale(0.97); }
+}
+
+@keyframes anim-glow-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.35); }
+  50%  { box-shadow: 0 0 0 6px rgba(22, 163, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(22, 163, 74, 0); }
+}
+
+@keyframes anim-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes anim-slide-in-right {
+  from { opacity: 0; transform: translateX(18px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Status transitions ── */
+
+@keyframes anim-value-flash {
+  0%   { filter: brightness(1); }
+  50%  { filter: brightness(1.25); }
+  100% { filter: brightness(1); }
+}
+
+/* ── Page-level entry classes ── */
+
+.page-enter-active {
+  animation: anim-fade-slide-up 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.page-exit-active {
+  animation: anim-fade-in 140ms ease-in reverse both;
+}
+
+/* ── Staggered reveal utility classes ── */
+
+.stagger-reveal {
+  animation: anim-reveal 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.stagger-0  { animation-delay: 0ms; }
+.stagger-1  { animation-delay: 60ms; }
+.stagger-2  { animation-delay: 120ms; }
+.stagger-3  { animation-delay: 180ms; }
+.stagger-4  { animation-delay: 240ms; }
+.stagger-5  { animation-delay: 300ms; }
+.stagger-6  { animation-delay: 360ms; }
+.stagger-7  { animation-delay: 420ms; }
+.stagger-8  { animation-delay: 480ms; }
+
+/* ── Hover card lift ── */
+
+.card-lift {
+  transition:
+    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 24px 56px rgba(30, 64, 175, 0.1),
+    0 2px 0 rgba(255, 255, 255, 0.9) inset !important;
+}
+
+/* ── Skeleton shimmer ── */
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    110deg,
+    #eef2ff 30%,
+    #f5f9ff 50%,
+    #eef2ff 70%
+  );
+  background-size: 200% 100%;
+  animation: anim-shimmer 1.6s ease-in-out infinite;
+}
+
+/* ── Provider activate glow ── */
+
+.provider-glow {
+  animation: anim-glow-pulse 700ms ease-out 1;
+}
+
+/* ── KPI value flash ── */
+
+.kpi-flash {
+  animation: anim-value-flash 500ms ease-out 1;
+}
+
+/* ── Click press ── */
+
+.pressable:active {
+  animation: anim-press 100ms ease-out 1;
+}

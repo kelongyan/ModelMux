@@ -59,6 +59,7 @@ type ProviderConfig struct {
 	ID         string   `json:"id"`
 	TargetURL  string   `json:"target_url"`
 	Keys       []string `json:"keys"`
+	Models     []string `json:"models,omitempty"`
 	StripTools bool     `json:"strip_tools,omitempty"`
 }
 
@@ -297,6 +298,7 @@ func (c *Config) effectiveProviders() ([]ProviderConfig, string) {
 // copy 返回 provider 配置副本，避免调用方误改共享 key 切片。
 func (p ProviderConfig) copy() ProviderConfig {
 	p.Keys = append([]string(nil), p.Keys...)
+	p.Models = append([]string(nil), p.Models...)
 	return p
 }
 

@@ -13,6 +13,7 @@ import {
   Space,
   Spin,
   Table,
+  Tag,
   Typography,
   message,
 } from "antd";
@@ -27,8 +28,10 @@ import {
   deleteProvider,
   deleteProviderKeys,
   fetchProviderDetail,
+  fetchProviderModels,
   fetchProviders,
   replaceProviderKeys,
+  replaceProviderModels,
   resetProviderKey,
   updateProvider,
 } from "../api/admin";
@@ -53,6 +56,10 @@ type KeyFormValues = {
   keys_text: string;
 };
 
+type ModelFormValues = {
+  models_text: string;
+};
+
 const providersQueryKey = ["providers"];
 
 // ProvidersPage 提供阶段 3 的 provider 与 key 管理主界面。
@@ -70,9 +77,11 @@ export function ProvidersPage(): JSX.Element {
     open: false,
     mode: "append",
   });
+  const [modelModal, setModelModal] = useState<{ open: boolean }>({ open: false });
 
   const [providerForm] = Form.useForm<ProviderFormValues>();
   const [keyForm] = Form.useForm<KeyFormValues>();
+  const [modelForm] = Form.useForm<ModelFormValues>();
 
   const providersQuery = useQuery({
     queryKey: providersQueryKey,
@@ -228,6 +237,33 @@ export function ProvidersPage(): JSX.Element {
     },
     onError: (error: Error) => {
       messageApi.error(`重置失败：${error.message}`);
+    },
+  });
+
+  const replaceModelsMutation = useMutation({
+    mutationFn: async (payload: { providerID: string; models: string[] }) =>
+      replaceProviderModels(payload.providerID, { models: payload.models }),
+    onSuccess: async (_, variables) => {
+      messageApi.success(`已更新模型记录（${variables.models.length} 个）`);
+      setModelModal({ open: false });
+      modelForm.resetFields();
+      await invalidateAdminQueries(variables.providerID);
+    },
+    onError: (error: Error) => {
+      messageApi.error(`更新模型失败：${error.message}`);
+    },
+  });
+
+  const fetchModelsMutation = useMutation({
+    mutationFn: async (providerID: string) => fetchProviderModels(providerID),
+    onSuccess: async (data, providerID) => {
+      messageApi.success(`从上游拉取到 ${data.count} 个模型`);
+      modelForm.setFieldsValue({ models_text: data.models.join("\n") });
+      setModelModal({ open: true });
+      await invalidateAdminQueries(providerID);
+    },
+    onError: (error: Error) => {
+      messageApi.error(`拉取模型失败：${error.message}`);
     },
   });
 
@@ -487,6 +523,27 @@ export function ProvidersPage(): JSX.Element {
         </Form>
       </Modal>
 
+      <Modal
+        destroyOnHidden
+        open={modelModal.open}
+        title={`模型记录：${selectedProviderID ?? ""}`}
+        okText="保存"
+        cancelText="取消"
+        onCancel={closeModelModal}
+        onOk={() => modelForm.submit()}
+        confirmLoading={replaceModelsMutation.isPending}
+      >
+        <Form<ModelFormValues> form={modelForm} layout="vertical" onFinish={submitModelForm}>
+          <Form.Item
+            label="模型 ID"
+            name="models_text"
+            extra="一行一个模型 ID，保存时自动去重、排序并忽略空行。也可点击「从上游拉取」自动获取。"
+          >
+            <Input.TextArea rows={10} placeholder={"gpt-4o\ngpt-4o-mini\nclaude-3-5-sonnet-20241022"} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       <Drawer
         open={selectedProviderID !== null}
         width={860}
@@ -518,6 +575,13 @@ export function ProvidersPage(): JSX.Element {
               deleteKeysMutation.mutate({ providerID: selectedProviderID, keyIDs: selectedKeyIDs });
             }}
             deletingKeys={deleteKeysMutation.isPending}
+            onOpenEditModels={() => openModelModal(providerDetail.models)}
+            onFetchModels={() => {
+              if (selectedProviderID) {
+                fetchModelsMutation.mutate(selectedProviderID);
+              }
+            }}
+            fetchingModels={fetchModelsMutation.isPending}
           />
         ) : (
           <Empty description="未找到 provider 详情" />
@@ -557,6 +621,28 @@ export function ProvidersPage(): JSX.Element {
   function closeKeyModal() {
     setKeyModal({ open: false, mode: "append" });
     keyForm.resetFields();
+  }
+
+  function openModelModal(currentModels: string[]) {
+    modelForm.setFieldsValue({ models_text: currentModels.join("\n") });
+    setModelModal({ open: true });
+  }
+
+  function closeModelModal() {
+    setModelModal({ open: false });
+    modelForm.resetFields();
+  }
+
+  async function submitModelForm(values: ModelFormValues) {
+    if (!selectedProviderID) {
+      messageApi.error("请先选择 provider");
+      return;
+    }
+    const models = values.models_text
+      .split(/\r?\n/g)
+      .map((m: string) => m.trim())
+      .filter((m: string) => m.length > 0);
+    await replaceModelsMutation.mutateAsync({ providerID: selectedProviderID, models });
   }
 
   async function submitProviderForm(values: ProviderFormValues) {
@@ -605,6 +691,9 @@ type ProviderDetailContentProps = {
   onOpenReplaceKeys: () => void;
   onDeleteSelectedKeys: () => void;
   deletingKeys: boolean;
+  onOpenEditModels: () => void;
+  onFetchModels: () => void;
+  fetchingModels: boolean;
 };
 
 // ProviderDetailContent 渲染 provider 详情抽屉中的摘要与 key 管理区域。
@@ -617,7 +706,11 @@ function ProviderDetailContent({
   onOpenReplaceKeys,
   onDeleteSelectedKeys,
   deletingKeys,
+  onOpenEditModels,
+  onFetchModels,
+  fetchingModels,
 }: ProviderDetailContentProps): JSX.Element {
+  const models = detail.models ?? [];
   return (
     <Space direction="vertical" size={14} className="console-stack">
       <Card className="surface-card" bordered={false}>
@@ -652,6 +745,36 @@ function ProviderDetailContent({
             { key: "target", label: "Target URL", children: <a href={detail.target_url} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>{detail.target_url}</a> },
           ]}
         />
+      </Card>
+
+      <Card className="surface-card" bordered={false}>
+        <div className="section-heading">
+          <div>
+            <Typography.Text className="placeholder-kicker">模型记录</Typography.Text>
+            <Typography.Title level={4} className="section-title">
+              已记录模型 {models.length > 0 ? `(${models.length})` : ""}
+            </Typography.Title>
+          </div>
+          <Space wrap>
+            <Button size="small" onClick={onOpenEditModels}>
+              编辑
+            </Button>
+            <Button size="small" loading={fetchingModels} onClick={onFetchModels}>
+              从上游拉取
+            </Button>
+          </Space>
+        </div>
+        {models.length === 0 ? (
+          <Empty description="暂无模型记录，点击「编辑」手动添加或「从上游拉取」自动获取" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <div className="model-tags">
+            {models.map((model) => (
+              <Tag key={model} className="model-tag">
+                {model}
+              </Tag>
+            ))}
+          </div>
+        )}
       </Card>
 
       <Card className="surface-card" bordered={false}>

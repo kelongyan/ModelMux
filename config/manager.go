@@ -199,6 +199,14 @@ func equalProviders(a, b []ProviderConfig) bool {
 				return false
 			}
 		}
+		if len(a[i].Models) != len(b[i].Models) {
+			return false
+		}
+		for j := range a[i].Models {
+			if a[i].Models[j] != b[i].Models[j] {
+				return false
+			}
+		}
 	}
 	return true
 }

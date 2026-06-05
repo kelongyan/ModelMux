@@ -20,6 +20,9 @@
   height: 10px;
   border-radius: 50%;
   background: #cbd5e1;
+  transition:
+    background 220ms ease,
+    box-shadow 220ms ease;
 }
 
 .key-pool-dots--small .key-pool-dot {
@@ -61,6 +64,9 @@
   background: #cbd5e1;
   margin-right: 6px;
   vertical-align: middle;
+  transition:
+    background 300ms ease,
+    box-shadow 300ms ease;
 }
 
 .health-dot--active {

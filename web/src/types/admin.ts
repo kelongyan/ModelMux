@@ -31,6 +31,7 @@ export type AdminProviderSummary = {
   active_keys: number;
   cooling_keys: number;
   invalid_keys: number;
+  models: string[];
 };
 
 // AdminKeyStatus 表示 provider 详情中单个 key 的运行状态。
@@ -56,6 +57,8 @@ export type AdminProviderDetailResponse = {
   cooling_keys: number;
   invalid_keys: number;
   keys: AdminKeyStatus[];
+  models: string[];
+  strip_tools: boolean;
 };
 
 // AdminDashboardResponse 对应 dashboard 聚合接口的响应结构。
@@ -231,4 +234,15 @@ export type AdminStatsModelsResponse = {
 
 export type AdminStatsRecentResponse = {
   records: AdminCallRecord[];
+};
+
+// AdminModelsPayload 对应 provider 模型 ID 替换动作。
+export type AdminModelsPayload = {
+  models: string[];
+};
+
+// AdminFetchModelsResponse 对应从上游拉取模型列表的响应。
+export type AdminFetchModelsResponse = {
+  models: string[];
+  count: number;
 };

@@ -5,6 +5,7 @@ import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "reac
 
 import { fetchDashboard, triggerReload } from "./api/admin";
 import { HealthDot } from "./components/health-dot";
+import { PageTransition } from "./components/page-transition";
 import { useGlobalShortcuts } from "./components/use-global-shortcuts";
 import type { AdminDashboardResponse } from "./types/admin";
 
@@ -87,15 +88,17 @@ export function App(): JSX.Element {
         </header>
         <main className="console-content">
           <Suspense fallback={<RouteFallback />}>
-            <Routes key={routeKey}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/providers" element={<ProvidersPage />} />
-              <Route path="/stats" element={<StatsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/events" element={<EventsPage />} />
-              <Route path="/about" element={<AboutPage />} />
-            </Routes>
+            <PageTransition animationKey={location.pathname}>
+              <Routes key={routeKey}>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<DashboardPage />} />
+                <Route path="/providers" element={<ProvidersPage />} />
+                <Route path="/stats" element={<StatsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/events" element={<EventsPage />} />
+                <Route path="/about" element={<AboutPage />} />
+              </Routes>
+            </PageTransition>
           </Suspense>
         </main>
       </Layout>
