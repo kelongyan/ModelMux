@@ -34,6 +34,22 @@ export type AdminProviderSummary = {
   models: string[];
 };
 
+export type AdminProviderCircuit = {
+  provider_id: string;
+  state: "closed" | "open" | "half_open" | string;
+  consecutive_failures: number;
+  open_until?: string;
+  half_open_in_flight: number;
+  current_cooling_seconds: number;
+};
+
+export type AdminStatsHealth = {
+  enabled: boolean;
+  dropped_records: number;
+  queue_depth: number;
+  queue_capacity: number;
+};
+
 // AdminKeyStatus 表示 provider 详情中单个 key 的运行状态。
 export type AdminKeyStatus = {
   index: number;
@@ -69,6 +85,8 @@ export type AdminDashboardResponse = {
   active_keys: number;
   cooling_keys: number;
   invalid_keys: number;
+  provider_circuit?: AdminProviderCircuit;
+  stats: AdminStatsHealth;
   providers: AdminProviderSummary[];
   events: AdminEvent[];
 };
@@ -225,6 +243,9 @@ export type AdminStatsSummaryResponse = {
   window: AdminStatsWindow;
   since: string;
   summary: AdminStatsSummary;
+  dropped_records: number;
+  queue_depth: number;
+  queue_capacity: number;
 };
 
 export type AdminStatsModelsResponse = {

@@ -33,24 +33,36 @@ var (
 )
 
 const (
-	quotaErrorInspectBytes    int64 = 64 * 1024
-	responseUsageInspectBytes int64 = 256 * 1024
-	upstreamErrorExcerptBytes int   = 2048
+	quotaErrorInspectBytes      int64 = 64 * 1024
+	responseUsageInspectBytes   int64 = 256 * 1024
+	upstreamErrorExcerptBytes   int   = 2048
+	upstreamRetryDrainBytes     int64 = 64 * 1024
+	upstreamMaxIdleConns        int   = 256
+	upstreamMaxIdleConnsPerHost int   = 64
+	statsDroppedEventInterval         = 30 * time.Second
 )
 
 var toolFieldNames = []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"}
 
 type Handler struct {
-	pools           *pool.ProviderPools
-	runtime         atomic.Value
-	stateChangeHook atomic.Value
-	statsRecorder   atomic.Value
-	eventRecorder   atomic.Value
+	pools                         *pool.ProviderPools
+	runtime                       atomic.Value
+	stateChangeHook               atomic.Value
+	statsRecorder                 atomic.Value
+	eventRecorder                 atomic.Value
+	lastStatsDroppedReported      atomic.Uint64
+	lastStatsDroppedEventUnixNano atomic.Int64
 }
 
 type stateChangeHook func(immediate bool)
 type statsRecorder interface {
 	Append(stats.CallRecord) error
+}
+
+type statsHealthRecorder interface {
+	DroppedRecords() uint64
+	QueueDepth() int
+	QueueCapacity() int
 }
 
 type eventRecorder interface {
@@ -63,6 +75,7 @@ type runtimeConfig struct {
 	keyPool                 *pool.Pool
 	client                  *http.Client
 	transport               *http.Transport
+	circuit                 *providerCircuit
 	requestTimeout          time.Duration
 	stripTools              bool
 	coolingSeconds          int
@@ -154,7 +167,80 @@ func (h *Handler) emitEvent(ctx context.Context, event logx.Event) {
 	}
 }
 
-func (h *Handler) recordCallStats(record stats.CallRecord) {
+func (h *Handler) recordProviderCircuitSuccess(ctx context.Context, rt *runtimeConfig, r *http.Request, requestID, clientRequestID string) {
+	if rt == nil || rt.circuit == nil {
+		return
+	}
+	if event := rt.circuit.recordSuccess(); event != nil {
+		h.emitProviderCircuitEvent(ctx, event, r, rt, requestID, clientRequestID)
+	}
+}
+
+func (h *Handler) emitProviderCircuitEvent(ctx context.Context, circuitEvent *providerCircuitEvent, r *http.Request, rt *runtimeConfig, requestID, clientRequestID string) {
+	if circuitEvent == nil {
+		return
+	}
+	data := map[string]any{
+		"state":                circuitEvent.state,
+		"consecutive_failures": circuitEvent.consecutiveFailures,
+	}
+	if !circuitEvent.openUntil.IsZero() {
+		data["open_until"] = circuitEvent.openUntil.UTC().Format(time.RFC3339Nano)
+	}
+	if circuitEvent.rejectedCount > 0 {
+		data["rejected_count"] = circuitEvent.rejectedCount
+		data["rejected_delta"] = circuitEvent.rejectedDelta
+	}
+
+	event := logx.Event{
+		Level:           providerCircuitEventLevel(circuitEvent.name),
+		Category:        logx.CategoryProvider,
+		Event:           circuitEvent.name,
+		Message:         providerCircuitEventMessage(circuitEvent.name),
+		RequestID:       requestID,
+		ClientRequestID: clientRequestID,
+		Data:            data,
+	}
+	if rt != nil {
+		event.ProviderID = rt.providerID
+	}
+	if r != nil {
+		event.Method = r.Method
+		event.Path = r.URL.Path
+	}
+	if circuitEvent.name == logx.EventProviderCircuitRejected {
+		event.Status = http.StatusServiceUnavailable
+	}
+	h.emitEvent(ctx, event)
+}
+
+func providerCircuitEventLevel(name string) string {
+	switch name {
+	case logx.EventProviderCircuitOpened:
+		return "warn"
+	case logx.EventProviderCircuitRejected:
+		return "warn"
+	default:
+		return "info"
+	}
+}
+
+func providerCircuitEventMessage(name string) string {
+	switch name {
+	case logx.EventProviderCircuitOpened:
+		return "provider circuit opened"
+	case logx.EventProviderCircuitHalfOpen:
+		return "provider circuit half-open"
+	case logx.EventProviderCircuitClosed:
+		return "provider circuit closed"
+	case logx.EventProviderCircuitRejected:
+		return "provider circuit rejected request"
+	default:
+		return "provider circuit event"
+	}
+}
+
+func (h *Handler) recordCallStats(ctx context.Context, record stats.CallRecord) {
 	recorder, _ := h.statsRecorder.Load().(statsRecorder)
 	if recorder == nil {
 		return
@@ -166,6 +252,50 @@ func (h *Handler) recordCallStats(record stats.CallRecord) {
 			"err", err,
 		)...)
 	}
+	h.emitStatsDroppedEventIfNeeded(ctx, recorder, record)
+}
+
+func (h *Handler) emitStatsDroppedEventIfNeeded(ctx context.Context, recorder statsRecorder, record stats.CallRecord) {
+	health, ok := recorder.(statsHealthRecorder)
+	if !ok || health == nil {
+		return
+	}
+
+	dropped := health.DroppedRecords()
+	previous := h.lastStatsDroppedReported.Load()
+	if dropped <= previous {
+		return
+	}
+
+	now := time.Now()
+	lastEventAt := h.lastStatsDroppedEventUnixNano.Load()
+	if lastEventAt > 0 && now.Sub(time.Unix(0, lastEventAt)) < statsDroppedEventInterval {
+		return
+	}
+	if !h.lastStatsDroppedEventUnixNano.CompareAndSwap(lastEventAt, now.UnixNano()) {
+		return
+	}
+
+	previous = h.lastStatsDroppedReported.Swap(dropped)
+	if dropped <= previous {
+		return
+	}
+	h.emitEvent(ctx, logx.Event{
+		Level:      "warn",
+		Category:   logx.CategoryStats,
+		Event:      logx.EventStatsQueueDropped,
+		Message:    "stats queue dropped records",
+		ProviderID: record.ProviderID,
+		Method:     record.Method,
+		Path:       record.Endpoint,
+		Model:      record.Model,
+		Data: map[string]any{
+			"dropped_records": dropped,
+			"dropped_delta":   dropped - previous,
+			"queue_depth":     health.QueueDepth(),
+			"queue_capacity":  health.QueueCapacity(),
+		},
+	})
 }
 
 // UpdateConfig 原子替换代理运行时配置，新请求会使用新快照，已有请求继续使用旧快照。
@@ -209,6 +339,15 @@ func (h *Handler) snapshot() *runtimeConfig {
 	return rt
 }
 
+// ProviderCircuitSnapshot returns the current active provider circuit state.
+func (h *Handler) ProviderCircuitSnapshot() ProviderCircuitSnapshot {
+	rt := h.snapshot()
+	if rt == nil || rt.circuit == nil {
+		return ProviderCircuitSnapshot{State: providerCircuitStateClosed.String()}
+	}
+	return exportProviderCircuitSnapshot(rt.providerID, rt.circuit.snapshot())
+}
+
 // newRuntimeConfig 从配置构造不可变运行时快照。
 func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPool *pool.Pool) (*runtimeConfig, error) {
 	target, err := parseTargetURL(provider.TargetURL)
@@ -224,7 +363,10 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 			Timeout:   time.Duration(connectTimeoutSeconds) * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		MaxIdleConns:          100,
+		MaxIdleConns:        upstreamMaxIdleConns,
+		MaxIdleConnsPerHost: upstreamMaxIdleConnsPerHost,
+		ForceAttemptHTTP2:   true,
+
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   time.Duration(connectTimeoutSeconds) * time.Second,
 		ResponseHeaderTimeout: time.Duration(responseHeaderTimeoutSeconds) * time.Second,
@@ -242,6 +384,7 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 		keyPool:                 keyPool,
 		client:                  client,
 		transport:               transport,
+		circuit:                 newProviderCircuit(providerCircuitOptions{}),
 		requestTimeout:          time.Duration(requestTimeoutSeconds) * time.Second,
 		stripTools:              provider.StripTools,
 		coolingSeconds:          effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
@@ -345,7 +488,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		callRecord.LatencyMs = time.Since(start).Milliseconds()
-		h.recordCallStats(callRecord)
+		h.recordCallStats(r.Context(), callRecord)
+	}()
+
+	decision := rt.circuit.beforeRequest()
+	if decision.event != nil {
+		h.emitProviderCircuitEvent(r.Context(), decision.event, r, rt, requestID, clientRequestID)
+	}
+	if !decision.allowed {
+		callRecord.Status = http.StatusServiceUnavailable
+		callRecord.Error = "active provider is temporarily unavailable"
+		writeProxyError(w, http.StatusServiceUnavailable, "active provider is temporarily unavailable")
+		return
+	}
+	circuitOutcomeRecorded := false
+	defer func() {
+		if !circuitOutcomeRecorded {
+			rt.circuit.recordNeutral()
+		}
 	}()
 
 	var lastStatus int
@@ -399,6 +559,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		callRecord.KeyID = state.KeyID(key.Value)
 		applyUsageToRecord(&callRecord, usage)
 		if err == nil {
+			circuitOutcomeRecorded = true
+			h.recordProviderCircuitSuccess(r.Context(), rt, r, requestID, clientRequestID)
 			callRecord.Success = status >= http.StatusOK && status < http.StatusBadRequest
 			if !callRecord.Success {
 				callRecord.Error = http.StatusText(status)
@@ -465,6 +627,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch scope {
 		case retryScopeKey:
+			circuitOutcomeRecorded = true
+			h.recordProviderCircuitSuccess(r.Context(), rt, r, requestID, clientRequestID)
 			switch status {
 			case http.StatusTooManyRequests:
 				cooling := rt.keyPool.CoolingDuration(rt.coolingSeconds)
@@ -554,6 +718,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			stopRetrying = transientFailures > rt.maxTransientRetries
 		case retryScopeProvider:
 			transientFailures++
+			circuitOutcomeRecorded = true
+			if event := rt.circuit.recordProviderFailure(); event != nil {
+				h.emitProviderCircuitEvent(r.Context(), event, r, rt, requestID, clientRequestID)
+				stopRetrying = true
+			}
 			slog.Warn("provider transient failure", logx.Fields(logx.CategoryRetry, logx.EventProviderTransient,
 				"attempt", attempt+1,
 				"provider_id", rt.providerID,
@@ -564,7 +733,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"max_transient_retries", rt.maxTransientRetries,
 				"err", err,
 			)...)
-			stopRetrying = transientFailures > rt.maxTransientRetries
+			stopRetrying = stopRetrying || transientFailures > rt.maxTransientRetries
 		default:
 			// 非重试错误已经在 forward 中写出响应，这里只记录分类日志。
 			slog.Error("upstream error", logx.Fields(logx.CategoryUpstream, logx.EventUpstreamUnexpected,
@@ -703,18 +872,19 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		)...)
 		return http.StatusBadGateway, 0, scope, unknownUsage, "", fmt.Errorf("%w: %v", errRetryableUpstream, err)
 	}
-	defer resp.Body.Close()
-
 	// 429/401 需要换 key 重试，因此不能提前向客户端写响应头。
 	if resp.StatusCode == http.StatusTooManyRequests {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		_ = drainAndClose(resp.Body, upstreamRetryDrainBytes)
 		return resp.StatusCode, retryAfter, retryScopeKey, unknownUsage, "", fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
+		_ = drainAndClose(resp.Body, upstreamRetryDrainBytes)
 		return resp.StatusCode, 0, retryScopeKey, unknownUsage, "", fmt.Errorf("upstream returned %d", resp.StatusCode)
 	}
 	if isRetryableUpstreamStatus(resp.StatusCode) {
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		_ = drainAndClose(resp.Body, upstreamRetryDrainBytes)
 		return resp.StatusCode, retryAfter, retryScopeProvider, unknownUsage, "", fmt.Errorf("%w: upstream returned %d", errRetryableUpstream, resp.StatusCode)
 	}
 
@@ -722,14 +892,17 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 	if resp.StatusCode == http.StatusForbidden {
 		prefix, replayBody, err := readResponsePrefix(resp.Body, quotaErrorInspectBytes)
 		if err != nil {
+			_ = resp.Body.Close()
 			writeProxyError(w, http.StatusBadGateway, "failed to read upstream error body")
 			return http.StatusBadGateway, 0, retryScopeNone, unknownUsage, "", err
 		}
 		if isQuotaExhaustedBody(prefix) {
+			_ = drainAndClose(resp.Body, upstreamRetryDrainBytes)
 			return resp.StatusCode, 0, retryScopeKey, unknownUsage, errorExcerpt(prefix), fmt.Errorf("%w: upstream returned %d", errKeyQuotaExhausted, resp.StatusCode)
 		}
 		responseBody = replayBody
 	}
+	defer resp.Body.Close()
 
 	key.RecordLatency(time.Since(upstreamStart))
 
@@ -765,6 +938,21 @@ func readResponsePrefix(body io.Reader, limit int64) ([]byte, io.Reader, error) 
 	}
 	prefixBytes := prefix.Bytes()
 	return prefixBytes, io.MultiReader(bytes.NewReader(prefixBytes), body), nil
+}
+
+func drainAndClose(body io.ReadCloser, limit int64) error {
+	if body == nil {
+		return nil
+	}
+	var readErr error
+	if limit > 0 {
+		_, readErr = io.Copy(io.Discard, io.LimitReader(body, limit))
+	}
+	closeErr := body.Close()
+	if readErr != nil {
+		return readErr
+	}
+	return closeErr
 }
 
 type noopStatsRecorder struct{}

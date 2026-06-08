@@ -6,6 +6,9 @@ import { statsWindowOptions } from "./stats-options";
 
 type StatsSummaryCardProps = {
   summary: AdminStatsSummary;
+  droppedRecords: number;
+  queueDepth: number;
+  queueCapacity: number;
   window: AdminStatsWindow;
   onWindowChange: (window: AdminStatsWindow) => void;
   onRefresh: () => void;
@@ -20,7 +23,15 @@ const toneAccent: Record<Tone, string> = {
   red: "#f43f5e",
 };
 
-export function StatsSummaryCard({ summary, window, onWindowChange, onRefresh }: StatsSummaryCardProps): JSX.Element {
+export function StatsSummaryCard({
+  summary,
+  droppedRecords,
+  queueDepth,
+  queueCapacity,
+  window,
+  onWindowChange,
+  onRefresh,
+}: StatsSummaryCardProps): JSX.Element {
   return (
     <Card className="surface-card reveal-card reveal-delay-0" bordered={false}>
       <div className="section-heading">
@@ -29,6 +40,9 @@ export function StatsSummaryCard({ summary, window, onWindowChange, onRefresh }:
           <Typography.Title level={3} className="section-title">调用统计</Typography.Title>
         </div>
         <Space wrap>
+          <Typography.Text className={droppedRecords > 0 ? "stats-dropped-counter stats-dropped-counter--warn" : "stats-dropped-counter"}>
+            队列 {formatNumber(queueDepth)}/{formatNumber(queueCapacity)} · 丢弃 {formatNumber(droppedRecords)}
+          </Typography.Text>
           <Segmented value={window} options={statsWindowOptions} onChange={(value) => onWindowChange(value as AdminStatsWindow)} />
           <Button onClick={onRefresh}>刷新</Button>
         </Space>

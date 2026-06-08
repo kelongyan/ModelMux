@@ -206,6 +206,7 @@ func main() {
 		adminStateChanged = saver.Trigger
 	}
 	adminHandler := admin.NewHandler(providerPools, configManager, reloadConfig, eventBuffer, adminStateChanged)
+	adminHandler.SetProviderHealthReader(proxyHandler)
 	if statsStore != nil {
 		adminHandler.SetStatsStore(statsStore)
 	}
@@ -289,6 +290,14 @@ func main() {
 		if err := saver.Close(); err != nil {
 			slog.Warn("state save failed", logx.Fields(logx.CategoryState, logx.EventStateSaveFailed,
 				"path", cfg.StateFile,
+				"err", err,
+			)...)
+		}
+	}
+	if statsStore != nil {
+		if err := statsStore.Close(); err != nil {
+			slog.Warn("stats store close failed", logx.Fields("stats", "stats.close_failed",
+				"path", cfg.StatsDir,
 				"err", err,
 			)...)
 		}

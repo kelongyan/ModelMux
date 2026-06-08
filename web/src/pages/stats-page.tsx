@@ -65,6 +65,9 @@ export function StatsPage(): JSX.Element {
   }
 
   const summary = summaryQuery.data?.summary ?? emptySummary();
+  const droppedRecords = summaryQuery.data?.dropped_records ?? 0;
+  const queueDepth = summaryQuery.data?.queue_depth ?? 0;
+  const queueCapacity = summaryQuery.data?.queue_capacity ?? 0;
   const logs = logsQuery.data?.records ?? [];
   const total = logsQuery.data?.total ?? 0;
 
@@ -72,6 +75,9 @@ export function StatsPage(): JSX.Element {
     <Space direction="vertical" size={20} className="console-stack">
       <StatsSummaryCard
         summary={summary}
+        droppedRecords={droppedRecords}
+        queueDepth={queueDepth}
+        queueCapacity={queueCapacity}
         window={window}
         onWindowChange={(nextWindow) => {
           setWindow(nextWindow);

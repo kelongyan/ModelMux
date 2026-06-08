@@ -13,6 +13,7 @@ import (
 
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/proxy"
 	"github.com/kelongyan/ModelMux/stats"
 )
 
@@ -116,6 +117,55 @@ func TestProvidersAPIListsProviders(t *testing.T) {
 	}
 	if len(body.Providers) != 2 {
 		t.Fatalf("len(Providers) = %d, want 2", len(body.Providers))
+	}
+}
+
+func TestDashboardIncludesProviderCircuitAndStatsHealth(t *testing.T) {
+	h, _, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	h.SetProviderHealthReader(fakeProviderHealthReader{
+		snapshot: proxy.ProviderCircuitSnapshot{
+			ProviderID:            "p1",
+			State:                 "open",
+			ConsecutiveFailures:   3,
+			CurrentCoolingSeconds: 5,
+		},
+	})
+	h.SetStatsStore(fakeStatsReader{dropped: 7, queueDepth: 3, queueCapacity: 4096})
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/admin/api/v1/dashboard", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var body struct {
+		ProviderCircuit *proxy.ProviderCircuitSnapshot `json:"provider_circuit"`
+		Stats           struct {
+			Enabled        bool   `json:"enabled"`
+			DroppedRecords uint64 `json:"dropped_records"`
+			QueueDepth     int    `json:"queue_depth"`
+			QueueCapacity  int    `json:"queue_capacity"`
+		} `json:"stats"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if body.ProviderCircuit == nil {
+		t.Fatal("provider_circuit should be present")
+	}
+	if body.ProviderCircuit.State != "open" || body.ProviderCircuit.ConsecutiveFailures != 3 {
+		t.Fatalf("provider_circuit = %+v, want open with 3 failures", body.ProviderCircuit)
+	}
+	if !body.Stats.Enabled || body.Stats.DroppedRecords != 7 || body.Stats.QueueDepth != 3 || body.Stats.QueueCapacity != 4096 {
+		t.Fatalf("stats = %+v, want enabled with dropped_records=7 queue=3/4096", body.Stats)
 	}
 }
 
@@ -587,6 +637,11 @@ func TestStatsAPIsReturnSummaryModelsAndRecentCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stats.NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 	if err := store.Append(stats.CallRecord{
 		At:          base.Add(-10 * time.Minute),
 		ProviderID:  "p1",
@@ -652,6 +707,40 @@ func TestStatsAPIsReturnSummaryModelsAndRecentCalls(t *testing.T) {
 	}
 }
 
+func TestStatsSummaryIncludesDroppedRecords(t *testing.T) {
+	h, _, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	h.SetStatsStore(fakeStatsReader{dropped: 11, queueDepth: 5, queueCapacity: 4096})
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/admin/api/v1/stats/summary?window=24h", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var body struct {
+		DroppedRecords uint64 `json:"dropped_records"`
+		QueueDepth     int    `json:"queue_depth"`
+		QueueCapacity  int    `json:"queue_capacity"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if body.DroppedRecords != 11 {
+		t.Fatalf("DroppedRecords = %d, want 11", body.DroppedRecords)
+	}
+	if body.QueueDepth != 5 || body.QueueCapacity != 4096 {
+		t.Fatalf("queue = %d/%d, want 5/4096", body.QueueDepth, body.QueueCapacity)
+	}
+}
+
 func TestStatsSummaryRejectsInvalidWindow(t *testing.T) {
 	h, _, _ := newTestHandler(t, &config.Config{
 		ActiveProvider: "p1",
@@ -667,6 +756,11 @@ func TestStatsSummaryRejectsInvalidWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stats.NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 	h.SetStatsStore(store)
 
 	mux := http.NewServeMux()
@@ -688,11 +782,11 @@ func TestParseProviderActionRecognizesSupportedRoutes(t *testing.T) {
 	})
 
 	cases := []struct {
-		path    string
-		id      string
-		action  string
-		keyID   string
-		ok      bool
+		path   string
+		id     string
+		action string
+		keyID  string
+		ok     bool
 	}{
 		{path: "/admin/api/v1/providers/p1", id: "p1", action: "", keyID: "", ok: true},
 		{path: "/admin/api/v1/providers/p1/activate", id: "p1", action: "activate", keyID: "", ok: true},
@@ -711,6 +805,48 @@ func TestParseProviderActionRecognizesSupportedRoutes(t *testing.T) {
 
 func int64PtrAdmin(value int64) *int64 {
 	return &value
+}
+
+type fakeProviderHealthReader struct {
+	snapshot proxy.ProviderCircuitSnapshot
+}
+
+func (f fakeProviderHealthReader) ProviderCircuitSnapshot() proxy.ProviderCircuitSnapshot {
+	return f.snapshot
+}
+
+type fakeStatsReader struct {
+	dropped       uint64
+	queueDepth    int
+	queueCapacity int
+}
+
+func (f fakeStatsReader) SummarySince(time.Time) stats.Summary {
+	return stats.Summary{}
+}
+
+func (f fakeStatsReader) ModelsSince(time.Time) []stats.ModelSummary {
+	return nil
+}
+
+func (f fakeStatsReader) Recent(int) []stats.CallRecord {
+	return nil
+}
+
+func (f fakeStatsReader) QueryLogs(time.Time, stats.CallLogFilter) stats.CallLogResult {
+	return stats.CallLogResult{}
+}
+
+func (f fakeStatsReader) DroppedRecords() uint64 {
+	return f.dropped
+}
+
+func (f fakeStatsReader) QueueDepth() int {
+	return f.queueDepth
+}
+
+func (f fakeStatsReader) QueueCapacity() int {
+	return f.queueCapacity
 }
 
 func newTestHandler(t *testing.T, cfg *config.Config) (*Handler, *pool.ProviderPools, string) {

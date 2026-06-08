@@ -98,6 +98,10 @@
     grid-template-columns: 1fr;
   }
 
+  .dashboard-health-strip {
+    grid-template-columns: 1fr;
+  }
+
   .stats-kpi {
     min-height: 96px;
   }

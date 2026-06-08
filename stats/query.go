@@ -132,5 +132,58 @@ func (s *Store) ModelsSince(since time.Time) []ModelSummary {
 }
 
 func (s *Store) recordsSince(since time.Time) ([]CallRecord, error) {
-	return s.recordsSinceFromFiles(since)
+	if s == nil {
+		return nil, nil
+	}
+
+	requestSince := since.UTC()
+	scanSince := requestSince.Truncate(defaultQueryCacheTTL)
+	now := s.now().UTC()
+	key := recordsCacheKey{sinceUnixNano: scanSince.UnixNano()}
+
+	s.queryCacheMu.Lock()
+	if entry, ok := s.recordsCache[key]; ok && now.Before(entry.expiresAt) {
+		records := filterRecordsSince(entry.records, requestSince)
+		s.queryCacheMu.Unlock()
+		return records, nil
+	}
+	s.queryCacheMu.Unlock()
+
+	records, err := s.recordsSinceFromFiles(scanSince)
+	if err != nil {
+		return nil, err
+	}
+
+	now = s.now().UTC()
+	s.queryCacheMu.Lock()
+	if s.recordsCache == nil {
+		s.recordsCache = make(map[recordsCacheKey]recordsCacheEntry)
+	}
+	s.pruneRecordsCacheLocked(now)
+	s.recordsCache[key] = recordsCacheEntry{
+		expiresAt: now.Add(defaultQueryCacheTTL),
+		records:   append([]CallRecord(nil), records...),
+	}
+	s.queryCacheMu.Unlock()
+
+	return filterRecordsSince(records, requestSince), nil
+}
+
+func filterRecordsSince(records []CallRecord, since time.Time) []CallRecord {
+	filtered := make([]CallRecord, 0, len(records))
+	for _, record := range records {
+		if record.At.IsZero() || record.At.Before(since) {
+			continue
+		}
+		filtered = append(filtered, record)
+	}
+	return filtered
+}
+
+func (s *Store) pruneRecordsCacheLocked(now time.Time) {
+	for key, entry := range s.recordsCache {
+		if !now.Before(entry.expiresAt) {
+			delete(s.recordsCache, key)
+		}
+	}
 }

@@ -86,6 +86,41 @@
   line-height: 1.5;
 }
 
+.dashboard-health-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dashboard-health-signal {
+  min-height: 50px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--mm-border-muted);
+  background: var(--mm-surface-muted);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dashboard-health-signal span {
+  color: var(--mm-text-subtle);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dashboard-health-signal strong {
+  color: var(--mm-text);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .dashboard-stat-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1,10 +1,12 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +23,7 @@ import (
 	"github.com/kelongyan/ModelMux/stats"
 )
 
-func mustHandler(t *testing.T, cfg *config.Config) (*Handler, *pool.ProviderPools) {
+func mustHandler(t testing.TB, cfg *config.Config) (*Handler, *pool.ProviderPools) {
 	t.Helper()
 	providers := cfg.ProviderConfigs()
 	if cfg.ActiveProvider == "" && len(providers) > 0 {
@@ -618,6 +620,29 @@ func (s *recordingStatsSink) Records() []stats.CallRecord {
 	return append([]stats.CallRecord(nil), s.records...)
 }
 
+type droppingStatsSink struct {
+	dropped       atomic.Uint64
+	queueDepth    int
+	queueCapacity int
+}
+
+func (s *droppingStatsSink) Append(stats.CallRecord) error {
+	s.dropped.Add(1)
+	return nil
+}
+
+func (s *droppingStatsSink) DroppedRecords() uint64 {
+	return s.dropped.Load()
+}
+
+func (s *droppingStatsSink) QueueDepth() int {
+	return s.queueDepth
+}
+
+func (s *droppingStatsSink) QueueCapacity() int {
+	return s.queueCapacity
+}
+
 type recordingEventSink struct {
 	mu     sync.Mutex
 	events []logx.Event
@@ -636,6 +661,75 @@ func (s *recordingEventSink) Last() logx.Event {
 		return logx.Event{}
 	}
 	return s.events[len(s.events)-1]
+}
+
+func (s *recordingEventSink) Events() []logx.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]logx.Event(nil), s.events...)
+}
+
+func TestRecordCallStatsEmitsThrottledDroppedStatsEvent(t *testing.T) {
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+
+	h := &Handler{}
+	statsSink := &droppingStatsSink{queueDepth: 4096, queueCapacity: 4096}
+	eventSink := &recordingEventSink{}
+	h.SetStatsRecorder(statsSink)
+	h.SetEventRecorder(eventSink)
+
+	record := stats.CallRecord{ProviderID: "p1", Model: "gpt-4.1-mini"}
+	h.recordCallStats(context.Background(), record)
+	h.recordCallStats(context.Background(), record)
+
+	events := filterEventsByName(eventSink.Events(), logx.EventStatsQueueDropped)
+	if len(events) != 1 {
+		t.Fatalf("dropped events = %d, want 1 inside throttle window", len(events))
+	}
+	assertStatsDroppedEvent(t, events[0], 1, 1, 4096, 4096)
+
+	h.lastStatsDroppedEventUnixNano.Store(time.Now().Add(-statsDroppedEventInterval - time.Second).UnixNano())
+	h.recordCallStats(context.Background(), record)
+
+	events = filterEventsByName(eventSink.Events(), logx.EventStatsQueueDropped)
+	if len(events) != 2 {
+		t.Fatalf("dropped events = %d, want 2 after throttle window", len(events))
+	}
+	assertStatsDroppedEvent(t, events[1], 3, 2, 4096, 4096)
+}
+
+func filterEventsByName(events []logx.Event, name string) []logx.Event {
+	out := make([]logx.Event, 0, len(events))
+	for _, event := range events {
+		if event.Event == name {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+func assertStatsDroppedEvent(t *testing.T, event logx.Event, droppedRecords, droppedDelta uint64, queueDepth, queueCapacity int) {
+	t.Helper()
+	if event.Level != "warn" || event.Category != logx.CategoryStats {
+		t.Fatalf("event level/category = %s/%s, want warn/%s", event.Level, event.Category, logx.CategoryStats)
+	}
+	if event.ProviderID != "p1" || event.Model != "gpt-4.1-mini" {
+		t.Fatalf("event provider/model = %q/%q, want p1/gpt-4.1-mini", event.ProviderID, event.Model)
+	}
+	if got := event.Data["dropped_records"]; got != droppedRecords {
+		t.Fatalf("dropped_records = %#v, want %d", got, droppedRecords)
+	}
+	if got := event.Data["dropped_delta"]; got != droppedDelta {
+		t.Fatalf("dropped_delta = %#v, want %d", got, droppedDelta)
+	}
+	if got := event.Data["queue_depth"]; got != queueDepth {
+		t.Fatalf("queue_depth = %#v, want %d", got, queueDepth)
+	}
+	if got := event.Data["queue_capacity"]; got != queueCapacity {
+		t.Fatalf("queue_capacity = %#v, want %d", got, queueCapacity)
+	}
 }
 
 func TestServeHTTPRetriesTransportErrorWithNextKey(t *testing.T) {
@@ -797,6 +891,93 @@ func TestServeHTTPRetriesRetryableGatewayStatusWithNextKey(t *testing.T) {
 	}
 }
 
+func TestServeHTTPDrainsRetryableStatusBodyBeforeRetry(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized},
+		{name: "rate limit", status: http.StatusTooManyRequests},
+		{name: "bad gateway", status: http.StatusBadGateway},
+		{name: "provider unavailable", status: http.StatusServiceUnavailable},
+		{name: "gateway timeout", status: http.StatusGatewayTimeout},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			firstBody := newTrackingReadCloser(strings.Repeat("retry-body", 8))
+			transport := &scriptedTransport{responses: []scriptedResponse{
+				{status: tc.status, body: firstBody},
+				{status: http.StatusOK, body: newTrackingReadCloser(`{"ok":true}`)},
+			}}
+
+			cfg := &config.Config{
+				TargetURL:               "https://upstream.example.com",
+				Keys:                    []string{"k1", "k2"},
+				RequestTimeoutSeconds:   10,
+				MaxRetries:              1,
+				MaxTransientRetries:     1,
+				CoolingSeconds:          1,
+				TransientCoolingSeconds: 1,
+			}
+			h, _ := mustHandler(t, cfg)
+			h.snapshot().client = &http.Client{Transport: transport}
+
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+			}
+			if got := transport.calls.Load(); got != 2 {
+				t.Fatalf("upstream calls = %d, want 2", got)
+			}
+			if !firstBody.closed.Load() {
+				t.Fatal("first retryable response body was not closed")
+			}
+			if got, want := firstBody.bytesRead.Load(), int64(len(firstBody.data)); got != want {
+				t.Fatalf("retryable response bytes read = %d, want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestServeHTTPDrainsQuotaForbiddenBodyBeforeRetry(t *testing.T) {
+	quotaMessage := `{"error":{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}}`
+	body := quotaMessage + strings.Repeat("x", int(quotaErrorInspectBytes)-len(quotaMessage)+32)
+	firstBody := newTrackingReadCloser(body)
+	transport := &scriptedTransport{responses: []scriptedResponse{
+		{status: http.StatusForbidden, body: firstBody},
+		{status: http.StatusOK, body: newTrackingReadCloser(`{"ok":true}`)},
+	}}
+
+	cfg := &config.Config{
+		TargetURL:             "https://upstream.example.com",
+		Keys:                  []string{"k1", "k2"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	h.snapshot().client = &http.Client{Transport: transport}
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/messages", strings.NewReader(`{"prompt":"hi"}`)))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if got := transport.calls.Load(); got != 2 {
+		t.Fatalf("upstream calls = %d, want 2", got)
+	}
+	if !firstBody.closed.Load() {
+		t.Fatal("quota response body was not closed")
+	}
+	if got, want := firstBody.bytesRead.Load(), int64(len(firstBody.data)); got != want {
+		t.Fatalf("quota response bytes read = %d, want %d", got, want)
+	}
+}
+
 func TestRuntimeConfigUsesSplitTimeouts(t *testing.T) {
 	cfg := &config.Config{
 		TargetURL:                    "https://example.com",
@@ -827,6 +1008,31 @@ func TestRuntimeConfigUsesSplitTimeouts(t *testing.T) {
 	}
 	if rt.waitForKeyTimeout != 900*time.Millisecond {
 		t.Fatalf("waitForKeyTimeout = %v, want 900ms", rt.waitForKeyTimeout)
+	}
+}
+
+func TestRuntimeConfigUsesOptimizedUpstreamConnectionPool(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:             "https://example.com",
+		Keys:                  []string{"k1"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	rt := h.snapshot()
+	if rt.transport.MaxIdleConns != 256 {
+		t.Fatalf("MaxIdleConns = %d, want 256", rt.transport.MaxIdleConns)
+	}
+	if rt.transport.MaxIdleConnsPerHost != 64 {
+		t.Fatalf("MaxIdleConnsPerHost = %d, want 64", rt.transport.MaxIdleConnsPerHost)
+	}
+	if !rt.transport.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 = false, want true")
+	}
+	if rt.transport.MaxConnsPerHost != 0 {
+		t.Fatalf("MaxConnsPerHost = %d, want 0 for no artificial upstream concurrency cap", rt.transport.MaxConnsPerHost)
 	}
 }
 
@@ -949,6 +1155,151 @@ func TestServeHTTPLimitsProviderTransientRetries(t *testing.T) {
 		if key.State != "active" {
 			t.Fatalf("key %s state = %q, want active for provider-level transient", key.MaskedKey, key.State)
 		}
+	}
+}
+
+func TestServeHTTPProviderTransportFailureDoesNotPoisonKeys(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	targetURL := "http://" + listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("listener.Close() error = %v", err)
+	}
+
+	cfg := &config.Config{
+		TargetURL:                    targetURL,
+		Keys:                         []string{"k1", "k2", "k3"},
+		RequestTimeoutSeconds:        10,
+		ConnectTimeoutSeconds:        1,
+		ResponseHeaderTimeoutSeconds: 1,
+		MaxRetries:                   5,
+		MaxTransientRetries:          1,
+		CoolingSeconds:               1,
+		TransientCoolingSeconds:      1,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/models", nil))
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+	status, err := pools.ActiveStatus()
+	if err != nil {
+		t.Fatalf("ActiveStatus() error = %v", err)
+	}
+	for _, key := range status.Keys {
+		if key.State != "active" {
+			t.Fatalf("key %s state = %q, want active for provider transport failure", key.MaskedKey, key.State)
+		}
+	}
+}
+
+func TestServeHTTPProviderCircuitOpensAndRejectsRequests(t *testing.T) {
+	var attempts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"provider down"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:               upstream.URL,
+		Keys:                    []string{"k1", "k2", "k3"},
+		RequestTimeoutSeconds:   10,
+		MaxRetries:              5,
+		MaxTransientRetries:     2,
+		CoolingSeconds:          1,
+		TransientCoolingSeconds: 1,
+	}
+	h, pools := mustHandler(t, cfg)
+	events := &recordingEventSink{}
+	h.SetEventRecorder(events)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("first status = %d, want %d, body=%s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("upstream calls after first request = %d, want 3", got)
+	}
+	if got := h.snapshot().circuit.snapshot().state; got != providerCircuitStateOpen.String() {
+		t.Fatalf("circuit state = %q, want open", got)
+	}
+
+	second := httptest.NewRecorder()
+	h.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if second.Code != http.StatusServiceUnavailable {
+		t.Fatalf("second status = %d, want %d, body=%s", second.Code, http.StatusServiceUnavailable, second.Body.String())
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("upstream calls after rejected request = %d, want 3", got)
+	}
+	if !strings.Contains(second.Body.String(), "active provider is temporarily unavailable") {
+		t.Fatalf("second body = %s, want circuit rejection message", second.Body.String())
+	}
+	if !hasEvent(events.Events(), logx.EventProviderCircuitOpened) {
+		t.Fatalf("events did not include %q: %+v", logx.EventProviderCircuitOpened, events.Events())
+	}
+	if !hasEvent(events.Events(), logx.EventProviderCircuitRejected) {
+		t.Fatalf("events did not include %q: %+v", logx.EventProviderCircuitRejected, events.Events())
+	}
+
+	status, err := pools.ActiveStatus()
+	if err != nil {
+		t.Fatalf("ActiveStatus() error = %v", err)
+	}
+	for _, key := range status.Keys {
+		if key.State != "active" {
+			t.Fatalf("key %s state = %q, want active for provider circuit failure", key.MaskedKey, key.State)
+		}
+	}
+}
+
+func TestServeHTTPKeyScopeErrorsDoNotOpenProviderCircuit(t *testing.T) {
+	var attempts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch attempts.Add(1) {
+		case 1:
+			w.WriteHeader(http.StatusUnauthorized)
+		case 2:
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Errorf("unexpected attempt %d", attempts.Load())
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:             upstream.URL,
+		Keys:                  []string{"k1", "k2"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	snapshot := h.snapshot().circuit.snapshot()
+	if snapshot.state != providerCircuitStateClosed.String() {
+		t.Fatalf("circuit state = %q, want closed", snapshot.state)
+	}
+	if snapshot.consecutiveFailures != 0 {
+		t.Fatalf("consecutiveFailures = %d, want 0", snapshot.consecutiveFailures)
 	}
 }
 
@@ -1273,6 +1624,34 @@ func TestReadResponsePrefixReplaysFullBody(t *testing.T) {
 	}
 }
 
+func TestDrainAndCloseReadsSmallBodyAndCloses(t *testing.T) {
+	body := newTrackingReadCloser("abcdef")
+
+	if err := drainAndClose(body, 64); err != nil {
+		t.Fatalf("drainAndClose() error = %v", err)
+	}
+	if !body.closed.Load() {
+		t.Fatal("body was not closed")
+	}
+	if got, want := body.bytesRead.Load(), int64(len(body.data)); got != want {
+		t.Fatalf("bytes read = %d, want %d", got, want)
+	}
+}
+
+func TestDrainAndCloseLimitsLargeBodyAndCloses(t *testing.T) {
+	body := newTrackingReadCloser(strings.Repeat("x", 128))
+
+	if err := drainAndClose(body, 64); err != nil {
+		t.Fatalf("drainAndClose() error = %v", err)
+	}
+	if !body.closed.Load() {
+		t.Fatal("body was not closed")
+	}
+	if got, want := body.bytesRead.Load(), int64(64); got != want {
+		t.Fatalf("bytes read = %d, want %d", got, want)
+	}
+}
+
 func TestUpdateConfigChangesTargetForNewRequests(t *testing.T) {
 	var firstCalls atomic.Int32
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1327,6 +1706,79 @@ func TestUpdateConfigChangesTargetForNewRequests(t *testing.T) {
 	}
 	if firstCalls.Load() != 1 {
 		t.Fatalf("first calls = %d, want 1", firstCalls.Load())
+	}
+	if secondCalls.Load() != 1 {
+		t.Fatalf("second calls = %d, want 1", secondCalls.Load())
+	}
+}
+
+func TestUpdateConfigUsesFreshProviderCircuit(t *testing.T) {
+	var firstCalls atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		firstCalls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer first.Close()
+
+	var secondCalls atomic.Int32
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"server":"second"}`))
+	}))
+	defer second.Close()
+
+	cfg := &config.Config{
+		TargetURL:               first.URL,
+		Keys:                    []string{"k1"},
+		RequestTimeoutSeconds:   10,
+		MaxRetries:              5,
+		MaxTransientRetries:     2,
+		CoolingSeconds:          1,
+		TransientCoolingSeconds: 1,
+	}
+	h, pools := mustHandler(t, cfg)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("first status = %d, want %d", rr.Code, http.StatusServiceUnavailable)
+	}
+	oldCircuit := h.snapshot().circuit
+	if got := oldCircuit.snapshot().state; got != providerCircuitStateOpen.String() {
+		t.Fatalf("old circuit state = %q, want open", got)
+	}
+
+	nextCfg := &config.Config{
+		TargetURL:             second.URL,
+		Keys:                  []string{"k1"},
+		ActiveProvider:        config.DefaultProviderID,
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	if err := pools.Update([]pool.ProviderSpec{{ID: nextCfg.ActiveProvider, Keys: nextCfg.Keys}}, nextCfg.ActiveProvider); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if err := h.UpdateConfig(nextCfg); err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+
+	newCircuit := h.snapshot().circuit
+	if newCircuit == oldCircuit {
+		t.Fatal("new runtime reused old provider circuit")
+	}
+	if got := newCircuit.snapshot().state; got != providerCircuitStateClosed.String() {
+		t.Fatalf("new circuit state = %q, want closed", got)
+	}
+
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if firstCalls.Load() != 3 {
+		t.Fatalf("first calls = %d, want 3", firstCalls.Load())
 	}
 	if secondCalls.Load() != 1 {
 		t.Fatalf("second calls = %d, want 1", secondCalls.Load())
@@ -1597,6 +2049,87 @@ func TestStreamBodyReturnsWriteError(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
+}
+
+func hasEvent(events []logx.Event, name string) bool {
+	for _, event := range events {
+		if event.Event == name {
+			return true
+		}
+	}
+	return false
+}
+
+type scriptedResponse struct {
+	status  int
+	body    io.ReadCloser
+	headers http.Header
+}
+
+type scriptedTransport struct {
+	responses []scriptedResponse
+	calls     atomic.Int32
+}
+
+func (t *scriptedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+		_ = req.Body.Close()
+	}
+
+	idx := int(t.calls.Add(1)) - 1
+	if idx >= len(t.responses) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Status:     "500 Internal Server Error",
+			Header:     make(http.Header),
+			Body:       http.NoBody,
+			Request:    req,
+		}, nil
+	}
+
+	next := t.responses[idx]
+	body := next.body
+	if body == nil {
+		body = http.NoBody
+	}
+	headers := make(http.Header)
+	for name, values := range next.headers {
+		headers[name] = append([]string(nil), values...)
+	}
+	return &http.Response{
+		StatusCode: next.status,
+		Status:     fmt.Sprintf("%d %s", next.status, http.StatusText(next.status)),
+		Header:     headers,
+		Body:       body,
+		Request:    req,
+	}, nil
+}
+
+type trackingReadCloser struct {
+	data      []byte
+	offset    int
+	bytesRead atomic.Int64
+	closed    atomic.Bool
+}
+
+func newTrackingReadCloser(value string) *trackingReadCloser {
+	return &trackingReadCloser{data: []byte(value)}
+}
+
+func (r *trackingReadCloser) Read(p []byte) (int, error) {
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.offset:])
+	r.offset += n
+	r.bytesRead.Add(int64(n))
+	return n, nil
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed.Store(true)
+	return nil
 }
 
 type failingResponseWriter struct {

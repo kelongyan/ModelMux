@@ -20,6 +20,11 @@ func TestStoreAppendPersistsDailyJSONLAndKeepsRecent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	record := CallRecord{
 		ProviderID:       "primary",
@@ -38,6 +43,16 @@ func TestStoreAppendPersistsDailyJSONLAndKeepsRecent(t *testing.T) {
 	}
 	if err := store.Append(record); err != nil {
 		t.Fatalf("Append() error = %v", err)
+	}
+	recent := store.Recent(10)
+	if len(recent) != 1 {
+		t.Fatalf("len(Recent) = %d, want 1", len(recent))
+	}
+	if recent[0].ID == "" {
+		t.Fatal("Recent()[0].ID is empty")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 
 	path := filepath.Join(store.dir, "calls-2026-06-01.jsonl")
@@ -67,13 +82,82 @@ func TestStoreAppendPersistsDailyJSONLAndKeepsRecent(t *testing.T) {
 	if persisted.TotalTokens == nil || *persisted.TotalTokens != 30 {
 		t.Fatalf("TotalTokens = %v, want 30", persisted.TotalTokens)
 	}
-
-	recent := store.Recent(10)
-	if len(recent) != 1 {
-		t.Fatalf("len(Recent) = %d, want 1", len(recent))
-	}
 	if recent[0].ID != persisted.ID {
 		t.Fatalf("Recent()[0].ID = %q, want %q", recent[0].ID, persisted.ID)
+	}
+}
+
+func TestStoreCloseFlushesQueuedRecords(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	store, err := NewStore(Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 10,
+		Now:              func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	for i := 0; i < 3; i++ {
+		if err := store.Append(CallRecord{
+			ProviderID:  "primary",
+			Model:       "gpt-4.1-mini",
+			Endpoint:    "/v1/chat/completions",
+			Method:      "POST",
+			Status:      200,
+			Success:     true,
+			LatencyMs:   int64(i + 1),
+			UsageSource: UsageSourceUnknown,
+		}); err != nil {
+			t.Fatalf("Append(%d) error = %v", i, err)
+		}
+	}
+	if got := len(store.Recent(10)); got != 3 {
+		t.Fatalf("len(Recent) = %d, want 3 before Close", got)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+
+	path := filepath.Join(store.dir, "calls-2026-06-01.jsonl")
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open stats file: %v", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lines := 0
+	for scanner.Scan() {
+		lines++
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan stats file: %v", err)
+	}
+	if lines != 3 {
+		t.Fatalf("persisted lines = %d, want 3", lines)
+	}
+}
+
+func TestStoreReportsQueueDepthAndCapacity(t *testing.T) {
+	store := &Store{commands: make(chan writeCommand, 3)}
+	store.commands <- writeCommand{}
+	store.commands <- writeCommand{}
+
+	if got := store.QueueDepth(); got != 2 {
+		t.Fatalf("QueueDepth() = %d, want 2", got)
+	}
+	if got := store.QueueCapacity(); got != 3 {
+		t.Fatalf("QueueCapacity() = %d, want 3", got)
 	}
 }
 
@@ -97,6 +181,11 @@ func TestStoreLoadsExistingRecordsAndSkipsInvalidLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	recent := store.Recent(10)
 	if len(recent) != 2 {
@@ -131,6 +220,11 @@ func TestStoreCleansExpiredFilesAndCapsRecentRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatalf("old stats file still exists or stat error = %v", err)
@@ -168,6 +262,11 @@ func TestStoreLoadsRecentRecordsFromNewestFilesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	recent := store.Recent(10)
 	if len(recent) != 2 {

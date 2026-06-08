@@ -8,6 +8,7 @@ import (
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/logx"
 	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/proxy"
 	"github.com/kelongyan/ModelMux/stats"
 )
 
@@ -18,6 +19,7 @@ type Handler struct {
 	eventBuffer  *EventBuffer
 	stateChanged func(bool)
 	statsStore   statsReader
+	healthReader providerHealthReader
 }
 
 type statsReader interface {
@@ -25,6 +27,16 @@ type statsReader interface {
 	ModelsSince(time.Time) []stats.ModelSummary
 	Recent(limit int) []stats.CallRecord
 	QueryLogs(since time.Time, filter stats.CallLogFilter) stats.CallLogResult
+}
+
+type statsHealthReader interface {
+	DroppedRecords() uint64
+	QueueDepth() int
+	QueueCapacity() int
+}
+
+type providerHealthReader interface {
+	ProviderCircuitSnapshot() proxy.ProviderCircuitSnapshot
 }
 
 // NewHandler 创建管理端处理器，并挂载配置管理器与事件缓冲区。
@@ -44,6 +56,11 @@ func NewHandler(pools *pool.ProviderPools, cfgManager *config.Manager, reloadFn 
 // SetStatsStore 挂载调用统计读取器，供管理台统计 API 使用。
 func (h *Handler) SetStatsStore(store statsReader) {
 	h.statsStore = store
+}
+
+// SetProviderHealthReader 挂载代理运行健康读取器，供 dashboard 展示熔断状态。
+func (h *Handler) SetProviderHealthReader(reader providerHealthReader) {
+	h.healthReader = reader
 }
 
 // Register 注册管理端 HTTP 路由。

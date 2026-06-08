@@ -16,6 +16,11 @@ func TestStoreSummarySinceAggregatesRecentCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	mustAppendRecord(t, store, CallRecord{
 		At:               base.Add(-30 * time.Minute),
@@ -75,6 +80,11 @@ func TestStoreModelsSinceAggregatesByModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	mustAppendRecord(t, store, CallRecord{
 		At:          base.Add(-10 * time.Minute),
@@ -129,6 +139,11 @@ func TestStoreSummarySinceReadsBeyondRecentCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	for i := 0; i < 4; i++ {
 		mustAppendRecord(t, store, CallRecord{
@@ -165,6 +180,11 @@ func TestStoreModelsSinceReadsBeyondRecentCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
 
 	mustAppendRecord(t, store, CallRecord{
 		At:          base.Add(-50 * time.Minute),
@@ -208,6 +228,115 @@ func TestStoreModelsSinceReadsBeyondRecentCache(t *testing.T) {
 	}
 	if models[0].Model != "model-a" || models[0].Calls != 2 {
 		t.Fatalf("models[0] = %+v, want model-a with 2 calls", models[0])
+	}
+}
+
+func TestStoreSummarySinceUsesShortTTLCache(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	now := base
+	store, err := NewStore(Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 10,
+		Now:              func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	since := base.Add(-1 * time.Hour)
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-30 * time.Minute),
+		Model:       "model-a",
+		Success:     true,
+		LatencyMs:   100,
+		UsageSource: UsageSourceUnknown,
+	})
+
+	if got := store.SummarySince(since).TotalCalls; got != 1 {
+		t.Fatalf("initial TotalCalls = %d, want 1", got)
+	}
+
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-10 * time.Minute),
+		Model:       "model-b",
+		Success:     true,
+		LatencyMs:   100,
+		UsageSource: UsageSourceUnknown,
+	})
+
+	if got := store.SummarySince(since).TotalCalls; got != 1 {
+		t.Fatalf("cached TotalCalls = %d, want 1 before TTL refresh", got)
+	}
+
+	now = now.Add(3 * time.Second)
+	if got := store.SummarySince(since).TotalCalls; got != 2 {
+		t.Fatalf("refreshed TotalCalls = %d, want 2 after TTL refresh", got)
+	}
+}
+
+func TestStoreQueryLogsUsesShortTTLCacheAndKeepsFilters(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	now := base
+	store, err := NewStore(Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 10,
+		Now:              func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	since := base.Add(-1 * time.Hour)
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-30 * time.Minute),
+		Model:       "model-a",
+		Success:     false,
+		Status:      503,
+		LatencyMs:   100,
+		UsageSource: UsageSourceUnknown,
+	})
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-20 * time.Minute),
+		Model:       "model-b",
+		Success:     true,
+		Status:      200,
+		LatencyMs:   100,
+		UsageSource: UsageSourceUnknown,
+	})
+
+	filter := CallLogFilter{Model: "model-b", Status: "success", Page: 1, PageSize: 10}
+	if got := store.QueryLogs(since, filter).Total; got != 1 {
+		t.Fatalf("initial logs total = %d, want 1", got)
+	}
+
+	mustAppendRecord(t, store, CallRecord{
+		At:          base.Add(-10 * time.Minute),
+		Model:       "model-b",
+		Success:     true,
+		Status:      200,
+		LatencyMs:   100,
+		UsageSource: UsageSourceUnknown,
+	})
+
+	if got := store.QueryLogs(since, filter).Total; got != 1 {
+		t.Fatalf("cached logs total = %d, want 1 before TTL refresh", got)
+	}
+
+	now = now.Add(3 * time.Second)
+	if got := store.QueryLogs(since, filter).Total; got != 2 {
+		t.Fatalf("refreshed logs total = %d, want 2 after TTL refresh", got)
 	}
 }
 

@@ -9,9 +9,12 @@ import (
 )
 
 type apiStatsSummaryResponse struct {
-	Window  string        `json:"window"`
-	Since   time.Time     `json:"since"`
-	Summary stats.Summary `json:"summary"`
+	Window         string        `json:"window"`
+	Since          time.Time     `json:"since"`
+	Summary        stats.Summary `json:"summary"`
+	DroppedRecords uint64        `json:"dropped_records"`
+	QueueDepth     int           `json:"queue_depth"`
+	QueueCapacity  int           `json:"queue_capacity"`
 }
 
 type apiStatsModelsResponse struct {
@@ -36,8 +39,11 @@ func (h *Handler) statsSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	since := time.Now().UTC().Add(-duration)
 	resp := apiStatsSummaryResponse{
-		Window: window,
-		Since:  since,
+		Window:         window,
+		Since:          since,
+		DroppedRecords: h.droppedStatsRecords(),
+		QueueDepth:     h.statsQueueDepth(),
+		QueueCapacity:  h.statsQueueCapacity(),
 	}
 	if h.statsStore != nil {
 		resp.Summary = h.statsStore.SummarySince(since)

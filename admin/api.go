@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,12 +11,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"context"
 	"time"
 
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/logx"
 	"github.com/kelongyan/ModelMux/pool"
+	"github.com/kelongyan/ModelMux/proxy"
 	"github.com/kelongyan/ModelMux/state"
 )
 
@@ -96,13 +97,22 @@ type apiModelsPayload struct {
 }
 
 type apiDashboardResponse struct {
-	ActiveProvider string               `json:"active_provider"`
-	ProviderCount  int                  `json:"provider_count"`
-	ActiveKeys     int                  `json:"active_keys"`
-	CoolingKeys    int                  `json:"cooling_keys"`
-	InvalidKeys    int                  `json:"invalid_keys"`
-	Providers      []apiProviderSummary `json:"providers"`
-	Events         []AdminEvent         `json:"events"`
+	ActiveProvider  string                         `json:"active_provider"`
+	ProviderCount   int                            `json:"provider_count"`
+	ActiveKeys      int                            `json:"active_keys"`
+	CoolingKeys     int                            `json:"cooling_keys"`
+	InvalidKeys     int                            `json:"invalid_keys"`
+	ProviderCircuit *proxy.ProviderCircuitSnapshot `json:"provider_circuit,omitempty"`
+	Stats           apiStatsHealth                 `json:"stats"`
+	Providers       []apiProviderSummary           `json:"providers"`
+	Events          []AdminEvent                   `json:"events"`
+}
+
+type apiStatsHealth struct {
+	Enabled        bool   `json:"enabled"`
+	DroppedRecords uint64 `json:"dropped_records"`
+	QueueDepth     int    `json:"queue_depth"`
+	QueueCapacity  int    `json:"queue_capacity"`
 }
 
 type apiProvidersResponse struct {
@@ -189,13 +199,15 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 	providers := h.buildProviderSummaries()
 	resp := apiDashboardResponse{
-		ActiveProvider: activeStatus.ID,
-		ProviderCount:  len(providers),
-		ActiveKeys:     activeStatus.ActiveKeys,
-		CoolingKeys:    activeStatus.CoolingKeys,
-		InvalidKeys:    activeStatus.InvalidKeys,
-		Providers:      providers,
-		Events:         h.listEvents(10),
+		ActiveProvider:  activeStatus.ID,
+		ProviderCount:   len(providers),
+		ActiveKeys:      activeStatus.ActiveKeys,
+		CoolingKeys:     activeStatus.CoolingKeys,
+		InvalidKeys:     activeStatus.InvalidKeys,
+		ProviderCircuit: h.providerCircuitSnapshot(),
+		Stats:           h.statsHealth(),
+		Providers:       providers,
+		Events:          h.listEvents(10),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1279,6 +1291,47 @@ func (h *Handler) listEvents(limit int) []AdminEvent {
 		return nil
 	}
 	return h.eventBuffer.List(limit)
+}
+
+func (h *Handler) providerCircuitSnapshot() *proxy.ProviderCircuitSnapshot {
+	if h.healthReader == nil {
+		return nil
+	}
+	snapshot := h.healthReader.ProviderCircuitSnapshot()
+	return &snapshot
+}
+
+func (h *Handler) statsHealth() apiStatsHealth {
+	return apiStatsHealth{
+		Enabled:        h.statsStore != nil,
+		DroppedRecords: h.droppedStatsRecords(),
+		QueueDepth:     h.statsQueueDepth(),
+		QueueCapacity:  h.statsQueueCapacity(),
+	}
+}
+
+func (h *Handler) droppedStatsRecords() uint64 {
+	reader, ok := h.statsStore.(statsHealthReader)
+	if !ok || reader == nil {
+		return 0
+	}
+	return reader.DroppedRecords()
+}
+
+func (h *Handler) statsQueueDepth() int {
+	reader, ok := h.statsStore.(statsHealthReader)
+	if !ok || reader == nil {
+		return 0
+	}
+	return reader.QueueDepth()
+}
+
+func (h *Handler) statsQueueCapacity() int {
+	reader, ok := h.statsStore.(statsHealthReader)
+	if !ok || reader == nil {
+		return 0
+	}
+	return reader.QueueCapacity()
 }
 
 // recordEvent 统一记录结构化事件，供前端页面和日志排查共享。
