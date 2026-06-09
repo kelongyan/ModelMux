@@ -28,6 +28,7 @@ export type AdminProviderSummary = {
   active: boolean;
   target_url: string;
   total_keys: number;
+  disabled_keys: number;
   active_keys: number;
   cooling_keys: number;
   invalid_keys: number;
@@ -52,16 +53,19 @@ export type AdminStatsHealth = {
 
 // AdminKeyStatus 表示 provider 详情中单个 key 的运行状态。
 export type AdminKeyStatus = {
-  index: number;
+  index?: number;
   key_id: string;
   masked_key: string;
-  state: "active" | "cooling" | "invalid";
+  state: "active" | "cooling" | "invalid" | "disabled";
   req_count: number;
   err_count: number;
   avg_latency_ms: number;
   cool_until?: string;
   last_401_at?: string;
   invalid_reason?: "unauthorized" | "quota_exhausted" | string;
+  label?: string;
+  note?: string;
+  disabled?: boolean;
 };
 
 // AdminProviderDetailResponse 对应 provider 详情接口的响应结构。
@@ -70,6 +74,7 @@ export type AdminProviderDetailResponse = {
   active: boolean;
   target_url: string;
   total_keys: number;
+  disabled_keys: number;
   active_keys: number;
   cooling_keys: number;
   invalid_keys: number;
@@ -114,6 +119,51 @@ export type AdminChangeResponse = {
   changed_fields?: string[];
   hot_reloaded_fields?: string[];
   restart_required_fields?: string[];
+};
+
+export type AdminKeyMetadataPayload = {
+  label?: string;
+  note?: string;
+  disabled?: boolean;
+};
+
+export type AdminKeysPreviewPayload = {
+  mode: "append" | "replace";
+  keys: string[];
+};
+
+export type AdminKeyPreviewEntry = {
+  key_id: string;
+  masked_key: string;
+  label?: string;
+  disabled?: boolean;
+};
+
+export type AdminKeysPreviewResponse = {
+  mode: "append" | "replace" | string;
+  input_count: number;
+  normalized_count: number;
+  duplicate_count: number;
+  existing_count: number;
+  new_count: number;
+  removed_count: number;
+  existing_keys: AdminKeyPreviewEntry[];
+  new_keys: AdminKeyPreviewEntry[];
+  removed_keys: AdminKeyPreviewEntry[];
+};
+
+export type AdminKeyTestResponse = {
+  ok: boolean;
+  status_code: number;
+  latency_ms: number;
+  scope?: string;
+  error?: string;
+  retry_after_seconds?: number;
+};
+
+export type AdminKeysResetAllResponse = {
+  ok: boolean;
+  reset_count: number;
 };
 
 // AdminProviderCreatePayload 对应 provider 新增表单提交结构。

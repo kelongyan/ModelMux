@@ -1,6 +1,11 @@
 import type {
   AdminAboutResponse,
   AdminChangeResponse,
+  AdminKeyMetadataPayload,
+  AdminKeyTestResponse,
+  AdminKeysPreviewPayload,
+  AdminKeysPreviewResponse,
+  AdminKeysResetAllResponse,
   AdminDashboardResponse,
   AdminDeleteKeysPayload,
   AdminEventsResponse,
@@ -39,6 +44,21 @@ export function fetchProviders(): Promise<AdminProvidersResponse> {
 // fetchProviderDetail 拉取单个 provider 的 key 详情与运行状态。
 export function fetchProviderDetail(providerID: string): Promise<AdminProviderDetailResponse> {
   return requestJSON<AdminProviderDetailResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}`);
+}
+
+// updateProviderKeyMetadata 更新单个 key 的标签、备注和停用状态。
+export function updateProviderKeyMetadata(
+  providerID: string,
+  keyID: string,
+  payload: AdminKeyMetadataPayload,
+): Promise<AdminChangeResponse> {
+  return requestJSON<AdminChangeResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/keys/${pathSegment(keyID)}/metadata`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 }
 
 // createProvider 提交一个新 provider 到配置文件并触发 reload。
@@ -110,12 +130,43 @@ export function deleteProviderKeys(providerID: string, payload: AdminDeleteKeysP
   });
 }
 
+// previewProviderKeys 预览追加或替换 keys 的结果，不会写入配置。
+export function previewProviderKeys(
+  providerID: string,
+  payload: AdminKeysPreviewPayload,
+): Promise<AdminKeysPreviewResponse> {
+  return requestJSON<AdminKeysPreviewResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/keys:preview`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 // resetProviderKey 手动把某个 key 恢复为 active。
 export function resetProviderKey(providerID: string, keyID: string): Promise<AdminReloadResponse> {
   return requestJSON<AdminReloadResponse>(
     `/admin/api/v1/providers/${pathSegment(providerID)}/keys/${pathSegment(keyID)}/reset`,
     {
+      method: "POST",
+    },
+  );
+}
+
+// resetAllProviderKeys 将一个 provider 下的所有启用 keys 恢复为 active。
+export function resetAllProviderKeys(providerID: string): Promise<AdminKeysResetAllResponse> {
+  return requestJSON<AdminKeysResetAllResponse>(`/admin/api/v1/providers/${pathSegment(providerID)}/keys:reset-all`, {
     method: "POST",
+  });
+}
+
+// testProviderKey 对单个 key 做一次轻量上游探测。
+export function testProviderKey(providerID: string, keyID: string): Promise<AdminKeyTestResponse> {
+  return requestJSON<AdminKeyTestResponse>(
+    `/admin/api/v1/providers/${pathSegment(providerID)}/keys/${pathSegment(keyID)}/test`,
+    {
+      method: "POST",
     },
   );
 }

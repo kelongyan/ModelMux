@@ -311,7 +311,7 @@ func providerSpecsFromConfig(providers []config.ProviderConfig) []pool.ProviderS
 	for _, provider := range providers {
 		specs = append(specs, pool.ProviderSpec{
 			ID:   provider.ID,
-			Keys: append([]string(nil), provider.Keys...),
+			Keys: provider.EnabledKeys(),
 		})
 	}
 	return specs

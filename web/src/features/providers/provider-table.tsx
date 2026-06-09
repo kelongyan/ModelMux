@@ -40,7 +40,12 @@ export function ProviderTable({
       key: "active",
       render: (_active: boolean, record) => renderProviderState(record),
     },
-    { title: "总 Key", dataIndex: "total_keys", key: "total_keys" },
+    {
+      title: "总 Key",
+      key: "configured_keys",
+      render: (_: unknown, record) => record.total_keys + record.disabled_keys,
+    },
+    { title: "停用", dataIndex: "disabled_keys", key: "disabled_keys" },
     { title: "可用", dataIndex: "active_keys", key: "active_keys" },
     { title: "冷却", dataIndex: "cooling_keys", key: "cooling_keys" },
     { title: "失效", dataIndex: "invalid_keys", key: "invalid_keys" },

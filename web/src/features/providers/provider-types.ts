@@ -1,7 +1,20 @@
-import type { AdminProviderSummary } from "../../types/admin";
+import type { AdminKeyStatus, AdminKeysPreviewResponse, AdminProviderSummary } from "../../types/admin";
 
 export type ProviderFormMode = "create" | "edit";
 export type KeyFormMode = "append" | "replace";
+
+export type KeyMetadataModalState = {
+  open: boolean;
+  key?: AdminKeyStatus;
+};
+
+export type KeyPreviewModalState = {
+  open: boolean;
+  providerID: string | null;
+  mode: KeyFormMode;
+  preview: AdminKeysPreviewResponse | null;
+  keys: string[];
+};
 
 export type ProviderModalState = {
   open: boolean;
@@ -26,6 +39,12 @@ export type ProviderFormValues = {
 
 export type KeyFormValues = {
   keys_text: string;
+};
+
+export type KeyMetadataFormValues = {
+  label: string;
+  note: string;
+  disabled: boolean;
 };
 
 export type ModelFormValues = {

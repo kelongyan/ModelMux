@@ -1,0 +1,1 @@
+function n(t){if(t===null||t<=0)return"-";const o=Math.ceil(t/1e3);if(o<60)return`${o}s`;const r=Math.floor(o/60),e=o%60;return e===0?`${r}m`:`${r}m${e}s`}function a(t){return t?new Date(t).toLocaleTimeString("zh-CN",{hour12:!1}):"--:--:--"}function f(t){return new Date(t).toLocaleString("zh-CN",{hour12:!1})}export{n as a,f as b,a as f};

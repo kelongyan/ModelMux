@@ -12,15 +12,21 @@ import {
   fetchProviderDetail,
   fetchProviderModels,
   fetchProviders,
+  previewProviderKeys,
   replaceProviderKeys,
   replaceProviderModels,
   resetProviderKey,
+  resetAllProviderKeys,
+  testProviderKey,
   updateProvider,
+  updateProviderKeyMetadata,
 } from "../api/admin";
 import { queryKeys } from "../api/query-keys";
 import { ProviderDetailContent } from "../features/providers/provider-detail-content";
 import {
   KeyEditorModal,
+  KeyMetadataModal,
+  KeyPreviewModal,
   ModelEditorModal,
   ProviderEditorModal,
 } from "../features/providers/provider-modals";
@@ -29,13 +35,16 @@ import type {
   KeyFormMode,
   KeyFormValues,
   KeyModalState,
+  KeyMetadataFormValues,
+  KeyMetadataModalState,
+  KeyPreviewModalState,
   ModelFormValues,
   ModelModalState,
   ProviderFormValues,
   ProviderModalState,
 } from "../features/providers/provider-types";
 import { splitLinesText } from "../features/providers/provider-utils";
-import type { AdminProviderSummary } from "../types/admin";
+import type { AdminKeyMetadataPayload, AdminKeyStatus, AdminProviderSummary } from "../types/admin";
 
 export function ProvidersPage(): JSX.Element {
   const queryClient = useQueryClient();
@@ -45,10 +54,20 @@ export function ProvidersPage(): JSX.Element {
   const [selectedKeyIDs, setSelectedKeyIDs] = useState<string[]>([]);
   const [providerModal, setProviderModal] = useState<ProviderModalState>({ open: false, mode: "create" });
   const [keyModal, setKeyModal] = useState<KeyModalState>({ open: false, mode: "append" });
+  const [keyMetadataModal, setKeyMetadataModal] = useState<KeyMetadataModalState>({ open: false });
+  const [keyPreviewModal, setKeyPreviewModal] = useState<KeyPreviewModalState>({
+    open: false,
+    providerID: null,
+    mode: "append",
+    preview: null,
+    keys: [],
+  });
   const [modelModal, setModelModal] = useState<ModelModalState>({ open: false });
+  const [testingKeyID, setTestingKeyID] = useState<string | null>(null);
 
   const [providerForm] = Form.useForm<ProviderFormValues>();
   const [keyForm] = Form.useForm<KeyFormValues>();
+  const [keyMetadataForm] = Form.useForm<KeyMetadataFormValues>();
   const [modelForm] = Form.useForm<ModelFormValues>();
 
   const providersQuery = useQuery({
@@ -79,6 +98,17 @@ export function ProvidersPage(): JSX.Element {
       setSelectedProviderID(fromUrl);
     }
   }, [searchParams, selectedProviderID]);
+
+  useEffect(() => {
+    setKeyMetadataModal({ open: false });
+    setKeyPreviewModal({
+      open: false,
+      providerID: null,
+      mode: "append",
+      preview: null,
+      keys: [],
+    });
+  }, [selectedProviderID]);
 
   const invalidateAdminQueries = async (providerID?: string) => {
     await Promise.all([
@@ -147,6 +177,21 @@ export function ProvidersPage(): JSX.Element {
     onError: (error: Error) => messageApi.error(`追加失败：${error.message}`),
   });
 
+  const previewKeysMutation = useMutation({
+    mutationFn: async (payload: { providerID: string; mode: KeyFormMode; keys: string[] }) =>
+      previewProviderKeys(payload.providerID, { mode: payload.mode, keys: payload.keys }),
+    onSuccess: async (preview, variables) => {
+      setKeyPreviewModal({
+        open: true,
+        providerID: variables.providerID,
+        mode: variables.mode,
+        preview,
+        keys: variables.keys,
+      });
+    },
+    onError: (error: Error) => messageApi.error(`预览失败：${error.message}`),
+  });
+
   const replaceKeysMutation = useMutation({
     mutationFn: async (payload: { providerID: string; keys: string[] }) =>
       replaceProviderKeys(payload.providerID, { keys: payload.keys }),
@@ -157,6 +202,24 @@ export function ProvidersPage(): JSX.Element {
       await invalidateAdminQueries(variables.providerID);
     },
     onError: (error: Error) => messageApi.error(`替换失败：${error.message}`),
+  });
+
+  const updateKeyMetadataMutation = useMutation({
+    mutationFn: async (payload: { providerID: string; keyID: string; metadata: AdminKeyMetadataPayload }) =>
+      updateProviderKeyMetadata(payload.providerID, payload.keyID, payload.metadata),
+    onSuccess: async (_, variables) => {
+      const message =
+        variables.metadata.disabled === true
+          ? "已停用 key"
+          : variables.metadata.label === undefined && variables.metadata.note === undefined && variables.metadata.disabled === false
+            ? "已启用 key"
+            : "已更新 key 元数据";
+      messageApi.success(message);
+      setKeyMetadataModal({ open: false });
+      keyMetadataForm.resetFields();
+      await invalidateAdminQueries(variables.providerID);
+    },
+    onError: (error: Error) => messageApi.error(`更新 key 元数据失败：${error.message}`),
   });
 
   const deleteKeysMutation = useMutation({
@@ -178,6 +241,35 @@ export function ProvidersPage(): JSX.Element {
       await invalidateAdminQueries(variables.providerID);
     },
     onError: (error: Error) => messageApi.error(`重置失败：${error.message}`),
+  });
+
+  const resetAllKeysMutation = useMutation({
+    mutationFn: resetAllProviderKeys,
+    onSuccess: async (_, providerID) => {
+      messageApi.success("已重置全部 key 状态");
+      await invalidateAdminQueries(providerID);
+    },
+    onError: (error: Error) => messageApi.error(`重置全部失败：${error.message}`),
+  });
+
+  const testKeyMutation = useMutation({
+    mutationFn: async (payload: { providerID: string; keyID: string }) =>
+      testProviderKey(payload.providerID, payload.keyID),
+    onMutate: (variables) => {
+      setTestingKeyID(variables.keyID);
+    },
+    onSuccess: (result) => {
+      if (result.ok) {
+        messageApi.success(`Key 测试通过（${result.status_code}）`);
+        return;
+      }
+      const suffix = result.error ? `：${result.error}` : "";
+      messageApi.warning(`Key 测试失败（${result.status_code || "无响应"}${suffix}）`);
+    },
+    onError: (error: Error) => messageApi.error(`测试失败：${error.message}`),
+    onSettled: () => {
+      setTestingKeyID(null);
+    },
   });
 
   const replaceModelsMutation = useMutation({
@@ -266,9 +358,22 @@ export function ProvidersPage(): JSX.Element {
       <KeyEditorModal
         state={keyModal}
         form={keyForm}
-        confirmLoading={appendKeysMutation.isPending || replaceKeysMutation.isPending}
+        confirmLoading={previewKeysMutation.isPending}
         onCancel={closeKeyModal}
         onSubmit={(values) => void submitKeyForm(values)}
+      />
+      <KeyMetadataModal
+        state={keyMetadataModal}
+        form={keyMetadataForm}
+        confirmLoading={updateKeyMetadataMutation.isPending}
+        onCancel={closeKeyMetadataModal}
+        onSubmit={(values) => void submitKeyMetadataForm(values)}
+      />
+      <KeyPreviewModal
+        state={keyPreviewModal}
+        confirmLoading={appendKeysMutation.isPending || replaceKeysMutation.isPending}
+        onCancel={closeKeyPreviewModal}
+        onConfirm={() => void confirmKeyPreview()}
       />
       <ModelEditorModal
         state={modelModal}
@@ -306,6 +411,33 @@ export function ProvidersPage(): JSX.Element {
               }
             }}
             resettingKey={resetKeyMutation.isPending}
+            onResetAllKeys={() => {
+              if (selectedProviderID) {
+                resetAllKeysMutation.mutate(selectedProviderID);
+              }
+            }}
+            resettingAllKeys={resetAllKeysMutation.isPending}
+            onEditKeyMetadata={openKeyMetadataModal}
+            onToggleKeyDisabled={(key, disabled) => {
+              if (!selectedProviderID) {
+                return;
+              }
+              updateKeyMetadataMutation.mutate({
+                providerID: selectedProviderID,
+                keyID: key.key_id,
+                metadata: {
+                  disabled,
+                },
+              });
+            }}
+            updatingKeyMetadata={updateKeyMetadataMutation.isPending}
+            onTestKey={(keyID) => {
+              if (!selectedProviderID) {
+                return;
+              }
+              testKeyMutation.mutate({ providerID: selectedProviderID, keyID });
+            }}
+            testingKeyID={testingKeyID}
             onOpenAppendKeys={() => openKeyModal("append")}
             onOpenReplaceKeys={() => openKeyModal("replace")}
             onDeleteSelectedKeys={() => {
@@ -359,11 +491,37 @@ export function ProvidersPage(): JSX.Element {
   function openKeyModal(mode: KeyFormMode) {
     keyForm.setFieldsValue({ keys_text: "" });
     setKeyModal({ open: true, mode });
+    closeKeyPreviewModal();
   }
 
   function closeKeyModal() {
     setKeyModal({ open: false, mode: "append" });
     keyForm.resetFields();
+    closeKeyPreviewModal();
+  }
+
+  function openKeyMetadataModal(key: AdminKeyStatus) {
+    keyMetadataForm.setFieldsValue({
+      label: key.label ?? "",
+      note: key.note ?? "",
+      disabled: key.disabled ?? key.state === "disabled",
+    });
+    setKeyMetadataModal({ open: true, key });
+  }
+
+  function closeKeyMetadataModal() {
+    setKeyMetadataModal({ open: false });
+    keyMetadataForm.resetFields();
+  }
+
+  function closeKeyPreviewModal() {
+    setKeyPreviewModal({
+      open: false,
+      providerID: null,
+      mode: "append",
+      preview: null,
+      keys: [],
+    });
   }
 
   function openModelModal(currentModels: string[]) {
@@ -409,10 +567,40 @@ export function ProvidersPage(): JSX.Element {
       return;
     }
     const keys = splitLinesText(values.keys_text);
-    if (keyModal.mode === "append") {
-      await appendKeysMutation.mutateAsync({ providerID: selectedProviderID, keys });
+    await previewKeysMutation.mutateAsync({ providerID: selectedProviderID, mode: keyModal.mode, keys });
+  }
+
+  async function confirmKeyPreview() {
+    if (!keyPreviewModal.providerID || !keyPreviewModal.preview) {
+      messageApi.error("预览结果不存在");
       return;
     }
-    await replaceKeysMutation.mutateAsync({ providerID: selectedProviderID, keys });
+    const payload = {
+      providerID: keyPreviewModal.providerID,
+      keys: keyPreviewModal.keys,
+    };
+    if (keyPreviewModal.mode === "append") {
+      await appendKeysMutation.mutateAsync(payload);
+    } else {
+      await replaceKeysMutation.mutateAsync(payload);
+    }
+    closeKeyPreviewModal();
+  }
+
+  async function submitKeyMetadataForm(values: KeyMetadataFormValues) {
+    const key = keyMetadataModal.key;
+    if (!selectedProviderID || !key) {
+      messageApi.error("请先选择 key");
+      return;
+    }
+    await updateKeyMetadataMutation.mutateAsync({
+      providerID: selectedProviderID,
+      keyID: key.key_id,
+      metadata: {
+        label: (values.label ?? "").trim(),
+        note: (values.note ?? "").trim(),
+        disabled: values.disabled ?? false,
+      },
+    });
   }
 }

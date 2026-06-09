@@ -116,6 +116,18 @@ func (p *Pool) ResetKeyByID(keyID string) error {
 	return ErrKeyNotFound
 }
 
+// ResetAll 恢复当前池内所有 key 为 active，返回被处理的 key 数量。
+func (p *Pool) ResetAll() int {
+	p.mu.RLock()
+	keys := append([]*Key(nil), p.keys...)
+	p.mu.RUnlock()
+
+	for _, key := range keys {
+		key.ResetActive()
+	}
+	return len(keys)
+}
+
 // Snapshot 返回当前 key 池可持久化快照，使用 key hash 标识而不暴露完整 key。
 func (p *Pool) Snapshot() []state.KeyRecord {
 	p.mu.RLock()

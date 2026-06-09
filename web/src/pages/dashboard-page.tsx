@@ -221,6 +221,7 @@ type ProviderRowProps = {
 function ProviderRow({ provider, activating, onActivate, onOpenDetail }: ProviderRowProps): JSX.Element {
   const tone = computeCardTone(provider);
   const className = `provider-row provider-row--${tone}${provider.active ? " provider-row--current" : ""}`;
+  const configuredKeys = provider.total_keys + provider.disabled_keys;
 
   return (
     <div className={className}>
@@ -238,7 +239,10 @@ function ProviderRow({ provider, activating, onActivate, onOpenDetail }: Provide
         <span className="provider-row-key-item provider-row-key-item--active">{provider.active_keys} 可用</span>
         <span className="provider-row-key-item provider-row-key-item--cooling">{provider.cooling_keys} 冷却</span>
         <span className="provider-row-key-item provider-row-key-item--invalid">{provider.invalid_keys} 失效</span>
-        <span className="provider-row-key-item provider-row-key-item--total">共 {provider.total_keys}</span>
+        {provider.disabled_keys > 0 ? (
+          <span className="provider-row-key-item provider-row-key-item--total">{provider.disabled_keys} 停用</span>
+        ) : null}
+        <span className="provider-row-key-item provider-row-key-item--total">共 {configuredKeys}</span>
       </div>
       <div className="provider-row-actions">
         {provider.active ? (

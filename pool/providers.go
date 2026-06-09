@@ -63,9 +63,6 @@ func (p *ProviderPools) Update(specs []ProviderSpec, activeID string) error {
 			return fmt.Errorf("duplicate provider id %q", spec.ID)
 		}
 		seen[spec.ID] = struct{}{}
-		if len(spec.Keys) == 0 {
-			return fmt.Errorf("provider %q must contain at least one key", spec.ID)
-		}
 		normalized = append(normalized, ProviderSpec{
 			ID:   spec.ID,
 			Keys: append([]string(nil), spec.Keys...),

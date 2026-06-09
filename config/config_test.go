@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kelongyan/ModelMux/state"
+)
 
 func TestApplyDefaultsUsesSafeLocalAdminAndBodyLimit(t *testing.T) {
 	cfg := &Config{
@@ -206,5 +210,61 @@ func TestStatsCollectionCanBeDisabled(t *testing.T) {
 
 	if cfg.StatsCollectionEnabled() {
 		t.Fatal("StatsCollectionEnabled() = true, want false")
+	}
+}
+
+func TestProviderKeyMetadataHelpers(t *testing.T) {
+	cfg := &Config{
+		ActiveProvider: "p1",
+		Providers: []ProviderConfig{{
+			ID:        "p1",
+			TargetURL: "https://one.example.com",
+			Keys:      []string{"k1", "k2"},
+			KeyMetadata: map[string]KeyMetadata{
+				state.KeyID("k2"): KeyMetadata{Label: "备用", Note: "暂停轮询", Disabled: true},
+				state.KeyID("old"): KeyMetadata{
+					Label: "orphan",
+				},
+			},
+		}},
+	}
+
+	cfg.applyDefaults()
+
+	provider := cfg.Providers[0]
+	if len(provider.KeyMetadata) != 1 {
+		t.Fatalf("len(KeyMetadata) = %d, want 1 after pruning orphan metadata", len(provider.KeyMetadata))
+	}
+	enabled := provider.EnabledKeys()
+	if len(enabled) != 1 || enabled[0] != "k1" {
+		t.Fatalf("EnabledKeys() = %v, want [k1]", enabled)
+	}
+	if disabled := provider.DisabledKeyCount(); disabled != 1 {
+		t.Fatalf("DisabledKeyCount() = %d, want 1", disabled)
+	}
+	meta, ok := provider.KeyMetadataForValue("k2")
+	if !ok {
+		t.Fatal("KeyMetadataForValue(k2) ok = false, want true")
+	}
+	if meta.Label != "备用" || meta.Note != "暂停轮询" || !meta.Disabled {
+		t.Fatalf("metadata = %+v, want label/note/disabled", meta)
+	}
+}
+
+func TestProviderConfigCopyDoesNotShareKeyMetadata(t *testing.T) {
+	original := ProviderConfig{
+		ID:        "p1",
+		TargetURL: "https://one.example.com",
+		Keys:      []string{"k1"},
+		KeyMetadata: map[string]KeyMetadata{
+			state.KeyID("k1"): KeyMetadata{Label: "主力"},
+		},
+	}
+
+	copied := original.copy()
+	copied.KeyMetadata[state.KeyID("k1")] = KeyMetadata{Label: "changed"}
+
+	if original.KeyMetadata[state.KeyID("k1")].Label != "主力" {
+		t.Fatalf("original metadata changed to %+v", original.KeyMetadata[state.KeyID("k1")])
 	}
 }

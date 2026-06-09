@@ -525,6 +525,267 @@ func TestResetProviderKey(t *testing.T) {
 	}
 }
 
+func TestProviderDetailIncludesKeyMetadataAndDisabledKeys(t *testing.T) {
+	h, pools, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{{
+			ID:        "p1",
+			TargetURL: "https://one.example.com",
+			Keys:      []string{"k1", "k2"},
+			KeyMetadata: map[string]config.KeyMetadata{
+				poolKeyID("k1"): config.KeyMetadata{Label: "主力"},
+				poolKeyID("k2"): config.KeyMetadata{Label: "备用", Note: "暂停轮询", Disabled: true},
+			},
+		}},
+	})
+	keyPool, err := pools.Get("p1")
+	if err != nil {
+		t.Fatalf("Get(p1) error = %v", err)
+	}
+	if keyPool.TotalCount() != 1 {
+		t.Fatalf("TotalCount() = %d, want 1 enabled key", keyPool.TotalCount())
+	}
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/admin/api/v1/providers/p1", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var body apiProviderDetail
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if body.DisabledKeys != 1 {
+		t.Fatalf("DisabledKeys = %d, want 1", body.DisabledKeys)
+	}
+	if len(body.Keys) != 2 {
+		t.Fatalf("len(Keys) = %d, want 2 including disabled key", len(body.Keys))
+	}
+	primary := requireProviderKey(t, body.Keys, poolKeyID("k1"))
+	if primary.Label != "主力" || primary.State != "active" || primary.Disabled {
+		t.Fatalf("primary key detail = %+v, want active labeled key", primary)
+	}
+	disabled := requireProviderKey(t, body.Keys, poolKeyID("k2"))
+	if disabled.Label != "备用" || disabled.Note != "暂停轮询" || disabled.State != "disabled" || !disabled.Disabled {
+		t.Fatalf("disabled key detail = %+v, want disabled metadata", disabled)
+	}
+}
+
+func TestUpdateProviderKeyMetadataPersistsAndDisablesKey(t *testing.T) {
+	h, pools, path := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{{
+			ID:        "p1",
+			TargetURL: "https://one.example.com",
+			Keys:      []string{"k1", "k2"},
+		}},
+	})
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	buf, err := json.Marshal(map[string]any{
+		"label":    "备用",
+		"note":     "暂停轮询",
+		"disabled": true,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/admin/api/v1/providers/p1/keys/"+poolKeyID("k2")+"/metadata", bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	loaded, err := config.Read(path)
+	if err != nil {
+		t.Fatalf("Read(path) error = %v", err)
+	}
+	provider, _ := findProviderConfig(loaded.ProviderConfigs(), "p1")
+	meta := provider.KeyMetadata[poolKeyID("k2")]
+	if meta.Label != "备用" || meta.Note != "暂停轮询" || !meta.Disabled {
+		t.Fatalf("metadata = %+v, want saved disabled metadata", meta)
+	}
+	keyPool, err := pools.Get("p1")
+	if err != nil {
+		t.Fatalf("Get(p1) error = %v", err)
+	}
+	if keyPool.TotalCount() != 1 {
+		t.Fatalf("TotalCount() = %d, want disabled key removed from runtime pool", keyPool.TotalCount())
+	}
+}
+
+func TestPreviewProviderKeysReportsAppendAndReplaceDiff(t *testing.T) {
+	h, _, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{{
+			ID:        "p1",
+			TargetURL: "https://one.example.com",
+			Keys:      []string{"k1", "k4"},
+		}},
+	})
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	appendPayload := apiKeysPreviewPayload{Mode: "append", Keys: []string{"k1", "k2", "k2", "k3"}}
+	appendBuf, err := json.Marshal(appendPayload)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	appendRR := httptest.NewRecorder()
+	appendReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/providers/p1/keys:preview", bytes.NewReader(appendBuf))
+	appendReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(appendRR, appendReq)
+	if appendRR.Code != http.StatusOK {
+		t.Fatalf("append preview status = %d, want %d, body=%s", appendRR.Code, http.StatusOK, appendRR.Body.String())
+	}
+	var appendResp apiKeysPreviewResponse
+	if err := json.Unmarshal(appendRR.Body.Bytes(), &appendResp); err != nil {
+		t.Fatalf("append preview response invalid JSON: %v", err)
+	}
+	if appendResp.DuplicateCount != 1 || appendResp.ExistingCount != 1 || appendResp.NewCount != 2 || appendResp.RemovedCount != 0 {
+		t.Fatalf("append preview = %+v, want duplicate=1 existing=1 new=2 removed=0", appendResp)
+	}
+
+	replacePayload := apiKeysPreviewPayload{Mode: "replace", Keys: []string{"k1", "k2", "k2"}}
+	replaceBuf, err := json.Marshal(replacePayload)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	replaceRR := httptest.NewRecorder()
+	replaceReq := httptest.NewRequest(http.MethodPost, "/admin/api/v1/providers/p1/keys:preview", bytes.NewReader(replaceBuf))
+	replaceReq.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(replaceRR, replaceReq)
+	if replaceRR.Code != http.StatusOK {
+		t.Fatalf("replace preview status = %d, want %d, body=%s", replaceRR.Code, http.StatusOK, replaceRR.Body.String())
+	}
+	var replaceResp apiKeysPreviewResponse
+	if err := json.Unmarshal(replaceRR.Body.Bytes(), &replaceResp); err != nil {
+		t.Fatalf("replace preview response invalid JSON: %v", err)
+	}
+	if replaceResp.DuplicateCount != 1 || replaceResp.ExistingCount != 1 || replaceResp.NewCount != 1 || replaceResp.RemovedCount != 1 {
+		t.Fatalf("replace preview = %+v, want duplicate=1 existing=1 new=1 removed=1", replaceResp)
+	}
+}
+
+func TestResetAllProviderKeys(t *testing.T) {
+	var stateChangedCalls int
+	h, pools, _ := newTestHandlerWithStateChange(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{{
+			ID:        "p1",
+			TargetURL: "https://one.example.com",
+			Keys:      []string{"k1", "k2"},
+		}},
+	}, func(bool) {
+		stateChangedCalls++
+	})
+	keyPool, err := pools.Get("p1")
+	if err != nil {
+		t.Fatalf("Get(p1) error = %v", err)
+	}
+	key1, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	key1.MarkInvalid()
+	key1.FinishRequest()
+	key2, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	key2.MarkCooling(time.Hour)
+	key2.FinishRequest()
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/admin/api/v1/providers/p1/keys:reset-all", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if stateChangedCalls != 1 {
+		t.Fatalf("stateChangedCalls = %d, want 1", stateChangedCalls)
+	}
+	var body struct {
+		ResetCount int `json:"reset_count"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if body.ResetCount != 2 {
+		t.Fatalf("ResetCount = %d, want 2", body.ResetCount)
+	}
+	for _, status := range keyPool.Status() {
+		if status.State != "active" {
+			t.Fatalf("status after reset-all = %+v, want all active", keyPool.Status())
+		}
+	}
+}
+
+func TestTestProviderKeyReturnsResultWithoutMutatingState(t *testing.T) {
+	var requestedAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Fatalf("request path = %q, want /models", r.URL.Path)
+		}
+		requestedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	h, pools, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{{
+			ID:        "p1",
+			TargetURL: upstream.URL,
+			Keys:      []string{"k1"},
+		}},
+	})
+	keyPool, err := pools.Get("p1")
+	if err != nil {
+		t.Fatalf("Get(p1) error = %v", err)
+	}
+	key, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	key.MarkInvalid()
+	key.FinishRequest()
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/admin/api/v1/providers/p1/keys/"+poolKeyID("k1")+"/test", nil))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var body proxy.KeyTestResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if !body.OK || body.StatusCode != http.StatusOK {
+		t.Fatalf("key test response = %+v, want ok 200", body)
+	}
+	if requestedAuth != "Bearer k1" {
+		t.Fatalf("Authorization = %q, want Bearer k1", requestedAuth)
+	}
+	status := keyPool.Status()
+	if len(status) != 1 || status[0].State != "invalid" {
+		t.Fatalf("status after test = %#v, want key state unchanged invalid", status)
+	}
+}
+
 func TestEventsAPIReturnsRecentEvents(t *testing.T) {
 	h, _, _ := newTestHandler(t, &config.Config{
 		ActiveProvider: "p1",
@@ -807,6 +1068,17 @@ func int64PtrAdmin(value int64) *int64 {
 	return &value
 }
 
+func requireProviderKey(t *testing.T, keys []apiProviderKeyDetail, keyID string) apiProviderKeyDetail {
+	t.Helper()
+	for _, key := range keys {
+		if key.KeyID == keyID {
+			return key
+		}
+	}
+	t.Fatalf("key %q not found in %+v", keyID, keys)
+	return apiProviderKeyDetail{}
+}
+
 type fakeProviderHealthReader struct {
 	snapshot proxy.ProviderCircuitSnapshot
 }
@@ -928,7 +1200,7 @@ func providerSpecsFromConfigTest(providers []config.ProviderConfig) []pool.Provi
 	for _, provider := range providers {
 		specs = append(specs, pool.ProviderSpec{
 			ID:   provider.ID,
-			Keys: append([]string(nil), provider.Keys...),
+			Keys: provider.EnabledKeys(),
 		})
 	}
 	return specs

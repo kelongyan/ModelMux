@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 )
 
@@ -206,6 +207,9 @@ func equalProviders(a, b []ProviderConfig) bool {
 			if a[i].Models[j] != b[i].Models[j] {
 				return false
 			}
+		}
+		if !reflect.DeepEqual(a[i].KeyMetadata, b[i].KeyMetadata) {
+			return false
 		}
 	}
 	return true

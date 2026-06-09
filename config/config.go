@@ -56,11 +56,18 @@ const (
 )
 
 type ProviderConfig struct {
-	ID         string   `json:"id"`
-	TargetURL  string   `json:"target_url"`
-	Keys       []string `json:"keys"`
-	Models     []string `json:"models,omitempty"`
-	StripTools bool     `json:"strip_tools,omitempty"`
+	ID          string                 `json:"id"`
+	TargetURL   string                 `json:"target_url"`
+	Keys        []string               `json:"keys"`
+	KeyMetadata map[string]KeyMetadata `json:"key_metadata,omitempty"`
+	Models      []string               `json:"models,omitempty"`
+	StripTools  bool                   `json:"strip_tools,omitempty"`
+}
+
+type KeyMetadata struct {
+	Label    string `json:"label,omitempty"`
+	Note     string `json:"note,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
 }
 
 type Config struct {
@@ -298,6 +305,7 @@ func (c *Config) effectiveProviders() ([]ProviderConfig, string) {
 // copy 返回 provider 配置副本，避免调用方误改共享 key 切片。
 func (p ProviderConfig) copy() ProviderConfig {
 	p.Keys = append([]string(nil), p.Keys...)
+	p.KeyMetadata = copyKeyMetadata(p.KeyMetadata)
 	p.Models = append([]string(nil), p.Models...)
 	return p
 }
@@ -375,6 +383,7 @@ func (c *Config) applyDefaults() {
 		c.StatsMaxRecentRecords = DefaultStatsMaxRecentRecords
 	}
 	c.normalizeProviders()
+	c.normalizeKeyMetadata()
 }
 
 // normalizeProviders 把旧版 target_url/keys 配置转换成隐式 provider，并同步 active provider 到旧字段。

@@ -51,27 +51,45 @@ type apiSettingsPayload struct {
 }
 
 type apiProviderSummary struct {
-	ID          string   `json:"id"`
-	Active      bool     `json:"active"`
-	TargetURL   string   `json:"target_url"`
-	TotalKeys   int      `json:"total_keys"`
-	ActiveKeys  int      `json:"active_keys"`
-	CoolingKeys int      `json:"cooling_keys"`
-	InvalidKeys int      `json:"invalid_keys"`
-	Models      []string `json:"models"`
+	ID           string   `json:"id"`
+	Active       bool     `json:"active"`
+	TargetURL    string   `json:"target_url"`
+	TotalKeys    int      `json:"total_keys"`
+	DisabledKeys int      `json:"disabled_keys"`
+	ActiveKeys   int      `json:"active_keys"`
+	CoolingKeys  int      `json:"cooling_keys"`
+	InvalidKeys  int      `json:"invalid_keys"`
+	Models       []string `json:"models"`
 }
 
 type apiProviderDetail struct {
-	ID          string           `json:"id"`
-	Active      bool             `json:"active"`
-	TargetURL   string           `json:"target_url"`
-	TotalKeys   int              `json:"total_keys"`
-	ActiveKeys  int              `json:"active_keys"`
-	CoolingKeys int              `json:"cooling_keys"`
-	InvalidKeys int              `json:"invalid_keys"`
-	Keys        []pool.KeyStatus `json:"keys"`
-	Models      []string         `json:"models"`
-	StripTools  bool             `json:"strip_tools"`
+	ID           string                 `json:"id"`
+	Active       bool                   `json:"active"`
+	TargetURL    string                 `json:"target_url"`
+	TotalKeys    int                    `json:"total_keys"`
+	DisabledKeys int                    `json:"disabled_keys"`
+	ActiveKeys   int                    `json:"active_keys"`
+	CoolingKeys  int                    `json:"cooling_keys"`
+	InvalidKeys  int                    `json:"invalid_keys"`
+	Keys         []apiProviderKeyDetail `json:"keys"`
+	Models       []string               `json:"models"`
+	StripTools   bool                   `json:"strip_tools"`
+}
+
+type apiProviderKeyDetail struct {
+	KeyID         string    `json:"key_id"`
+	MaskedKey     string    `json:"masked_key"`
+	State         string    `json:"state"`
+	ReqCount      int64     `json:"req_count"`
+	ErrCount      int64     `json:"err_count"`
+	InFlight      int64     `json:"in_flight"`
+	AvgLatencyMs  float64   `json:"avg_latency_ms"`
+	CoolUntil     time.Time `json:"cool_until,omitempty"`
+	Last401At     time.Time `json:"last_401_at,omitempty"`
+	InvalidReason string    `json:"invalid_reason,omitempty"`
+	Label         string    `json:"label,omitempty"`
+	Note          string    `json:"note,omitempty"`
+	Disabled      bool      `json:"disabled,omitempty"`
 }
 
 type apiProviderCreatePayload struct {
@@ -86,6 +104,51 @@ type apiProviderUpdatePayload struct {
 
 type apiKeysPayload struct {
 	Keys []string `json:"keys"`
+}
+
+type apiKeyMetadataPayload struct {
+	Label    *string `json:"label,omitempty"`
+	Note     *string `json:"note,omitempty"`
+	Disabled *bool   `json:"disabled,omitempty"`
+}
+
+type apiKeysPreviewPayload struct {
+	Mode string   `json:"mode"`
+	Keys []string `json:"keys"`
+}
+
+type apiKeyPreviewEntry struct {
+	KeyID     string `json:"key_id"`
+	MaskedKey string `json:"masked_key"`
+	Label     string `json:"label,omitempty"`
+	Disabled  bool   `json:"disabled,omitempty"`
+}
+
+type apiKeysPreviewResponse struct {
+	Mode            string               `json:"mode"`
+	InputCount      int                  `json:"input_count"`
+	NormalizedCount int                  `json:"normalized_count"`
+	DuplicateCount  int                  `json:"duplicate_count"`
+	ExistingCount   int                  `json:"existing_count"`
+	NewCount        int                  `json:"new_count"`
+	RemovedCount    int                  `json:"removed_count"`
+	ExistingKeys    []apiKeyPreviewEntry `json:"existing_keys"`
+	NewKeys         []apiKeyPreviewEntry `json:"new_keys"`
+	RemovedKeys     []apiKeyPreviewEntry `json:"removed_keys"`
+}
+
+type apiKeyTestResponse struct {
+	OK                bool   `json:"ok"`
+	StatusCode        int    `json:"status_code"`
+	LatencyMs         int64  `json:"latency_ms"`
+	Scope             string `json:"scope,omitempty"`
+	Error             string `json:"error,omitempty"`
+	RetryAfterSeconds int64  `json:"retry_after_seconds,omitempty"`
+}
+
+type apiKeysResetAllResponse struct {
+	OK         bool `json:"ok"`
+	ResetCount int  `json:"reset_count"`
 }
 
 type apiDeleteKeysPayload struct {
@@ -262,8 +325,16 @@ func (h *Handler) providersDetail(w http.ResponseWriter, r *http.Request) {
 		h.replaceProviderKeys(w, r, id)
 	case "keys:delete":
 		h.deleteProviderKeys(w, r, id)
+	case "keys:preview":
+		h.previewProviderKeys(w, r, id)
+	case "keys:reset-all":
+		h.resetAllProviderKeys(w, r, id)
 	case "key:reset":
 		h.resetProviderKey(w, r, id, keyID)
+	case "key:metadata":
+		h.updateProviderKeyMetadata(w, r, id, keyID)
+	case "key:test":
+		h.testProviderKey(w, r, id, keyID)
 	case "models:replace":
 		h.replaceProviderModels(w, r, id)
 	case "models:fetch":
@@ -299,19 +370,21 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	keys := poolStatus.Status()
-	summary := buildProviderSummary(providerCfg, id == h.pools.ActiveID(), keys)
+	keyStatuses := poolStatus.Status()
+	keyDetails := buildProviderKeyDetails(providerCfg, keyStatuses)
+	summary := buildProviderSummary(providerCfg, id == h.pools.ActiveID(), keyStatuses)
 	writeJSON(w, http.StatusOK, apiProviderDetail{
-		ID:          summary.ID,
-		Active:      summary.Active,
-		TargetURL:   summary.TargetURL,
-		TotalKeys:   summary.TotalKeys,
-		ActiveKeys:  summary.ActiveKeys,
-		CoolingKeys: summary.CoolingKeys,
-		InvalidKeys: summary.InvalidKeys,
-		Keys:        keys,
-		Models:      safeModels(providerCfg.Models),
-		StripTools:  providerCfg.StripTools,
+		ID:           summary.ID,
+		Active:       summary.Active,
+		TargetURL:    summary.TargetURL,
+		TotalKeys:    summary.TotalKeys,
+		DisabledKeys: summary.DisabledKeys,
+		ActiveKeys:   summary.ActiveKeys,
+		CoolingKeys:  summary.CoolingKeys,
+		InvalidKeys:  summary.InvalidKeys,
+		Keys:         keyDetails,
+		Models:       safeModels(providerCfg.Models),
+		StripTools:   providerCfg.StripTools,
 	})
 }
 
@@ -1140,13 +1213,14 @@ func (h *Handler) buildProviderSummaries() []apiProviderSummary {
 // buildProviderSummary 汇总单个 provider 的基础信息和状态统计。
 func buildProviderSummary(providerCfg config.ProviderConfig, active bool, statuses []pool.KeyStatus) apiProviderSummary {
 	summary := apiProviderSummary{
-		ID:        providerCfg.ID,
-		Active:    active,
-		TargetURL: providerCfg.TargetURL,
-		Models:    safeModels(providerCfg.Models),
+		ID:           providerCfg.ID,
+		Active:       active,
+		TargetURL:    providerCfg.TargetURL,
+		TotalKeys:    len(statuses),
+		DisabledKeys: providerCfg.DisabledKeyCount(),
+		Models:       safeModels(providerCfg.Models),
 	}
 	for _, keyStatus := range statuses {
-		summary.TotalKeys++
 		switch keyStatus.State {
 		case "active":
 			summary.ActiveKeys++
@@ -1173,7 +1247,8 @@ func (h *Handler) parseProviderAction(path string) (string, string, string, bool
 		if parts[1] == "activate" {
 			return parts[0], "activate", "", true
 		}
-		if parts[1] == "keys:append" || parts[1] == "keys:replace" || parts[1] == "keys:delete" {
+		if parts[1] == "keys:append" || parts[1] == "keys:replace" || parts[1] == "keys:delete" ||
+			parts[1] == "keys:preview" || parts[1] == "keys:reset-all" {
 			return parts[0], parts[1], "", true
 		}
 		if parts[1] == "models:replace" || parts[1] == "models:fetch" {
@@ -1181,8 +1256,15 @@ func (h *Handler) parseProviderAction(path string) (string, string, string, bool
 		}
 		return "", "", "", false
 	case 4:
-		if parts[1] == "keys" && parts[3] == "reset" {
-			return parts[0], "key:reset", parts[2], true
+		if parts[1] == "keys" {
+			switch parts[3] {
+			case "reset":
+				return parts[0], "key:reset", parts[2], true
+			case "metadata":
+				return parts[0], "key:metadata", parts[2], true
+			case "test":
+				return parts[0], "key:test", parts[2], true
+			}
 		}
 		return "", "", "", false
 	default:

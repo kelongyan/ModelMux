@@ -156,3 +156,27 @@ func TestProviderPoolsUpdateDoesNotMutatePreviouslyHeldPool(t *testing.T) {
 		t.Fatal("heldPool and nextPool should differ after update")
 	}
 }
+
+func TestProviderPoolsAllowsEmptyKeyPool(t *testing.T) {
+	pools, err := NewProviderPools([]ProviderSpec{
+		{ID: "p1", Keys: []string{}},
+	}, "p1")
+	if err != nil {
+		t.Fatalf("NewProviderPools() error = %v", err)
+	}
+
+	activeID, keyPool, err := pools.Active()
+	if err != nil {
+		t.Fatalf("Active() error = %v", err)
+	}
+	if activeID != "p1" {
+		t.Fatalf("activeID = %q, want p1", activeID)
+	}
+	if keyPool.TotalCount() != 0 {
+		t.Fatalf("TotalCount() = %d, want 0", keyPool.TotalCount())
+	}
+
+	if _, err := keyPool.Next(); err != ErrNoAvailableKey {
+		t.Fatalf("Next() error = %v, want ErrNoAvailableKey", err)
+	}
+}
