@@ -24,22 +24,26 @@ import (
 )
 
 var (
-	errClientCanceled      = errors.New("client canceled request")
-	errStreamFailed        = errors.New("stream failed")
-	errRequestBodyTooLarge = errors.New("request body too large")
-	errKeyQuotaExhausted   = errors.New("key quota exhausted")
-	errRetryableUpstream   = errors.New("retryable upstream failure")
-	requestSeq             atomic.Uint64
+	errClientCanceled            = errors.New("client canceled request")
+	errStreamFailed              = errors.New("stream failed")
+	errRequestBodyTooLarge       = errors.New("request body too large")
+	errKeyQuotaExhausted         = errors.New("key quota exhausted")
+	errRetryableUpstream         = errors.New("retryable upstream failure")
+	errStreamIdleTimeout         = errors.New("stream idle timeout exceeded")
+	errStreamMaxDurationExceeded = errors.New("stream max duration exceeded")
+	requestSeq                   atomic.Uint64
 )
 
 const (
-	quotaErrorInspectBytes      int64 = 64 * 1024
-	responseUsageInspectBytes   int64 = 256 * 1024
-	upstreamErrorExcerptBytes   int   = 2048
-	upstreamRetryDrainBytes     int64 = 64 * 1024
-	upstreamMaxIdleConns        int   = 256
-	upstreamMaxIdleConnsPerHost int   = 64
-	statsDroppedEventInterval         = 30 * time.Second
+	quotaErrorInspectBytes        int64 = 64 * 1024
+	responseUsageInspectBytes     int64 = 256 * 1024
+	upstreamErrorExcerptBytes     int   = 2048
+	upstreamRetryDrainBytes       int64 = 64 * 1024
+	upstreamMaxIdleConns          int   = 256
+	upstreamMaxIdleConnsPerHost   int   = 64
+	statsDroppedEventInterval           = 30 * time.Second
+	connectionCoolingBase               = 2 * time.Second
+	defaultStreamKeepAliveComment       = ": modelmux keepalive\n\n"
 )
 
 var toolFieldNames = []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"}
@@ -83,16 +87,26 @@ type runtimeConfig struct {
 	maxTransientRetries     int
 	transientCoolingSeconds int
 	waitForKeyTimeout       time.Duration
+	streamKeepAlive         time.Duration
+	streamIdleTimeout       time.Duration
+	streamMaxDuration       time.Duration
 	maxBodyBytes            int64
 }
 
 type retryScope int
+type streamFailureSide string
 
 const (
 	retryScopeNone retryScope = iota
 	retryScopeKey
 	retryScopeConnection
 	retryScopeProvider
+)
+
+const (
+	streamFailureSideUpstreamRead   streamFailureSide = "upstream_read"
+	streamFailureSideClientWrite    streamFailureSide = "client_write"
+	streamFailureSideClientCanceled streamFailureSide = "client_canceled"
 )
 
 func (s retryScope) String() string {
@@ -106,6 +120,64 @@ func (s retryScope) String() string {
 	default:
 		return "none"
 	}
+}
+
+type streamFailureError struct {
+	side streamFailureSide
+	err  error
+}
+
+func (e *streamFailureError) Error() string {
+	if e == nil || e.err == nil {
+		return "stream failed"
+	}
+	return e.err.Error()
+}
+
+func (e *streamFailureError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func streamFailureDetails(err error) (streamFailureSide, error) {
+	var streamErr *streamFailureError
+	if errors.As(err, &streamErr) {
+		return streamErr.side, streamErr.err
+	}
+	return "", err
+}
+
+func streamFailureMessage(side streamFailureSide, err error) string {
+	if err == nil {
+		return "stream failed"
+	}
+	message := logx.RedactSensitiveText(err.Error())
+	switch side {
+	case streamFailureSideUpstreamRead:
+		return "stream upstream read failed: " + message
+	case streamFailureSideClientWrite:
+		return "stream client write failed: " + message
+	case streamFailureSideClientCanceled:
+		return "stream client canceled: " + message
+	default:
+		return "stream failed: " + message
+	}
+}
+
+func streamFailureLogLevel(side streamFailureSide) slog.Level {
+	if side == streamFailureSideClientCanceled {
+		return slog.LevelInfo
+	}
+	return slog.LevelWarn
+}
+
+func streamFailureLogMessage(side streamFailureSide) string {
+	if side == streamFailureSideClientCanceled {
+		return "stream canceled by client"
+	}
+	return "stream failed"
 }
 
 // NewHandler 创建代理处理器，并初始化带超时的上游 HTTP client。
@@ -379,12 +451,17 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 	}
 
 	return &runtimeConfig{
-		providerID:              provider.ID,
-		targetURL:               target,
-		keyPool:                 keyPool,
-		client:                  client,
-		transport:               transport,
-		circuit:                 newProviderCircuit(providerCircuitOptions{}),
+		providerID: provider.ID,
+		targetURL:  target,
+		keyPool:    keyPool,
+		client:     client,
+		transport:  transport,
+		circuit: newProviderCircuit(providerCircuitOptions{
+			failureThreshold: effectiveInt(cfg.ProviderCircuitFailureThreshold, config.DefaultProviderCircuitFailureThreshold),
+			openCooling:      time.Duration(effectiveInt(cfg.ProviderCircuitOpenSeconds, config.DefaultProviderCircuitOpenSeconds)) * time.Second,
+			maxOpenCooling:   time.Duration(effectiveInt(cfg.ProviderCircuitMaxOpenSeconds, config.DefaultProviderCircuitMaxOpenSeconds)) * time.Second,
+			halfOpenMax:      effectiveInt(cfg.ProviderCircuitHalfOpenMax, config.DefaultProviderCircuitHalfOpenMax),
+		}),
 		requestTimeout:          time.Duration(requestTimeoutSeconds) * time.Second,
 		stripTools:              provider.StripTools,
 		coolingSeconds:          effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
@@ -392,6 +469,9 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 		maxTransientRetries:     effectiveInt(cfg.MaxTransientRetries, config.DefaultMaxTransientRetries),
 		transientCoolingSeconds: effectiveInt(cfg.TransientCoolingSeconds, config.DefaultTransientCoolingSeconds),
 		waitForKeyTimeout:       time.Duration(effectiveInt(cfg.WaitForKeyTimeoutMS, config.DefaultWaitForKeyTimeoutMS)) * time.Millisecond,
+		streamKeepAlive:         time.Duration(effectiveInt(cfg.StreamKeepAliveSeconds, config.DefaultStreamKeepAliveSeconds)) * time.Second,
+		streamIdleTimeout:       time.Duration(effectiveInt(cfg.StreamIdleTimeoutSeconds, config.DefaultStreamIdleTimeoutSeconds)) * time.Second,
+		streamMaxDuration:       time.Duration(effectiveInt(cfg.StreamMaxDurationSeconds, config.DefaultStreamMaxDurationSeconds)) * time.Second,
 		maxBodyBytes:            effectiveInt64(cfg.MaxBodyBytes, config.DefaultMaxBodyBytes),
 	}, nil
 }
@@ -559,6 +639,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		callRecord.KeyID = state.KeyID(key.Value)
 		applyUsageToRecord(&callRecord, usage)
 		if err == nil {
+			key.ResetConnectionFailures()
 			circuitOutcomeRecorded = true
 			h.recordProviderCircuitSuccess(r.Context(), rt, r, requestID, clientRequestID)
 			callRecord.Success = status >= http.StatusOK && status < http.StatusBadRequest
@@ -598,24 +679,51 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, errStreamFailed) {
-			callRecord.Error = "stream failed"
+			side, streamErr := streamFailureDetails(err)
+			if side == streamFailureSideClientCanceled {
+				callRecord.Status = 0
+				h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
+					level:             "info",
+					event:             logx.EventClientCanceled,
+					message:           "request canceled",
+					requestID:         requestID,
+					clientRequestID:   clientRequestID,
+					request:           r,
+					runtime:           rt,
+					key:               key,
+					model:             requestModel,
+					stream:            requestStream,
+					status:            status,
+					latencyMs:         time.Since(start).Milliseconds(),
+					attempts:          attempt + 1,
+					retryScope:        retryScopeNone,
+					toolsPresent:      toolsPresent,
+					toolsStripped:     toolsStripped,
+					streamFailureSide: side,
+					streamError:       streamErr,
+				}))
+				return
+			}
+			callRecord.Error = streamFailureMessage(side, streamErr)
 			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-				level:           "warn",
-				event:           logx.EventProxyRequestFailed,
-				message:         "stream failed",
-				requestID:       requestID,
-				clientRequestID: clientRequestID,
-				request:         r,
-				runtime:         rt,
-				key:             key,
-				model:           requestModel,
-				stream:          requestStream,
-				status:          status,
-				latencyMs:       time.Since(start).Milliseconds(),
-				attempts:        attempt + 1,
-				retryScope:      retryScopeNone,
-				toolsPresent:    toolsPresent,
-				toolsStripped:   toolsStripped,
+				level:             "warn",
+				event:             logx.EventProxyRequestFailed,
+				message:           "stream failed",
+				requestID:         requestID,
+				clientRequestID:   clientRequestID,
+				request:           r,
+				runtime:           rt,
+				key:               key,
+				model:             requestModel,
+				stream:            requestStream,
+				status:            status,
+				latencyMs:         time.Since(start).Milliseconds(),
+				attempts:          attempt + 1,
+				retryScope:        retryScopeNone,
+				toolsPresent:      toolsPresent,
+				toolsStripped:     toolsStripped,
+				streamFailureSide: side,
+				streamError:       streamErr,
 			}))
 			return
 		}
@@ -627,6 +735,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		switch scope {
 		case retryScopeKey:
+			key.ResetConnectionFailures()
 			circuitOutcomeRecorded = true
 			h.recordProviderCircuitSuccess(r.Context(), rt, r, requestID, clientRequestID)
 			switch status {
@@ -698,11 +807,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case retryScopeConnection:
 			transientFailures++
-			cooling := rt.keyPool.CoolingDuration(rt.transientCoolingSeconds)
+			cooling := connectionCoolingDuration(rt.keyPool.CoolingDuration(rt.transientCoolingSeconds), key.ConnectionFailureCount())
 			if retryAfter > 0 {
 				cooling = retryAfter
 			}
-			key.MarkCooling(cooling)
+			key.MarkConnectionCooling(cooling)
 			h.notifyStateChanged(true)
 			slog.Warn("key transient failure, cooling", logx.Fields(logx.CategoryRetry, logx.EventKeyTransientFailure,
 				"attempt", attempt+1,
@@ -717,6 +826,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)...)
 			stopRetrying = transientFailures > rt.maxTransientRetries
 		case retryScopeProvider:
+			key.ResetConnectionFailures()
 			transientFailures++
 			circuitOutcomeRecorded = true
 			if event := rt.circuit.recordProviderFailure(); event != nil {
@@ -841,6 +951,27 @@ func (h *Handler) waitForCoolingKey(ctx context.Context, rt *runtimeConfig, budg
 	}
 }
 
+func connectionCoolingDuration(cap time.Duration, priorConnectionFailures int64) time.Duration {
+	if cap <= 0 {
+		return 0
+	}
+	if cap <= connectionCoolingBase {
+		return cap
+	}
+
+	cooling := connectionCoolingBase
+	for i := int64(0); i < priorConnectionFailures && cooling < cap; i++ {
+		if cooling > cap/2 {
+			return cap
+		}
+		cooling *= 2
+	}
+	if cooling > cap {
+		return cap
+	}
+	return cooling
+}
+
 // forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
 // 成功时返回状态码和 nil；429、401 和余额不足类 403 返回可重试错误；其他错误会在本函数内写出响应。
 func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte, requestStream bool) (int, time.Duration, retryScope, stats.Usage, string, error) {
@@ -909,15 +1040,24 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 	capturedBody := newCaptureReader(responseBody, responseUsageInspectBytes)
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
-	if err := streamBody(w, capturedBody); err != nil {
-		slog.Warn("stream failed", logx.Fields(logx.CategoryStream, logx.EventStreamFailed,
+	streamOpts := streamOptions{contentType: resp.Header.Get("Content-Type")}
+	if requestStream || isEventStreamContentType(streamOpts.contentType) {
+		streamOpts.keepAlive = rt.streamKeepAlive
+		streamOpts.idleTimeout = rt.streamIdleTimeout
+		streamOpts.maxDuration = rt.streamMaxDuration
+		streamOpts.keepAliveComment = defaultStreamKeepAliveComment
+	}
+	if err := streamBody(w, capturedBody, streamOpts); err != nil {
+		side, streamErr := streamFailureDetails(err)
+		slog.Log(r.Context(), streamFailureLogLevel(side), streamFailureLogMessage(side), logx.Fields(logx.CategoryStream, logx.EventStreamFailed,
 			"path", r.URL.Path,
 			"status", resp.StatusCode,
 			"provider_id", rt.providerID,
 			"key_hint", logx.MaskSecret(key.Value),
-			"err", err,
+			"stream_failure_side", side,
+			"err", logx.RedactSensitiveText(streamErr.Error()),
 		)...)
-		return resp.StatusCode, 0, retryScopeNone, unknownUsage, "", fmt.Errorf("%w: %v", errStreamFailed, err)
+		return resp.StatusCode, 0, retryScopeNone, unknownUsage, "", fmt.Errorf("%w: %w", errStreamFailed, err)
 	}
 	captured := capturedBody.Bytes()
 	return resp.StatusCode, 0, retryScopeNone, stats.ExtractUsage(captured), errorExcerptForStatus(resp.StatusCode, captured), nil
@@ -1056,6 +1196,8 @@ type requestDiagnosticInput struct {
 	toolsPresent         bool
 	toolsStripped        bool
 	upstreamErrorExcerpt string
+	streamFailureSide    streamFailureSide
+	streamError          error
 }
 
 type requestMeta struct {
@@ -1071,6 +1213,12 @@ func requestDiagnosticEvent(input requestDiagnosticInput) logx.Event {
 	}
 	if input.upstreamErrorExcerpt != "" {
 		data["upstream_error_excerpt"] = logx.RedactSensitiveText(input.upstreamErrorExcerpt)
+	}
+	if input.streamFailureSide != "" {
+		data["stream_failure_side"] = string(input.streamFailureSide)
+	}
+	if input.streamError != nil {
+		data["stream_error"] = logx.RedactSensitiveText(input.streamError.Error())
 	}
 
 	event := logx.Event{
@@ -1398,15 +1546,126 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
+type streamOptions struct {
+	keepAlive        time.Duration
+	idleTimeout      time.Duration
+	maxDuration      time.Duration
+	contentType      string
+	keepAliveComment string
+}
+
+type streamReadResult struct {
+	n   int
+	err error
+}
+
 // streamBody 按小块转发响应体并在每次写入后刷新，保证 SSE 不被代理缓冲。
-func streamBody(w http.ResponseWriter, body io.Reader) error {
+func streamBody(w http.ResponseWriter, body io.Reader, options ...streamOptions) error {
+	opts := effectiveStreamOptions(options)
 	flusher, canFlush := w.(http.Flusher)
+	canKeepAlive := canFlush && opts.keepAlive > 0 && isEventStreamContentType(opts.contentType)
+	if opts.keepAliveComment == "" {
+		opts.keepAliveComment = defaultStreamKeepAliveComment
+	}
+	if !canKeepAlive && opts.idleTimeout <= 0 && opts.maxDuration <= 0 {
+		return streamBodySimple(w, body, canFlush, flusher)
+	}
+
+	buf := make([]byte, 4096)
+	readCh := make(chan streamReadResult, 1)
+	startRead := func() {
+		go func() {
+			n, err := body.Read(buf)
+			readCh <- streamReadResult{n: n, err: err}
+		}()
+	}
+
+	start := time.Now()
+	lastActivity := start
+	startRead()
+	for {
+		var timers []*time.Timer
+		timerChan := func(after time.Duration) <-chan time.Time {
+			if after < 0 {
+				after = 0
+			}
+			timer := time.NewTimer(after)
+			timers = append(timers, timer)
+			return timer.C
+		}
+		var keepAliveC <-chan time.Time
+		if canKeepAlive {
+			keepAliveC = timerChan(opts.keepAlive)
+		}
+		var idleC <-chan time.Time
+		if opts.idleTimeout > 0 {
+			idleAfter := opts.idleTimeout - time.Since(lastActivity)
+			idleC = timerChan(idleAfter)
+		}
+		var maxC <-chan time.Time
+		if opts.maxDuration > 0 {
+			maxAfter := opts.maxDuration - time.Since(start)
+			maxC = timerChan(maxAfter)
+		}
+
+		var result streamReadResult
+		select {
+		case result = <-readCh:
+		case <-keepAliveC:
+			if _, writeErr := w.Write([]byte(opts.keepAliveComment)); writeErr != nil {
+				if errors.Is(writeErr, context.Canceled) {
+					return &streamFailureError{side: streamFailureSideClientCanceled, err: writeErr}
+				}
+				return &streamFailureError{side: streamFailureSideClientWrite, err: writeErr}
+			}
+			flusher.Flush()
+			stopStreamTimers(timers)
+			continue
+		case <-idleC:
+			stopStreamTimers(timers)
+			return &streamFailureError{side: streamFailureSideUpstreamRead, err: errStreamIdleTimeout}
+		case <-maxC:
+			stopStreamTimers(timers)
+			return &streamFailureError{side: streamFailureSideUpstreamRead, err: errStreamMaxDurationExceeded}
+		}
+		stopStreamTimers(timers)
+
+		n, err := result.n, result.err
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				if errors.Is(writeErr, context.Canceled) {
+					return &streamFailureError{side: streamFailureSideClientCanceled, err: writeErr}
+				}
+				return &streamFailureError{side: streamFailureSideClientWrite, err: writeErr}
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+			lastActivity = time.Now()
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return &streamFailureError{side: streamFailureSideClientCanceled, err: err}
+			}
+			return &streamFailureError{side: streamFailureSideUpstreamRead, err: err}
+		}
+		startRead()
+	}
+}
+
+func streamBodySimple(w http.ResponseWriter, body io.Reader, canFlush bool, flusher http.Flusher) error {
 	buf := make([]byte, 4096)
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return writeErr
+				if errors.Is(writeErr, context.Canceled) {
+					return &streamFailureError{side: streamFailureSideClientCanceled, err: writeErr}
+				}
+				return &streamFailureError{side: streamFailureSideClientWrite, err: writeErr}
 			}
 			if canFlush {
 				flusher.Flush()
@@ -1416,7 +1675,33 @@ func streamBody(w http.ResponseWriter, body io.Reader) error {
 			return nil
 		}
 		if err != nil {
-			return err
+			if errors.Is(err, context.Canceled) {
+				return &streamFailureError{side: streamFailureSideClientCanceled, err: err}
+			}
+			return &streamFailureError{side: streamFailureSideUpstreamRead, err: err}
+		}
+	}
+}
+
+func effectiveStreamOptions(options []streamOptions) streamOptions {
+	if len(options) == 0 {
+		return streamOptions{}
+	}
+	return options[0]
+}
+
+func isEventStreamContentType(contentType string) bool {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return mediaType == "text/event-stream"
+}
+
+func stopStreamTimers(timers []*time.Timer) {
+	for _, timer := range timers {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
 	}
 }

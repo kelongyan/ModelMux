@@ -311,14 +311,21 @@ func TestSettingsGetAndPut(t *testing.T) {
 		Providers: []config.ProviderConfig{
 			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
 		},
-		ConnectTimeoutSeconds:        4,
-		MaxTransientRetries:          2,
-		ResponseHeaderTimeoutSeconds: 9,
-		TransientCoolingSeconds:      12,
-		WaitForKeyTimeoutMS:          650,
-		StatsDir:                     "custom_stats",
-		StatsRetentionDays:           14,
-		StatsMaxRecentRecords:        1234,
+		ConnectTimeoutSeconds:           4,
+		MaxTransientRetries:             2,
+		ResponseHeaderTimeoutSeconds:    9,
+		TransientCoolingSeconds:         12,
+		WaitForKeyTimeoutMS:             650,
+		StreamKeepAliveSeconds:          3,
+		StreamIdleTimeoutSeconds:        45,
+		StreamMaxDurationSeconds:        600,
+		ProviderCircuitFailureThreshold: 4,
+		ProviderCircuitOpenSeconds:      6,
+		ProviderCircuitMaxOpenSeconds:   30,
+		ProviderCircuitHalfOpenMax:      2,
+		StatsDir:                        "custom_stats",
+		StatsRetentionDays:              14,
+		StatsMaxRecentRecords:           1234,
 	})
 	mux := http.NewServeMux()
 	h.Register(mux)
@@ -339,6 +346,13 @@ func TestSettingsGetAndPut(t *testing.T) {
 	resp.Settings.StatsDir = "next_stats"
 	resp.Settings.StatsRetentionDays = 30
 	resp.Settings.StatsMaxRecentRecords = 4321
+	resp.Settings.ProviderCircuitFailureThreshold = intPtr(5)
+	resp.Settings.ProviderCircuitOpenSeconds = intPtr(7)
+	resp.Settings.ProviderCircuitMaxOpenSeconds = intPtr(42)
+	resp.Settings.ProviderCircuitHalfOpenMax = intPtr(3)
+	resp.Settings.StreamKeepAliveSeconds = intPtr(4)
+	resp.Settings.StreamIdleTimeoutSeconds = intPtr(60)
+	resp.Settings.StreamMaxDurationSeconds = intPtr(900)
 
 	buf, err := json.Marshal(resp.Settings)
 	if err != nil {
@@ -376,6 +390,27 @@ func TestSettingsGetAndPut(t *testing.T) {
 	}
 	if loaded.WaitForKeyTimeoutMS != 650 {
 		t.Fatalf("WaitForKeyTimeoutMS = %d, want 650", loaded.WaitForKeyTimeoutMS)
+	}
+	if loaded.StreamKeepAliveSeconds != 4 {
+		t.Fatalf("StreamKeepAliveSeconds = %d, want 4", loaded.StreamKeepAliveSeconds)
+	}
+	if loaded.StreamIdleTimeoutSeconds != 60 {
+		t.Fatalf("StreamIdleTimeoutSeconds = %d, want 60", loaded.StreamIdleTimeoutSeconds)
+	}
+	if loaded.StreamMaxDurationSeconds != 900 {
+		t.Fatalf("StreamMaxDurationSeconds = %d, want 900", loaded.StreamMaxDurationSeconds)
+	}
+	if loaded.ProviderCircuitFailureThreshold != 5 {
+		t.Fatalf("ProviderCircuitFailureThreshold = %d, want 5", loaded.ProviderCircuitFailureThreshold)
+	}
+	if loaded.ProviderCircuitOpenSeconds != 7 {
+		t.Fatalf("ProviderCircuitOpenSeconds = %d, want 7", loaded.ProviderCircuitOpenSeconds)
+	}
+	if loaded.ProviderCircuitMaxOpenSeconds != 42 {
+		t.Fatalf("ProviderCircuitMaxOpenSeconds = %d, want 42", loaded.ProviderCircuitMaxOpenSeconds)
+	}
+	if loaded.ProviderCircuitHalfOpenMax != 3 {
+		t.Fatalf("ProviderCircuitHalfOpenMax = %d, want 3", loaded.ProviderCircuitHalfOpenMax)
 	}
 	if loaded.StatsCollectionEnabled() {
 		t.Fatal("StatsCollectionEnabled() = true, want false")

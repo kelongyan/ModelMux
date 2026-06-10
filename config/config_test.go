@@ -74,8 +74,29 @@ func TestApplyDefaultsUsesSafeLocalAdminAndBodyLimit(t *testing.T) {
 	if cfg.WaitForKeyTimeoutMS != DefaultWaitForKeyTimeoutMS {
 		t.Fatalf("WaitForKeyTimeoutMS = %d, want %d", cfg.WaitForKeyTimeoutMS, DefaultWaitForKeyTimeoutMS)
 	}
+	if cfg.StreamKeepAliveSeconds != DefaultStreamKeepAliveSeconds {
+		t.Fatalf("StreamKeepAliveSeconds = %d, want %d", cfg.StreamKeepAliveSeconds, DefaultStreamKeepAliveSeconds)
+	}
+	if cfg.StreamIdleTimeoutSeconds != DefaultStreamIdleTimeoutSeconds {
+		t.Fatalf("StreamIdleTimeoutSeconds = %d, want %d", cfg.StreamIdleTimeoutSeconds, DefaultStreamIdleTimeoutSeconds)
+	}
+	if cfg.StreamMaxDurationSeconds != DefaultStreamMaxDurationSeconds {
+		t.Fatalf("StreamMaxDurationSeconds = %d, want %d", cfg.StreamMaxDurationSeconds, DefaultStreamMaxDurationSeconds)
+	}
 	if cfg.MaxTransientRetries != DefaultMaxTransientRetries {
 		t.Fatalf("MaxTransientRetries = %d, want %d", cfg.MaxTransientRetries, DefaultMaxTransientRetries)
+	}
+	if cfg.ProviderCircuitFailureThreshold != DefaultProviderCircuitFailureThreshold {
+		t.Fatalf("ProviderCircuitFailureThreshold = %d, want %d", cfg.ProviderCircuitFailureThreshold, DefaultProviderCircuitFailureThreshold)
+	}
+	if cfg.ProviderCircuitOpenSeconds != DefaultProviderCircuitOpenSeconds {
+		t.Fatalf("ProviderCircuitOpenSeconds = %d, want %d", cfg.ProviderCircuitOpenSeconds, DefaultProviderCircuitOpenSeconds)
+	}
+	if cfg.ProviderCircuitMaxOpenSeconds != DefaultProviderCircuitMaxOpenSeconds {
+		t.Fatalf("ProviderCircuitMaxOpenSeconds = %d, want %d", cfg.ProviderCircuitMaxOpenSeconds, DefaultProviderCircuitMaxOpenSeconds)
+	}
+	if cfg.ProviderCircuitHalfOpenMax != DefaultProviderCircuitHalfOpenMax {
+		t.Fatalf("ProviderCircuitHalfOpenMax = %d, want %d", cfg.ProviderCircuitHalfOpenMax, DefaultProviderCircuitHalfOpenMax)
 	}
 	if !cfg.StatePersistenceEnabled() {
 		t.Fatal("StatePersistenceEnabled() = false, want true by default")

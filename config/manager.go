@@ -19,6 +19,13 @@ var (
 		"response_header_timeout_seconds",
 		"transient_cooling_seconds",
 		"wait_for_key_timeout_ms",
+		"stream_keepalive_seconds",
+		"stream_idle_timeout_seconds",
+		"stream_max_duration_seconds",
+		"provider_circuit_failure_threshold",
+		"provider_circuit_open_seconds",
+		"provider_circuit_max_open_seconds",
+		"provider_circuit_half_open_max",
 		"max_body_bytes",
 	}
 	// RestartRequiredFields 列出保存后需要重启进程才能完全生效的字段。
@@ -164,6 +171,13 @@ func diffFields(before, after *Config) []string {
 	appendIfChanged("response_header_timeout_seconds", before.ResponseHeaderTimeoutSeconds == after.ResponseHeaderTimeoutSeconds)
 	appendIfChanged("transient_cooling_seconds", before.TransientCoolingSeconds == after.TransientCoolingSeconds)
 	appendIfChanged("wait_for_key_timeout_ms", before.WaitForKeyTimeoutMS == after.WaitForKeyTimeoutMS)
+	appendIfChanged("stream_keepalive_seconds", before.StreamKeepAliveSeconds == after.StreamKeepAliveSeconds)
+	appendIfChanged("stream_idle_timeout_seconds", before.StreamIdleTimeoutSeconds == after.StreamIdleTimeoutSeconds)
+	appendIfChanged("stream_max_duration_seconds", before.StreamMaxDurationSeconds == after.StreamMaxDurationSeconds)
+	appendIfChanged("provider_circuit_failure_threshold", before.ProviderCircuitFailureThreshold == after.ProviderCircuitFailureThreshold)
+	appendIfChanged("provider_circuit_open_seconds", before.ProviderCircuitOpenSeconds == after.ProviderCircuitOpenSeconds)
+	appendIfChanged("provider_circuit_max_open_seconds", before.ProviderCircuitMaxOpenSeconds == after.ProviderCircuitMaxOpenSeconds)
+	appendIfChanged("provider_circuit_half_open_max", before.ProviderCircuitHalfOpenMax == after.ProviderCircuitHalfOpenMax)
 	appendIfChanged("max_body_bytes", before.MaxBodyBytes == after.MaxBodyBytes)
 	appendIfChanged("log_level", before.LogLevel == after.LogLevel)
 	appendIfChanged("log_format", before.LogFormat == after.LogFormat)

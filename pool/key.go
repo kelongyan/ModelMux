@@ -27,6 +27,7 @@ type Key struct {
 	invalidReason  atomic.Value // string
 	ReqCount       atomic.Int64
 	ErrCount       atomic.Int64
+	connectionErrs atomic.Int64
 	inFlight       atomic.Int64
 	totalLatencyMs atomic.Int64
 	mu             sync.Mutex
@@ -72,6 +73,19 @@ func (k *Key) MarkCooling(duration time.Duration) {
 	k.ErrCount.Add(1)
 }
 
+// MarkConnectionCooling 将 key 标记为连接类短冷却，并记录连续连接失败次数。
+func (k *Key) MarkConnectionCooling(duration time.Duration) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.State() == StateInvalid {
+		return
+	}
+	k.coolUntil.Store(time.Now().Add(duration).UnixNano())
+	k.state.Store(int32(StateCooling))
+	k.ErrCount.Add(1)
+	k.connectionErrs.Add(1)
+}
+
 // MarkInvalid 将 key 标记为失效状态，并记录最近一次 401 时间。
 func (k *Key) MarkInvalid() {
 	k.MarkInvalidWithReason(InvalidReasonUnauthorized)
@@ -92,6 +106,7 @@ func (k *Key) ResetActive() {
 	k.coolUntil.Store(0)
 	k.state.Store(int32(StateActive))
 	k.invalidReason.Store("")
+	k.connectionErrs.Store(0)
 }
 
 // BeginRequest 记录一次进入上游的请求，并增加当前 key 的并发占用数。
@@ -116,6 +131,16 @@ func (k *Key) FinishRequest() {
 // InFlight 返回当前正在使用该 key 的请求数量。
 func (k *Key) InFlight() int64 {
 	return k.inFlight.Load()
+}
+
+// ConnectionFailureCount 返回当前连续连接类失败次数。
+func (k *Key) ConnectionFailureCount() int64 {
+	return k.connectionErrs.Load()
+}
+
+// ResetConnectionFailures 清理连续连接类失败次数。
+func (k *Key) ResetConnectionFailures() {
+	k.connectionErrs.Store(0)
 }
 
 // RecordLatency 累加上游请求延迟，用于计算平均延迟。

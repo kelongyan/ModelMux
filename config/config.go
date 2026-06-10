@@ -33,6 +33,20 @@ const (
 	DefaultTransientCoolingSeconds = 15
 	// DefaultWaitForKeyTimeoutMS 是所有 key 暂时 cooling 时允许短等的默认毫秒数。
 	DefaultWaitForKeyTimeoutMS = 1000
+	// DefaultStreamKeepAliveSeconds 是 SSE 流空闲时发送注释保活的默认秒数。
+	DefaultStreamKeepAliveSeconds = 15
+	// DefaultStreamIdleTimeoutSeconds 是流式响应长时间无上游数据后的默认保护秒数。
+	DefaultStreamIdleTimeoutSeconds = 300
+	// DefaultStreamMaxDurationSeconds 是单个流式响应允许持续的默认最大秒数。
+	DefaultStreamMaxDurationSeconds = 3600
+	// DefaultProviderCircuitFailureThreshold 是 provider 级临时失败连续达到多少次后打开熔断。
+	DefaultProviderCircuitFailureThreshold = 3
+	// DefaultProviderCircuitOpenSeconds 是 provider 熔断首次打开的默认秒数。
+	DefaultProviderCircuitOpenSeconds = 5
+	// DefaultProviderCircuitMaxOpenSeconds 是 provider 熔断退避打开的最大秒数。
+	DefaultProviderCircuitMaxOpenSeconds = 60
+	// DefaultProviderCircuitHalfOpenMax 是 provider 熔断半开时允许的探针并发数。
+	DefaultProviderCircuitHalfOpenMax = 1
 	// DefaultMaxBodyBytes 是默认请求体上限，避免异常大请求占满内存。
 	DefaultMaxBodyBytes int64 = 32 * 1024 * 1024
 	// DefaultLogOutput 是默认日志输出目标，仅输出到控制台。
@@ -71,36 +85,43 @@ type KeyMetadata struct {
 }
 
 type Config struct {
-	Listen                       string           `json:"listen"`
-	AdminListen                  string           `json:"admin_listen"`
-	TargetURL                    string           `json:"target_url"`
-	Keys                         []string         `json:"keys"`
-	ActiveProvider               string           `json:"active_provider"`
-	Providers                    []ProviderConfig `json:"providers"`
-	CoolingSeconds               int              `json:"cooling_seconds"`
-	MaxRetries                   int              `json:"max_retries"`
-	MaxTransientRetries          int              `json:"max_transient_retries"`
-	RequestTimeoutSeconds        int              `json:"request_timeout_seconds"`
-	ConnectTimeoutSeconds        int              `json:"connect_timeout_seconds"`
-	ResponseHeaderTimeoutSeconds int              `json:"response_header_timeout_seconds"`
-	TransientCoolingSeconds      int              `json:"transient_cooling_seconds"`
-	WaitForKeyTimeoutMS          int              `json:"wait_for_key_timeout_ms"`
-	MaxBodyBytes                 int64            `json:"max_body_bytes"`
-	LogLevel                     string           `json:"log_level"`
-	LogFormat                    string           `json:"log_format"` // "text" (default) or "json"
-	LogOutput                    string           `json:"log_output"` // "stdout" (default), "file", or "both"
-	LogFile                      string           `json:"log_file"`
-	LogMaxSizeMB                 int              `json:"log_max_size_mb"`
-	LogMaxBackups                int              `json:"log_max_backups"`
-	LogMaxAgeDays                int              `json:"log_max_age_days"`
-	LogCompress                  bool             `json:"log_compress"`
-	PersistState                 *bool            `json:"persist_state"`
-	StateFile                    string           `json:"state_file"`
-	InvalidTTLHours              int              `json:"invalid_ttl_hours"`
-	StatsEnabled                 *bool            `json:"stats_enabled"`
-	StatsDir                     string           `json:"stats_dir"`
-	StatsRetentionDays           int              `json:"stats_retention_days"`
-	StatsMaxRecentRecords        int              `json:"stats_max_recent_records"`
+	Listen                          string           `json:"listen"`
+	AdminListen                     string           `json:"admin_listen"`
+	TargetURL                       string           `json:"target_url"`
+	Keys                            []string         `json:"keys"`
+	ActiveProvider                  string           `json:"active_provider"`
+	Providers                       []ProviderConfig `json:"providers"`
+	CoolingSeconds                  int              `json:"cooling_seconds"`
+	MaxRetries                      int              `json:"max_retries"`
+	MaxTransientRetries             int              `json:"max_transient_retries"`
+	RequestTimeoutSeconds           int              `json:"request_timeout_seconds"`
+	ConnectTimeoutSeconds           int              `json:"connect_timeout_seconds"`
+	ResponseHeaderTimeoutSeconds    int              `json:"response_header_timeout_seconds"`
+	TransientCoolingSeconds         int              `json:"transient_cooling_seconds"`
+	WaitForKeyTimeoutMS             int              `json:"wait_for_key_timeout_ms"`
+	StreamKeepAliveSeconds          int              `json:"stream_keepalive_seconds"`
+	StreamIdleTimeoutSeconds        int              `json:"stream_idle_timeout_seconds"`
+	StreamMaxDurationSeconds        int              `json:"stream_max_duration_seconds"`
+	ProviderCircuitFailureThreshold int              `json:"provider_circuit_failure_threshold"`
+	ProviderCircuitOpenSeconds      int              `json:"provider_circuit_open_seconds"`
+	ProviderCircuitMaxOpenSeconds   int              `json:"provider_circuit_max_open_seconds"`
+	ProviderCircuitHalfOpenMax      int              `json:"provider_circuit_half_open_max"`
+	MaxBodyBytes                    int64            `json:"max_body_bytes"`
+	LogLevel                        string           `json:"log_level"`
+	LogFormat                       string           `json:"log_format"` // "text" (default) or "json"
+	LogOutput                       string           `json:"log_output"` // "stdout" (default), "file", or "both"
+	LogFile                         string           `json:"log_file"`
+	LogMaxSizeMB                    int              `json:"log_max_size_mb"`
+	LogMaxBackups                   int              `json:"log_max_backups"`
+	LogMaxAgeDays                   int              `json:"log_max_age_days"`
+	LogCompress                     bool             `json:"log_compress"`
+	PersistState                    *bool            `json:"persist_state"`
+	StateFile                       string           `json:"state_file"`
+	InvalidTTLHours                 int              `json:"invalid_ttl_hours"`
+	StatsEnabled                    *bool            `json:"stats_enabled"`
+	StatsDir                        string           `json:"stats_dir"`
+	StatsRetentionDays              int              `json:"stats_retention_days"`
+	StatsMaxRecentRecords           int              `json:"stats_max_recent_records"`
 }
 
 var (
@@ -341,6 +362,27 @@ func (c *Config) applyDefaults() {
 	}
 	if c.WaitForKeyTimeoutMS <= 0 {
 		c.WaitForKeyTimeoutMS = DefaultWaitForKeyTimeoutMS
+	}
+	if c.StreamKeepAliveSeconds <= 0 {
+		c.StreamKeepAliveSeconds = DefaultStreamKeepAliveSeconds
+	}
+	if c.StreamIdleTimeoutSeconds <= 0 {
+		c.StreamIdleTimeoutSeconds = DefaultStreamIdleTimeoutSeconds
+	}
+	if c.StreamMaxDurationSeconds <= 0 {
+		c.StreamMaxDurationSeconds = DefaultStreamMaxDurationSeconds
+	}
+	if c.ProviderCircuitFailureThreshold <= 0 {
+		c.ProviderCircuitFailureThreshold = DefaultProviderCircuitFailureThreshold
+	}
+	if c.ProviderCircuitOpenSeconds <= 0 {
+		c.ProviderCircuitOpenSeconds = DefaultProviderCircuitOpenSeconds
+	}
+	if c.ProviderCircuitMaxOpenSeconds <= 0 {
+		c.ProviderCircuitMaxOpenSeconds = DefaultProviderCircuitMaxOpenSeconds
+	}
+	if c.ProviderCircuitHalfOpenMax <= 0 {
+		c.ProviderCircuitHalfOpenMax = DefaultProviderCircuitHalfOpenMax
 	}
 	if c.MaxBodyBytes <= 0 {
 		c.MaxBodyBytes = DefaultMaxBodyBytes

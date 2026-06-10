@@ -423,6 +423,171 @@ func TestServeHTTPRecordsStreamingUsageStats(t *testing.T) {
 	}
 }
 
+func TestServeHTTPRecordsUpstreamStreamReadFailureDetails(t *testing.T) {
+	readErr := errors.New("upstream read failed with api_key=secret-token")
+	upstreamBody := &failingReadCloser{
+		chunks: [][]byte{[]byte("data: partial\n\n")},
+		err:    readErr,
+	}
+	transport := &scriptedTransport{
+		responses: []scriptedResponse{{
+			status: http.StatusOK,
+			body:   upstreamBody,
+		}},
+	}
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{{
+			ID:        "primary",
+			TargetURL: "https://upstream.test/v1",
+			Keys:      []string{"key-a"},
+		}},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	rt := h.snapshot()
+	rt.client.Transport = transport
+	rt.transport = nil
+
+	recorder := &recordingStatsSink{}
+	events := &recordingEventSink{}
+	h.SetStatsRecorder(recorder)
+	h.SetEventRecorder(events)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":true}`))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 because stream had already started", rr.Code)
+	}
+	records := recorder.Records()
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.Success {
+		t.Fatal("record.Success = true, want false")
+	}
+	if record.Error != "stream upstream read failed: upstream read failed with api_key=[REDACTED]" {
+		t.Fatalf("record.Error = %q", record.Error)
+	}
+
+	event := events.Last()
+	if event.Event != logx.EventProxyRequestFailed {
+		t.Fatalf("event = %q, want %q", event.Event, logx.EventProxyRequestFailed)
+	}
+	if event.Data["stream_failure_side"] != "upstream_read" {
+		t.Fatalf("stream_failure_side = %#v, want upstream_read", event.Data["stream_failure_side"])
+	}
+	if event.Data["stream_error"] != "upstream read failed with api_key=[REDACTED]" {
+		t.Fatalf("stream_error = %#v", event.Data["stream_error"])
+	}
+	if strings.Contains(fmt.Sprint(event.Data["stream_error"]), "secret-token") {
+		t.Fatalf("stream_error leaked secret: %#v", event.Data["stream_error"])
+	}
+}
+
+func TestServeHTTPRecordsClientStreamWriteFailureDetails(t *testing.T) {
+	writeErr := errors.New("client write failed")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: chunk\n\n"))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{{
+			ID:        "primary",
+			TargetURL: upstream.URL,
+			Keys:      []string{"key-a"},
+		}},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	recorder := &recordingStatsSink{}
+	events := &recordingEventSink{}
+	h.SetStatsRecorder(recorder)
+	h.SetEventRecorder(events)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":true}`))
+	h.ServeHTTP(failingResponseWriter{err: writeErr}, req)
+
+	records := recorder.Records()
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.Success {
+		t.Fatal("record.Success = true, want false")
+	}
+	if record.Error != "stream client write failed: client write failed" {
+		t.Fatalf("record.Error = %q", record.Error)
+	}
+
+	event := events.Last()
+	if event.Event != logx.EventProxyRequestFailed {
+		t.Fatalf("event = %q, want %q", event.Event, logx.EventProxyRequestFailed)
+	}
+	if event.Data["stream_failure_side"] != "client_write" {
+		t.Fatalf("stream_failure_side = %#v, want client_write", event.Data["stream_failure_side"])
+	}
+	if event.Data["stream_error"] != "client write failed" {
+		t.Fatalf("stream_error = %#v", event.Data["stream_error"])
+	}
+}
+
+func TestServeHTTPRecordsClientCanceledStreamAsCancellation(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: chunk\n\n"))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{{
+			ID:        "primary",
+			TargetURL: upstream.URL,
+			Keys:      []string{"key-a"},
+		}},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	recorder := &recordingStatsSink{}
+	events := &recordingEventSink{}
+	h.SetStatsRecorder(recorder)
+	h.SetEventRecorder(events)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/responses", strings.NewReader(`{"model":"gpt-5.5","stream":true}`))
+	h.ServeHTTP(failingResponseWriter{err: context.Canceled}, req)
+
+	if records := recorder.Records(); len(records) != 0 {
+		t.Fatalf("records = %d, want 0 because client cancellation is not a proxy failure", len(records))
+	}
+
+	event := events.Last()
+	if event.Event != logx.EventClientCanceled {
+		t.Fatalf("event = %q, want %q", event.Event, logx.EventClientCanceled)
+	}
+	if event.Level != "info" {
+		t.Fatalf("level = %q, want info", event.Level)
+	}
+	if event.Data["stream_failure_side"] != "client_canceled" {
+		t.Fatalf("stream_failure_side = %#v, want client_canceled", event.Data["stream_failure_side"])
+	}
+	if event.Data["stream_error"] != "context canceled" {
+		t.Fatalf("stream_error = %#v", event.Data["stream_error"])
+	}
+}
+
 func TestServeHTTPRecordsOneCallAcrossRetries(t *testing.T) {
 	var attempts atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -825,6 +990,13 @@ func TestServeHTTPRetriesTransportErrorWithNextKey(t *testing.T) {
 	if got := status.Keys[0].State; got != "cooling" {
 		t.Fatalf("first key state = %q, want cooling", got)
 	}
+	remainingCooling := time.Until(status.Keys[0].CoolUntil)
+	if remainingCooling <= 0 {
+		t.Fatalf("first key remaining cooling = %v, want positive duration", remainingCooling)
+	}
+	if remainingCooling > 5*time.Second {
+		t.Fatalf("first key remaining cooling = %v, want short connection-failure cooling", remainingCooling)
+	}
 	if got := status.Keys[0].InFlight; got != 0 {
 		t.Fatalf("first key in_flight = %d, want 0 after retry", got)
 	}
@@ -1011,6 +1183,60 @@ func TestRuntimeConfigUsesSplitTimeouts(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigUsesProviderCircuitOptions(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:                       "https://example.com",
+		Keys:                            []string{"k1"},
+		RequestTimeoutSeconds:           10,
+		MaxRetries:                      1,
+		CoolingSeconds:                  1,
+		ProviderCircuitFailureThreshold: 5,
+		ProviderCircuitOpenSeconds:      7,
+		ProviderCircuitMaxOpenSeconds:   42,
+		ProviderCircuitHalfOpenMax:      2,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	circuit := h.snapshot().circuit
+	if circuit.failureThreshold != 5 {
+		t.Fatalf("failureThreshold = %d, want 5", circuit.failureThreshold)
+	}
+	if circuit.openCooling != 7*time.Second {
+		t.Fatalf("openCooling = %v, want 7s", circuit.openCooling)
+	}
+	if circuit.maxOpenCooling != 42*time.Second {
+		t.Fatalf("maxOpenCooling = %v, want 42s", circuit.maxOpenCooling)
+	}
+	if circuit.halfOpenMax != 2 {
+		t.Fatalf("halfOpenMax = %d, want 2", circuit.halfOpenMax)
+	}
+}
+
+func TestRuntimeConfigUsesStreamOptions(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:                "https://example.com",
+		Keys:                     []string{"k1"},
+		RequestTimeoutSeconds:    10,
+		MaxRetries:               1,
+		CoolingSeconds:           1,
+		StreamKeepAliveSeconds:   2,
+		StreamIdleTimeoutSeconds: 7,
+		StreamMaxDurationSeconds: 42,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	rt := h.snapshot()
+	if rt.streamKeepAlive != 2*time.Second {
+		t.Fatalf("streamKeepAlive = %v, want 2s", rt.streamKeepAlive)
+	}
+	if rt.streamIdleTimeout != 7*time.Second {
+		t.Fatalf("streamIdleTimeout = %v, want 7s", rt.streamIdleTimeout)
+	}
+	if rt.streamMaxDuration != 42*time.Second {
+		t.Fatalf("streamMaxDuration = %v, want 42s", rt.streamMaxDuration)
+	}
+}
+
 func TestRuntimeConfigUsesOptimizedUpstreamConnectionPool(t *testing.T) {
 	cfg := &config.Config{
 		TargetURL:             "https://example.com",
@@ -1070,6 +1296,52 @@ func TestServeHTTPStreamingRequestIgnoresFixedClientTimeout(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "data: [DONE]") {
 		t.Fatalf("body = %q, want completed streaming response", rr.Body.String())
+	}
+}
+
+func TestServeHTTPStreamingRequestWritesKeepAliveDuringUpstreamIdle(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(35 * time.Millisecond)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{
+			{ID: "primary", TargetURL: upstream.URL, Keys: []string{"k1"}},
+		},
+		RequestTimeoutSeconds:    10,
+		MaxRetries:               1,
+		CoolingSeconds:           1,
+		StreamKeepAliveSeconds:   1,
+		StreamIdleTimeoutSeconds: 2,
+		StreamMaxDurationSeconds: 3,
+	}
+	h, _ := mustHandler(t, cfg)
+	rt := h.snapshot()
+	rt.streamKeepAlive = 10 * time.Millisecond
+	rt.streamIdleTimeout = time.Second
+	rt.streamMaxDuration = time.Second
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"stream-model","stream":true,"messages":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), ": modelmux keepalive\n\n") {
+		t.Fatalf("body = %q, want SSE keepalive comment", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "data: [DONE]") {
+		t.Fatalf("body = %q, want completed stream", rr.Body.String())
 	}
 }
 
@@ -1263,6 +1535,61 @@ func TestServeHTTPProviderCircuitOpensAndRejectsRequests(t *testing.T) {
 	}
 }
 
+func TestServeHTTPProviderCircuitUsesConfiguredFailureThreshold(t *testing.T) {
+	var attempts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"provider down"}`))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		TargetURL:                       upstream.URL,
+		Keys:                            []string{"k1", "k2", "k3"},
+		RequestTimeoutSeconds:           10,
+		MaxRetries:                      5,
+		MaxTransientRetries:             2,
+		CoolingSeconds:                  1,
+		TransientCoolingSeconds:         1,
+		ProviderCircuitFailureThreshold: 4,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	first := httptest.NewRecorder()
+	h.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+	if first.Code != http.StatusServiceUnavailable {
+		t.Fatalf("first status = %d, want %d, body=%s", first.Code, http.StatusServiceUnavailable, first.Body.String())
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("upstream calls after first request = %d, want 3", got)
+	}
+	if got := h.snapshot().circuit.snapshot().state; got != providerCircuitStateClosed.String() {
+		t.Fatalf("circuit state after 3 failures = %q, want closed", got)
+	}
+
+	second := httptest.NewRecorder()
+	h.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+	if second.Code != http.StatusServiceUnavailable {
+		t.Fatalf("second status = %d, want %d, body=%s", second.Code, http.StatusServiceUnavailable, second.Body.String())
+	}
+	if got := attempts.Load(); got != 4 {
+		t.Fatalf("upstream calls after threshold failure = %d, want 4", got)
+	}
+	if got := h.snapshot().circuit.snapshot().state; got != providerCircuitStateOpen.String() {
+		t.Fatalf("circuit state after 4 failures = %q, want open", got)
+	}
+
+	rejected := httptest.NewRecorder()
+	h.ServeHTTP(rejected, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+	if got := attempts.Load(); got != 4 {
+		t.Fatalf("upstream calls after rejected request = %d, want 4", got)
+	}
+	if !strings.Contains(rejected.Body.String(), "active provider is temporarily unavailable") {
+		t.Fatalf("rejected body = %s, want circuit rejection message", rejected.Body.String())
+	}
+}
+
 func TestServeHTTPKeyScopeErrorsDoNotOpenProviderCircuit(t *testing.T) {
 	var attempts atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1320,6 +1647,57 @@ func TestClassifyTransportRetryScope(t *testing.T) {
 				t.Fatalf("classifyTransportRetryScope() = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestConnectionCoolingDurationAdaptsAndCaps(t *testing.T) {
+	keyPool := pool.New([]string{"k1"})
+	key, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	key.FinishRequest()
+
+	tests := []struct {
+		name        string
+		cap         time.Duration
+		priorErrors int64
+		want        time.Duration
+	}{
+		{name: "fresh key uses short cooling", cap: 15 * time.Second, priorErrors: 0, want: 2 * time.Second},
+		{name: "second failure backs off", cap: 15 * time.Second, priorErrors: 1, want: 4 * time.Second},
+		{name: "third failure backs off again", cap: 15 * time.Second, priorErrors: 2, want: 8 * time.Second},
+		{name: "repeated failures cap at configured transient cooling", cap: 15 * time.Second, priorErrors: 3, want: 15 * time.Second},
+		{name: "configured shorter cap is respected", cap: time.Second, priorErrors: 0, want: time.Second},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			key.ResetConnectionFailures()
+			for range tc.priorErrors {
+				key.MarkConnectionCooling(time.Nanosecond)
+			}
+
+			if got := connectionCoolingDuration(tc.cap, key.ConnectionFailureCount()); got != tc.want {
+				t.Fatalf("connectionCoolingDuration() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConnectionCoolingDurationIgnoresNonConnectionErrors(t *testing.T) {
+	keyPool := pool.New([]string{"k1"})
+	key, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	key.FinishRequest()
+	key.MarkCooling(time.Nanosecond)
+	key.MarkCooling(time.Nanosecond)
+	key.MarkCooling(time.Nanosecond)
+
+	if got := connectionCoolingDuration(15*time.Second, key.ConnectionFailureCount()); got != 2*time.Second {
+		t.Fatalf("connectionCoolingDuration() = %v, want fresh connection cooling despite non-connection errors", got)
 	}
 }
 
@@ -2051,6 +2429,145 @@ func TestStreamBodyReturnsWriteError(t *testing.T) {
 	}
 }
 
+func TestStreamBodyClassifiesCanceledClientWrite(t *testing.T) {
+	err := streamBody(failingResponseWriter{err: context.Canceled}, strings.NewReader("chunk"))
+
+	side, streamErr := streamFailureDetails(err)
+	if side != streamFailureSideClientCanceled {
+		t.Fatalf("stream failure side = %q, want %q", side, streamFailureSideClientCanceled)
+	}
+	if !errors.Is(streamErr, context.Canceled) {
+		t.Fatalf("stream error = %v, want context.Canceled", streamErr)
+	}
+}
+
+func TestStreamBodyClassifiesCanceledUpstreamReadAsClientCanceled(t *testing.T) {
+	err := streamBody(httptest.NewRecorder(), &failingReadCloser{err: context.Canceled})
+
+	side, streamErr := streamFailureDetails(err)
+	if side != streamFailureSideClientCanceled {
+		t.Fatalf("stream failure side = %q, want %q", side, streamFailureSideClientCanceled)
+	}
+	if !errors.Is(streamErr, context.Canceled) {
+		t.Fatalf("stream error = %v, want context.Canceled", streamErr)
+	}
+}
+
+func TestStreamBodyWritesSSEKeepAliveWhileWaitingForUpstream(t *testing.T) {
+	reader := newBlockingReadCloser()
+	defer reader.Close()
+	writer := &flushRecorder{}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- streamBody(writer, reader, streamOptions{
+			keepAlive:        10 * time.Millisecond,
+			idleTimeout:      time.Second,
+			contentType:      "text/event-stream",
+			keepAliveComment: ": modelmux keepalive\n\n",
+		})
+	}()
+
+	waitForCondition(t, time.Second, func() bool {
+		return strings.Contains(writer.String(), ": modelmux keepalive\n\n")
+	})
+	reader.Send("data: done\n\n")
+	reader.Close()
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("streamBody() error = %v", err)
+	}
+	if !strings.Contains(writer.String(), "data: done\n\n") {
+		t.Fatalf("body = %q, want upstream chunk", writer.String())
+	}
+	if writer.Flushes() == 0 {
+		t.Fatal("flushes = 0, want keepalive/upstream flushes")
+	}
+}
+
+func TestStreamBodyDoesNotInjectKeepAliveForNonSSE(t *testing.T) {
+	reader := newBlockingReadCloser()
+	defer reader.Close()
+	writer := &flushRecorder{}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- streamBody(writer, reader, streamOptions{
+			keepAlive:   10 * time.Millisecond,
+			idleTimeout: time.Second,
+			contentType: "application/json",
+		})
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	reader.Send(`{"ok":true}`)
+	reader.Close()
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("streamBody() error = %v", err)
+	}
+	if strings.Contains(writer.String(), "keepalive") {
+		t.Fatalf("body = %q, want no injected keepalive for non-SSE", writer.String())
+	}
+	if !strings.Contains(writer.String(), `{"ok":true}`) {
+		t.Fatalf("body = %q, want upstream JSON", writer.String())
+	}
+}
+
+func TestStreamBodyFailsWhenUpstreamIdleTimeoutExpires(t *testing.T) {
+	reader := newBlockingReadCloser()
+	defer reader.Close()
+
+	err := streamBody(httptest.NewRecorder(), reader, streamOptions{
+		idleTimeout: 10 * time.Millisecond,
+		contentType: "text/event-stream",
+	})
+
+	side, streamErr := streamFailureDetails(err)
+	if side != streamFailureSideUpstreamRead {
+		t.Fatalf("stream failure side = %q, want %q", side, streamFailureSideUpstreamRead)
+	}
+	if !errors.Is(streamErr, errStreamIdleTimeout) {
+		t.Fatalf("stream error = %v, want errStreamIdleTimeout", streamErr)
+	}
+}
+
+func TestStreamBodyFailsWhenMaxDurationExpires(t *testing.T) {
+	reader := newBlockingReadCloser()
+	defer reader.Close()
+	writer := &flushRecorder{}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- streamBody(writer, reader, streamOptions{
+			keepAlive:   5 * time.Millisecond,
+			maxDuration: 20 * time.Millisecond,
+			contentType: "text/event-stream",
+		})
+	}()
+
+	err := <-errCh
+	side, streamErr := streamFailureDetails(err)
+	if side != streamFailureSideUpstreamRead {
+		t.Fatalf("stream failure side = %q, want %q", side, streamFailureSideUpstreamRead)
+	}
+	if !errors.Is(streamErr, errStreamMaxDurationExceeded) {
+		t.Fatalf("stream error = %v, want errStreamMaxDurationExceeded", streamErr)
+	}
+}
+
+func TestStreamFailureLogLevelUsesInfoForClientCancellation(t *testing.T) {
+	if got := streamFailureLogLevel(streamFailureSideClientCanceled); got != slog.LevelInfo {
+		t.Fatalf("client canceled log level = %v, want info", got)
+	}
+	if got := streamFailureLogLevel(streamFailureSideUpstreamRead); got != slog.LevelWarn {
+		t.Fatalf("upstream read log level = %v, want warn", got)
+	}
+	if got := streamFailureLogLevel(streamFailureSideClientWrite); got != slog.LevelWarn {
+		t.Fatalf("client write log level = %v, want warn", got)
+	}
+}
+
 func hasEvent(events []logx.Event, name string) bool {
 	for _, event := range events {
 		if event.Event == name {
@@ -2132,6 +2649,66 @@ func (r *trackingReadCloser) Close() error {
 	return nil
 }
 
+type failingReadCloser struct {
+	chunks [][]byte
+	err    error
+	closed atomic.Bool
+}
+
+func (r *failingReadCloser) Read(p []byte) (int, error) {
+	if len(r.chunks) == 0 {
+		return 0, r.err
+	}
+	chunk := r.chunks[0]
+	n := copy(p, chunk)
+	if n == len(chunk) {
+		r.chunks = r.chunks[1:]
+	} else {
+		r.chunks[0] = chunk[n:]
+	}
+	return n, nil
+}
+
+func (r *failingReadCloser) Close() error {
+	r.closed.Store(true)
+	return nil
+}
+
+type blockingReadCloser struct {
+	ch     chan []byte
+	closed atomic.Bool
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{ch: make(chan []byte, 8)}
+}
+
+func (r *blockingReadCloser) Read(p []byte) (int, error) {
+	chunk, ok := <-r.ch
+	if !ok {
+		return 0, io.EOF
+	}
+	n := copy(p, chunk)
+	if n < len(chunk) {
+		remaining := append([]byte(nil), chunk[n:]...)
+		go func() {
+			r.ch <- remaining
+		}()
+	}
+	return n, nil
+}
+
+func (r *blockingReadCloser) Send(value string) {
+	r.ch <- []byte(value)
+}
+
+func (r *blockingReadCloser) Close() error {
+	if r.closed.CompareAndSwap(false, true) {
+		close(r.ch)
+	}
+	return nil
+}
+
 type failingResponseWriter struct {
 	err error
 }
@@ -2145,3 +2722,53 @@ func (w failingResponseWriter) Write([]byte) (int, error) {
 }
 
 func (w failingResponseWriter) WriteHeader(int) {}
+
+type flushRecorder struct {
+	header  http.Header
+	body    strings.Builder
+	mu      sync.Mutex
+	flushes atomic.Int32
+}
+
+func (w *flushRecorder) Header() http.Header {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *flushRecorder) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.Write(p)
+}
+
+func (w *flushRecorder) WriteHeader(int) {}
+
+func (w *flushRecorder) Flush() {
+	w.flushes.Add(1)
+}
+
+func (w *flushRecorder) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.String()
+}
+
+func (w *flushRecorder) Flushes() int {
+	return int(w.flushes.Load())
+}
+
+func waitForCondition(t testing.TB, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition was not met before timeout")
+}

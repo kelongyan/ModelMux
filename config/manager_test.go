@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -101,6 +102,141 @@ func TestManagerUpdateWritesAndReloads(t *testing.T) {
 	}
 	if current := Get(); current == nil || current.ActiveProvider != "p2" {
 		t.Fatalf("current.ActiveProvider = %#v, want p2", current)
+	}
+}
+
+func TestManagerUpdateTreatsProviderCircuitFieldsAsHotReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	initial := mustNormalizedConfig(t, &Config{
+		ActiveProvider: "p1",
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	if err := writeFileAtomic(path, initial); err != nil {
+		t.Fatalf("writeFileAtomic() error = %v", err)
+	}
+
+	reloads := 0
+	manager := NewManager(path, func(path string) error {
+		reloads++
+		cfg, err := Read(path)
+		if err != nil {
+			return err
+		}
+		SetCurrent(cfg)
+		return nil
+	})
+
+	result, err := manager.Update(func(cfg *Config) error {
+		cfg.ProviderCircuitFailureThreshold = 5
+		cfg.ProviderCircuitOpenSeconds = 7
+		cfg.ProviderCircuitMaxOpenSeconds = 42
+		cfg.ProviderCircuitHalfOpenMax = 2
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if reloads != 1 {
+		t.Fatalf("reloads = %d, want 1", reloads)
+	}
+	wantFields := []string{
+		"provider_circuit_failure_threshold",
+		"provider_circuit_open_seconds",
+		"provider_circuit_max_open_seconds",
+		"provider_circuit_half_open_max",
+	}
+	if !slices.Equal(result.ChangedFields, wantFields) {
+		t.Fatalf("ChangedFields = %#v, want %#v", result.ChangedFields, wantFields)
+	}
+	if !slices.Equal(result.HotReloadedFields, wantFields) {
+		t.Fatalf("HotReloadedFields = %#v, want %#v", result.HotReloadedFields, wantFields)
+	}
+	if len(result.RestartRequiredFields) != 0 {
+		t.Fatalf("RestartRequiredFields = %#v, want none", result.RestartRequiredFields)
+	}
+
+	loaded, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read(path) error = %v", err)
+	}
+	if loaded.ProviderCircuitFailureThreshold != 5 {
+		t.Fatalf("ProviderCircuitFailureThreshold = %d, want 5", loaded.ProviderCircuitFailureThreshold)
+	}
+	if loaded.ProviderCircuitOpenSeconds != 7 {
+		t.Fatalf("ProviderCircuitOpenSeconds = %d, want 7", loaded.ProviderCircuitOpenSeconds)
+	}
+	if loaded.ProviderCircuitMaxOpenSeconds != 42 {
+		t.Fatalf("ProviderCircuitMaxOpenSeconds = %d, want 42", loaded.ProviderCircuitMaxOpenSeconds)
+	}
+	if loaded.ProviderCircuitHalfOpenMax != 2 {
+		t.Fatalf("ProviderCircuitHalfOpenMax = %d, want 2", loaded.ProviderCircuitHalfOpenMax)
+	}
+}
+
+func TestManagerUpdateTreatsStreamFieldsAsHotReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	initial := mustNormalizedConfig(t, &Config{
+		ActiveProvider: "p1",
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	if err := writeFileAtomic(path, initial); err != nil {
+		t.Fatalf("writeFileAtomic() error = %v", err)
+	}
+
+	reloads := 0
+	manager := NewManager(path, func(path string) error {
+		reloads++
+		cfg, err := Read(path)
+		if err != nil {
+			return err
+		}
+		SetCurrent(cfg)
+		return nil
+	})
+
+	result, err := manager.Update(func(cfg *Config) error {
+		cfg.StreamKeepAliveSeconds = 3
+		cfg.StreamIdleTimeoutSeconds = 45
+		cfg.StreamMaxDurationSeconds = 600
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if reloads != 1 {
+		t.Fatalf("reloads = %d, want 1", reloads)
+	}
+	wantFields := []string{
+		"stream_keepalive_seconds",
+		"stream_idle_timeout_seconds",
+		"stream_max_duration_seconds",
+	}
+	if !slices.Equal(result.ChangedFields, wantFields) {
+		t.Fatalf("ChangedFields = %#v, want %#v", result.ChangedFields, wantFields)
+	}
+	if !slices.Equal(result.HotReloadedFields, wantFields) {
+		t.Fatalf("HotReloadedFields = %#v, want %#v", result.HotReloadedFields, wantFields)
+	}
+	if len(result.RestartRequiredFields) != 0 {
+		t.Fatalf("RestartRequiredFields = %#v, want none", result.RestartRequiredFields)
+	}
+
+	loaded, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read(path) error = %v", err)
+	}
+	if loaded.StreamKeepAliveSeconds != 3 {
+		t.Fatalf("StreamKeepAliveSeconds = %d, want 3", loaded.StreamKeepAliveSeconds)
+	}
+	if loaded.StreamIdleTimeoutSeconds != 45 {
+		t.Fatalf("StreamIdleTimeoutSeconds = %d, want 45", loaded.StreamIdleTimeoutSeconds)
+	}
+	if loaded.StreamMaxDurationSeconds != 600 {
+		t.Fatalf("StreamMaxDurationSeconds = %d, want 600", loaded.StreamMaxDurationSeconds)
 	}
 }
 

@@ -201,6 +201,13 @@ export type AdminSettingsPayload = {
   response_header_timeout_seconds: number;
   transient_cooling_seconds: number;
   wait_for_key_timeout_ms: number;
+  stream_keepalive_seconds: number;
+  stream_idle_timeout_seconds: number;
+  stream_max_duration_seconds: number;
+  provider_circuit_failure_threshold: number;
+  provider_circuit_open_seconds: number;
+  provider_circuit_max_open_seconds: number;
+  provider_circuit_half_open_max: number;
   max_body_bytes: number;
   log_level: string;
   log_format: string;

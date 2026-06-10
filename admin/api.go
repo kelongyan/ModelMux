@@ -21,33 +21,40 @@ import (
 )
 
 type apiSettingsPayload struct {
-	Listen                       string `json:"listen"`
-	AdminListen                  string `json:"admin_listen"`
-	ActiveProvider               string `json:"active_provider"`
-	CoolingSeconds               int    `json:"cooling_seconds"`
-	MaxRetries                   int    `json:"max_retries"`
-	MaxTransientRetries          *int   `json:"max_transient_retries,omitempty"`
-	RequestTimeoutSeconds        int    `json:"request_timeout_seconds"`
-	ConnectTimeoutSeconds        *int   `json:"connect_timeout_seconds,omitempty"`
-	ResponseHeaderTimeoutSeconds *int   `json:"response_header_timeout_seconds,omitempty"`
-	TransientCoolingSeconds      *int   `json:"transient_cooling_seconds,omitempty"`
-	WaitForKeyTimeoutMS          *int   `json:"wait_for_key_timeout_ms,omitempty"`
-	MaxBodyBytes                 int64  `json:"max_body_bytes"`
-	LogLevel                     string `json:"log_level"`
-	LogFormat                    string `json:"log_format"`
-	LogOutput                    string `json:"log_output"`
-	LogFile                      string `json:"log_file"`
-	LogMaxSizeMB                 int    `json:"log_max_size_mb"`
-	LogMaxBackups                int    `json:"log_max_backups"`
-	LogMaxAgeDays                int    `json:"log_max_age_days"`
-	LogCompress                  bool   `json:"log_compress"`
-	PersistState                 bool   `json:"persist_state"`
-	StateFile                    string `json:"state_file"`
-	InvalidTTLHours              int    `json:"invalid_ttl_hours"`
-	StatsEnabled                 bool   `json:"stats_enabled"`
-	StatsDir                     string `json:"stats_dir"`
-	StatsRetentionDays           int    `json:"stats_retention_days"`
-	StatsMaxRecentRecords        int    `json:"stats_max_recent_records"`
+	Listen                          string `json:"listen"`
+	AdminListen                     string `json:"admin_listen"`
+	ActiveProvider                  string `json:"active_provider"`
+	CoolingSeconds                  int    `json:"cooling_seconds"`
+	MaxRetries                      int    `json:"max_retries"`
+	MaxTransientRetries             *int   `json:"max_transient_retries,omitempty"`
+	RequestTimeoutSeconds           int    `json:"request_timeout_seconds"`
+	ConnectTimeoutSeconds           *int   `json:"connect_timeout_seconds,omitempty"`
+	ResponseHeaderTimeoutSeconds    *int   `json:"response_header_timeout_seconds,omitempty"`
+	TransientCoolingSeconds         *int   `json:"transient_cooling_seconds,omitempty"`
+	WaitForKeyTimeoutMS             *int   `json:"wait_for_key_timeout_ms,omitempty"`
+	StreamKeepAliveSeconds          *int   `json:"stream_keepalive_seconds,omitempty"`
+	StreamIdleTimeoutSeconds        *int   `json:"stream_idle_timeout_seconds,omitempty"`
+	StreamMaxDurationSeconds        *int   `json:"stream_max_duration_seconds,omitempty"`
+	ProviderCircuitFailureThreshold *int   `json:"provider_circuit_failure_threshold,omitempty"`
+	ProviderCircuitOpenSeconds      *int   `json:"provider_circuit_open_seconds,omitempty"`
+	ProviderCircuitMaxOpenSeconds   *int   `json:"provider_circuit_max_open_seconds,omitempty"`
+	ProviderCircuitHalfOpenMax      *int   `json:"provider_circuit_half_open_max,omitempty"`
+	MaxBodyBytes                    int64  `json:"max_body_bytes"`
+	LogLevel                        string `json:"log_level"`
+	LogFormat                       string `json:"log_format"`
+	LogOutput                       string `json:"log_output"`
+	LogFile                         string `json:"log_file"`
+	LogMaxSizeMB                    int    `json:"log_max_size_mb"`
+	LogMaxBackups                   int    `json:"log_max_backups"`
+	LogMaxAgeDays                   int    `json:"log_max_age_days"`
+	LogCompress                     bool   `json:"log_compress"`
+	PersistState                    bool   `json:"persist_state"`
+	StateFile                       string `json:"state_file"`
+	InvalidTTLHours                 int    `json:"invalid_ttl_hours"`
+	StatsEnabled                    bool   `json:"stats_enabled"`
+	StatsDir                        string `json:"stats_dir"`
+	StatsRetentionDays              int    `json:"stats_retention_days"`
+	StatsMaxRecentRecords           int    `json:"stats_max_recent_records"`
 }
 
 type apiProviderSummary struct {
@@ -920,33 +927,40 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, apiSettingsResponse{
 		Settings: apiSettingsPayload{
-			Listen:                       cfg.Listen,
-			AdminListen:                  cfg.AdminListen,
-			ActiveProvider:               cfg.ActiveProvider,
-			CoolingSeconds:               cfg.CoolingSeconds,
-			MaxRetries:                   cfg.MaxRetries,
-			MaxTransientRetries:          intPtr(cfg.MaxTransientRetries),
-			RequestTimeoutSeconds:        cfg.RequestTimeoutSeconds,
-			ConnectTimeoutSeconds:        intPtr(cfg.ConnectTimeoutSeconds),
-			ResponseHeaderTimeoutSeconds: intPtr(cfg.ResponseHeaderTimeoutSeconds),
-			TransientCoolingSeconds:      intPtr(cfg.TransientCoolingSeconds),
-			WaitForKeyTimeoutMS:          intPtr(cfg.WaitForKeyTimeoutMS),
-			MaxBodyBytes:                 cfg.MaxBodyBytes,
-			LogLevel:                     cfg.LogLevel,
-			LogFormat:                    cfg.LogFormat,
-			LogOutput:                    cfg.LogOutput,
-			LogFile:                      cfg.LogFile,
-			LogMaxSizeMB:                 cfg.LogMaxSizeMB,
-			LogMaxBackups:                cfg.LogMaxBackups,
-			LogMaxAgeDays:                cfg.LogMaxAgeDays,
-			LogCompress:                  cfg.LogCompress,
-			PersistState:                 cfg.StatePersistenceEnabled(),
-			StateFile:                    cfg.StateFile,
-			InvalidTTLHours:              cfg.InvalidTTLHours,
-			StatsEnabled:                 cfg.StatsCollectionEnabled(),
-			StatsDir:                     cfg.StatsDir,
-			StatsRetentionDays:           cfg.StatsRetentionDays,
-			StatsMaxRecentRecords:        cfg.StatsMaxRecentRecords,
+			Listen:                          cfg.Listen,
+			AdminListen:                     cfg.AdminListen,
+			ActiveProvider:                  cfg.ActiveProvider,
+			CoolingSeconds:                  cfg.CoolingSeconds,
+			MaxRetries:                      cfg.MaxRetries,
+			MaxTransientRetries:             intPtr(cfg.MaxTransientRetries),
+			RequestTimeoutSeconds:           cfg.RequestTimeoutSeconds,
+			ConnectTimeoutSeconds:           intPtr(cfg.ConnectTimeoutSeconds),
+			ResponseHeaderTimeoutSeconds:    intPtr(cfg.ResponseHeaderTimeoutSeconds),
+			TransientCoolingSeconds:         intPtr(cfg.TransientCoolingSeconds),
+			WaitForKeyTimeoutMS:             intPtr(cfg.WaitForKeyTimeoutMS),
+			StreamKeepAliveSeconds:          intPtr(cfg.StreamKeepAliveSeconds),
+			StreamIdleTimeoutSeconds:        intPtr(cfg.StreamIdleTimeoutSeconds),
+			StreamMaxDurationSeconds:        intPtr(cfg.StreamMaxDurationSeconds),
+			ProviderCircuitFailureThreshold: intPtr(cfg.ProviderCircuitFailureThreshold),
+			ProviderCircuitOpenSeconds:      intPtr(cfg.ProviderCircuitOpenSeconds),
+			ProviderCircuitMaxOpenSeconds:   intPtr(cfg.ProviderCircuitMaxOpenSeconds),
+			ProviderCircuitHalfOpenMax:      intPtr(cfg.ProviderCircuitHalfOpenMax),
+			MaxBodyBytes:                    cfg.MaxBodyBytes,
+			LogLevel:                        cfg.LogLevel,
+			LogFormat:                       cfg.LogFormat,
+			LogOutput:                       cfg.LogOutput,
+			LogFile:                         cfg.LogFile,
+			LogMaxSizeMB:                    cfg.LogMaxSizeMB,
+			LogMaxBackups:                   cfg.LogMaxBackups,
+			LogMaxAgeDays:                   cfg.LogMaxAgeDays,
+			LogCompress:                     cfg.LogCompress,
+			PersistState:                    cfg.StatePersistenceEnabled(),
+			StateFile:                       cfg.StateFile,
+			InvalidTTLHours:                 cfg.InvalidTTLHours,
+			StatsEnabled:                    cfg.StatsCollectionEnabled(),
+			StatsDir:                        cfg.StatsDir,
+			StatsRetentionDays:              cfg.StatsRetentionDays,
+			StatsMaxRecentRecords:           cfg.StatsMaxRecentRecords,
 		},
 		HotReloadFields:       append([]string(nil), config.HotReloadFields...),
 		RestartRequiredFields: append([]string(nil), config.RestartRequiredFields...),
@@ -985,6 +999,27 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.WaitForKeyTimeoutMS != nil {
 			cfg.WaitForKeyTimeoutMS = *req.WaitForKeyTimeoutMS
+		}
+		if req.StreamKeepAliveSeconds != nil {
+			cfg.StreamKeepAliveSeconds = *req.StreamKeepAliveSeconds
+		}
+		if req.StreamIdleTimeoutSeconds != nil {
+			cfg.StreamIdleTimeoutSeconds = *req.StreamIdleTimeoutSeconds
+		}
+		if req.StreamMaxDurationSeconds != nil {
+			cfg.StreamMaxDurationSeconds = *req.StreamMaxDurationSeconds
+		}
+		if req.ProviderCircuitFailureThreshold != nil {
+			cfg.ProviderCircuitFailureThreshold = *req.ProviderCircuitFailureThreshold
+		}
+		if req.ProviderCircuitOpenSeconds != nil {
+			cfg.ProviderCircuitOpenSeconds = *req.ProviderCircuitOpenSeconds
+		}
+		if req.ProviderCircuitMaxOpenSeconds != nil {
+			cfg.ProviderCircuitMaxOpenSeconds = *req.ProviderCircuitMaxOpenSeconds
+		}
+		if req.ProviderCircuitHalfOpenMax != nil {
+			cfg.ProviderCircuitHalfOpenMax = *req.ProviderCircuitHalfOpenMax
 		}
 		cfg.MaxBodyBytes = req.MaxBodyBytes
 		cfg.LogLevel = req.LogLevel

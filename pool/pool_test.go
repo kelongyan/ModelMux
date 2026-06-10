@@ -64,6 +64,35 @@ func TestFinishRequestDoesNotGoNegative(t *testing.T) {
 	}
 }
 
+func TestConnectionFailureCounterTracksOnlyConnectionCooling(t *testing.T) {
+	k := newKey("k1")
+
+	k.MarkCooling(time.Nanosecond)
+	if got := k.ConnectionFailureCount(); got != 0 {
+		t.Fatalf("ConnectionFailureCount after regular cooling = %d, want 0", got)
+	}
+
+	k.MarkConnectionCooling(time.Nanosecond)
+	k.MarkConnectionCooling(time.Nanosecond)
+	if got := k.ConnectionFailureCount(); got != 2 {
+		t.Fatalf("ConnectionFailureCount after connection cooling = %d, want 2", got)
+	}
+	if got := k.ErrCount.Load(); got != 3 {
+		t.Fatalf("ErrCount = %d, want regular and connection cooling errors counted", got)
+	}
+
+	k.ResetConnectionFailures()
+	if got := k.ConnectionFailureCount(); got != 0 {
+		t.Fatalf("ConnectionFailureCount after reset = %d, want 0", got)
+	}
+
+	k.MarkConnectionCooling(time.Nanosecond)
+	k.ResetActive()
+	if got := k.ConnectionFailureCount(); got != 0 {
+		t.Fatalf("ConnectionFailureCount after ResetActive = %d, want 0", got)
+	}
+}
+
 func TestSkipCoolingKey(t *testing.T) {
 	p := New([]string{"k1", "k2", "k3"})
 
