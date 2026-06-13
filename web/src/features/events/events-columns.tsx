@@ -2,6 +2,7 @@ import type { TableColumnsType } from "antd";
 
 import { formatDateTime } from "../../components/format-time";
 import type { AdminEvent } from "../../types/admin";
+import { formatLatencySec } from "../stats/stats-format";
 
 export function buildEventColumns(): TableColumnsType<AdminEvent> {
   return [
@@ -62,7 +63,7 @@ export function buildEventColumns(): TableColumnsType<AdminEvent> {
       dataIndex: "latency_ms",
       key: "latency_ms",
       width: 88,
-      render: (value: number | undefined) => (typeof value === "number" ? `${value}ms` : "-"),
+      render: (value: number | undefined) => (typeof value === "number" ? formatLatencySec(value) : "-"),
     },
     {
       title: "重试",

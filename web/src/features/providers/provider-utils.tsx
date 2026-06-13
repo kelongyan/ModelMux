@@ -1,11 +1,11 @@
 import type { AdminKeyStatus, AdminProviderSummary } from "../../types/admin";
 
 const stateColors: Record<string, string> = {
-  green: "#16a34a",
-  red: "#dc2626",
-  gold: "#d97706",
-  blue: "#2563eb",
-  gray: "#64748b",
+  green: "#3d8b50",
+  red: "#a83535",
+  gold: "#b0861a",
+  blue: "var(--mm-primary-text)",
+  gray: "#6c6a64",
 };
 
 export function renderProviderState(provider: AdminProviderSummary): JSX.Element {

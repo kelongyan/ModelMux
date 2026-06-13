@@ -2,7 +2,7 @@ import { Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import type { AdminCallRecord } from "../../types/admin";
-import { formatLocalDateTime, formatNumber, latencyClass } from "./stats-format";
+import { formatLocalDateTime, formatNumber, formatLatencySec, latencyClass } from "./stats-format";
 
 export function buildStatsLogColumns(): ColumnsType<AdminCallRecord> {
   return [
@@ -43,7 +43,7 @@ export function buildStatsLogColumns(): ColumnsType<AdminCallRecord> {
       key: "latency_ms",
       width: 95,
       sorter: (a, b) => a.latency_ms - b.latency_ms,
-      render: (value: number) => <span className={latencyClass(value)}>{formatNumber(value)} ms</span>,
+      render: (value: number) => <span className={latencyClass(value)}>{formatLatencySec(value)}</span>,
     },
     {
       title: "总 Token",

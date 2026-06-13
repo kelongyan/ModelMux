@@ -3,8 +3,9 @@ import { Button, Card, Empty, Result, Space, Spin, Typography, message } from "a
 import { startTransition } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { activateProvider, fetchDashboard, triggerReload } from "../api/admin";
+import { activateProvider, fetchDashboard, fetchSettings, triggerReload } from "../api/admin";
 import { queryKeys } from "../api/query-keys";
+import { ProgressBar } from "../components/charts/progress-bar";
 import { formatClockShort } from "../components/format-time";
 import { HealthDot } from "../components/health-dot";
 import type { AdminDashboardResponse, AdminProviderCircuit, AdminProviderSummary, AdminStatsHealth } from "../types/admin";
@@ -18,6 +19,12 @@ export function DashboardPage(): JSX.Element {
     queryKey: queryKeys.dashboard,
     queryFn: fetchDashboard,
     refetchInterval: 5000,
+  });
+
+  const settingsQuery = useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: fetchSettings,
+    staleTime: 60000,
   });
 
   const reloadMutation = useMutation({
@@ -84,12 +91,15 @@ export function DashboardPage(): JSX.Element {
 
   const dashboard = dashboardQuery.data;
   const lastUpdated = formatClockShort(dashboardQuery.dataUpdatedAt);
+  const circuitThreshold = settingsQuery.data?.settings.provider_circuit_failure_threshold ?? 3;
 
   return (
     <>
       {contextHolder}
-      <Space direction="vertical" size={16} className="console-stack">
-        <Card className="surface-card dashboard-overview-card reveal-card reveal-delay-0" bordered={false}>
+      <Space direction="vertical" size={20} className="console-stack">
+
+        {/* ── Status card ── */}
+        <Card className="surface-card reveal-card reveal-delay-0" bordered={false}>
           <div className="section-heading">
             <div>
               <Typography.Text className="placeholder-kicker">Dashboard</Typography.Text>
@@ -100,17 +110,19 @@ export function DashboardPage(): JSX.Element {
             <Space wrap>
               <Typography.Text className="dashboard-updated-at">{`更新于 ${lastUpdated}`}</Typography.Text>
               <Button
-                size="small"
+                size="middle"
                 type="primary"
                 loading={reloadMutation.isPending}
                 onClick={() => reloadMutation.mutate()}
               >
                 立即重载
               </Button>
-              <Button size="small" onClick={() => void dashboardQuery.refetch()}>刷新</Button>
+              <Button size="middle" onClick={() => void dashboardQuery.refetch()}>刷新</Button>
             </Space>
           </div>
-          <div className="dashboard-overview-grid">
+
+          {/* Active provider + health */}
+          <div className="dashboard-hero-row">
             <div className="dashboard-active-panel">
               <span className="dashboard-panel-label">当前活跃 Provider</span>
               <div className="dashboard-active-provider-row">
@@ -122,30 +134,35 @@ export function DashboardPage(): JSX.Element {
               <span className="dashboard-panel-desc">
                 {dashboard.provider_count === 0
                   ? "还没有配置 provider，先去提供商页面新增上游。"
-                  : `当前共 ${dashboard.provider_count} 个 provider，切换操作会直接写回配置。`}
+                  : `共 ${dashboard.provider_count} 个 Provider · 可用 ${dashboard.active_keys} 个 Key · 冷却 ${dashboard.cooling_keys} · 失效 ${dashboard.invalid_keys}`}
               </span>
               <div className="dashboard-health-strip">
-                <HealthSignal
-                  label="熔断"
-                  value={formatCircuitState(dashboard.provider_circuit)}
-                  state={circuitHealthDot(dashboard.provider_circuit)}
-                />
-                <HealthSignal
-                  label="Stats 队列"
-                  value={formatStatsHealth(dashboard.stats)}
-                  state={statsHealthDot(dashboard.stats)}
-                />
+                <div className="dashboard-health-signal">
+                  <span>熔断器</span>
+                  <ProgressBar
+                    value={dashboard.provider_circuit?.consecutive_failures ?? 0}
+                    max={circuitThreshold}
+                    color={circuitProgressColor(dashboard.provider_circuit)}
+                    label={formatCircuitState(dashboard.provider_circuit)}
+                    detail={`连续失败: ${dashboard.provider_circuit?.consecutive_failures ?? 0} / ${circuitThreshold}`}
+                  />
+                </div>
+                <div className="dashboard-health-signal">
+                  <span>Stats 队列</span>
+                  <ProgressBar
+                    value={dashboard.stats?.queue_depth ?? 0}
+                    max={dashboard.stats?.queue_capacity ?? 1000}
+                    color="var(--mm-primary)"
+                    label={formatStatsHealth(dashboard.stats)}
+                    detail={dashboard.stats?.enabled ? `${dashboard.stats.queue_depth} / ${dashboard.stats.queue_capacity} · 丢 ${dashboard.stats.dropped_records}` : undefined}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="dashboard-stat-strip">
-              <OverviewStat label="可用 Key" value={dashboard.active_keys} tone="green" />
-              <OverviewStat label="冷却中" value={dashboard.cooling_keys} tone="amber" />
-              <OverviewStat label="已失效" value={dashboard.invalid_keys} tone="red" />
-              <OverviewStat label="Provider" value={dashboard.provider_count} tone="teal" />
             </div>
           </div>
         </Card>
 
+        {/* ── Provider list ── */}
         <Card className="surface-card reveal-card reveal-delay-1" bordered={false}>
           <div className="section-heading">
             <div>
@@ -175,39 +192,6 @@ export function DashboardPage(): JSX.Element {
 
       </Space>
     </>
-  );
-}
-
-type OverviewStatProps = {
-  label: string;
-  value: number;
-  tone: "green" | "amber" | "red" | "teal";
-};
-
-function OverviewStat({ label, value, tone }: OverviewStatProps): JSX.Element {
-  return (
-    <div className={`dashboard-stat-card dashboard-stat-card--${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-type HealthSignalProps = {
-  label: string;
-  value: string;
-  state: "active" | "cooling" | "invalid" | "idle";
-};
-
-function HealthSignal({ label, value, state }: HealthSignalProps): JSX.Element {
-  return (
-    <div className="dashboard-health-signal">
-      <span>{label}</span>
-      <strong>
-        <HealthDot state={state} pulse={state === "active"} />
-        {value}
-      </strong>
-    </div>
   );
 }
 
@@ -258,43 +242,31 @@ function ProviderRow({ provider, activating, onActivate, onOpenDetail }: Provide
   );
 }
 
+function circuitProgressColor(circuit: AdminProviderCircuit | undefined): string {
+  if (!circuit || circuit.state === "closed") return "var(--mm-success)";
+  if (circuit.state === "half_open") return "var(--mm-warning)";
+  return "var(--mm-error)";
+}
+
 function providerStateLabel(provider: AdminProviderSummary, tone: "active" | "cooling" | "invalid" | "idle"): string {
-  if (provider.active) {
-    return "当前活跃";
-  }
-  if (tone === "invalid") {
-    return "不可用";
-  }
-  if (tone === "cooling") {
-    return "波动中";
-  }
+  if (provider.active) return "当前活跃";
+  if (tone === "invalid") return "不可用";
+  if (tone === "cooling") return "波动中";
   return "待命";
 }
 
 function computeOverviewState(dashboard: AdminDashboardResponse): "active" | "cooling" | "invalid" | "idle" {
-  if (dashboard.provider_circuit?.state === "open") {
-    return "invalid";
-  }
-  if (dashboard.provider_circuit?.state === "half_open") {
-    return "cooling";
-  }
-  if (!dashboard.active_provider) {
-    return "idle";
-  }
-  if (dashboard.active_keys === 0) {
-    return dashboard.cooling_keys > 0 ? "cooling" : "invalid";
-  }
-  if (dashboard.cooling_keys > 0 || dashboard.invalid_keys > 0) {
-    return "cooling";
-  }
+  if (dashboard.provider_circuit?.state === "open") return "invalid";
+  if (dashboard.provider_circuit?.state === "half_open") return "cooling";
+  if (!dashboard.active_provider) return "idle";
+  if (dashboard.active_keys === 0) return dashboard.cooling_keys > 0 ? "cooling" : "invalid";
+  if (dashboard.cooling_keys > 0 || dashboard.invalid_keys > 0) return "cooling";
   return "active";
 }
 
 function applyOptimisticActivate(prev: AdminDashboardResponse, providerID: string): AdminDashboardResponse {
   const target = prev.providers.find((p) => p.id === providerID);
-  if (!target) {
-    return prev;
-  }
+  if (!target) return prev;
   const providers = prev.providers.map((p) => ({ ...p, active: p.id === providerID }));
   return {
     ...prev,
@@ -307,63 +279,23 @@ function applyOptimisticActivate(prev: AdminDashboardResponse, providerID: strin
 }
 
 function computeCardTone(provider: AdminProviderSummary): "active" | "cooling" | "invalid" | "idle" {
-  if (provider.active_keys === 0 && provider.cooling_keys === 0) {
-    return "invalid";
-  }
-  if (provider.active_keys === 0) {
-    return "cooling";
-  }
-  if (provider.cooling_keys > 0 || provider.invalid_keys > 0) {
-    return provider.active ? "cooling" : "idle";
-  }
+  if (provider.active_keys === 0 && provider.cooling_keys === 0) return "invalid";
+  if (provider.active_keys === 0) return "cooling";
+  if (provider.cooling_keys > 0 || provider.invalid_keys > 0) return provider.active ? "cooling" : "idle";
   return provider.active ? "active" : "idle";
 }
 
 function formatCircuitState(circuit: AdminProviderCircuit | undefined): string {
-  if (!circuit) {
-    return "未挂载";
-  }
+  if (!circuit) return "未挂载";
   switch (circuit.state) {
-    case "open":
-      return `${circuit.consecutive_failures} 次失败`;
-    case "half_open":
-      return "探测中";
-    case "closed":
-      return "正常";
-    default:
-      return circuit.state || "未知";
+    case "open": return `${circuit.consecutive_failures} 次失败`;
+    case "half_open": return "探测中";
+    case "closed": return "正常";
+    default: return circuit.state || "未知";
   }
-}
-
-function circuitHealthDot(circuit: AdminProviderCircuit | undefined): "active" | "cooling" | "invalid" | "idle" {
-  if (!circuit) {
-    return "idle";
-  }
-  if (circuit.state === "open") {
-    return "invalid";
-  }
-  if (circuit.state === "half_open") {
-    return "cooling";
-  }
-  return "active";
 }
 
 function formatStatsHealth(stats: AdminStatsHealth | undefined): string {
-  if (!stats?.enabled) {
-    return "未启用";
-  }
+  if (!stats?.enabled) return "未启用";
   return `${stats.queue_depth}/${stats.queue_capacity} · 丢 ${stats.dropped_records}`;
-}
-
-function statsHealthDot(stats: AdminStatsHealth | undefined): "active" | "cooling" | "invalid" | "idle" {
-  if (!stats?.enabled) {
-    return "idle";
-  }
-  if (stats.dropped_records > 0) {
-    return "cooling";
-  }
-  if (stats.queue_capacity > 0 && stats.queue_depth * 4 >= stats.queue_capacity * 3) {
-    return "cooling";
-  }
-  return "active";
 }

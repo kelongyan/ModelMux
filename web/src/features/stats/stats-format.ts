@@ -2,6 +2,12 @@ export function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN").format(value);
 }
 
+export function formatLatencySec(ms: number): string {
+  if (ms <= 0) return "0s";
+  const sec = ms / 1000;
+  return `${sec.toFixed(1)}s`;
+}
+
 export function formatPercent(part: number, total: number): string {
   return total <= 0 ? "0%" : `${Math.round((part / total) * 100)}%`;
 }

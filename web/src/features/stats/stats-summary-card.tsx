@@ -1,7 +1,7 @@
 import { Button, Card, Col, Row, Segmented, Space, Typography } from "antd";
 
 import type { AdminStatsSummary, AdminStatsWindow } from "../../types/admin";
-import { formatNumber, formatPercent } from "./stats-format";
+import { formatNumber, formatLatencySec, formatPercent } from "./stats-format";
 import { statsWindowOptions } from "./stats-options";
 
 type StatsSummaryCardProps = {
@@ -17,10 +17,10 @@ type StatsSummaryCardProps = {
 type Tone = "blue" | "green" | "purple" | "red";
 
 const toneAccent: Record<Tone, string> = {
-  blue: "#6366f1",
-  green: "#10b981",
-  purple: "#8b5cf6",
-  red: "#f43f5e",
+  blue: "var(--mm-primary)",
+  green: "#5db872",
+  purple: "#B87333",
+  red: "#c64545",
 };
 
 export function StatsSummaryCard({
@@ -52,7 +52,7 @@ export function StatsSummaryCard({
         <KPI label="调用数" value={formatNumber(summary.total_calls)} tone="blue" />
         <KPI label="总 Token" value={formatNumber(summary.total_tokens)} tone="purple" />
         <KPI label="成功率" value={formatPercent(summary.success_calls, summary.total_calls)} tone="green" />
-        <KPI label="平均延迟" value={`${Math.round(summary.avg_latency_ms)} ms`} tone="red" />
+        <KPI label="平均延迟" value={formatLatencySec(summary.avg_latency_ms)} tone="red" />
       </Row>
     </Card>
   );

@@ -7,16 +7,15 @@
 }
 
 .console-sidebar {
-  width: 248px;
-  min-width: 248px;
-  flex: 0 0 248px;
-  padding: 26px 18px;
+  width: 250px;
+  min-width: 250px;
+  flex: 0 0 250px;
+  padding: 24px 16px;
   border-right: 1px solid var(--mm-border-soft);
-  background: var(--mm-surface);
-  backdrop-filter: blur(18px);
+  background: var(--mm-surface-solid);
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 24px;
   box-shadow: var(--mm-shadow-panel);
   position: sticky;
   top: 0;
@@ -33,7 +32,8 @@
 
 .console-brand h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
   line-height: 1.1;
   letter-spacing: -0.04em;
   color: var(--mm-text);
@@ -72,15 +72,13 @@
     background 160ms ease,
     border-color 160ms ease,
     color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+    box-shadow 160ms ease;
 }
 
 .console-nav-link:hover {
-  border-color: var(--mm-primary-border);
-  background: var(--mm-primary-softer);
+  border-color: var(--mm-border);
+  background: var(--mm-surface-active);
   color: var(--mm-primary-text);
-  transform: translateX(2px);
 }
 
 .console-nav-link.is-active {
@@ -109,10 +107,9 @@
 }
 
 .console-header {
-  padding: 12px 24px;
+  padding: 10px 24px;
   border-bottom: 1px solid var(--mm-border-soft);
-  background: color-mix(in srgb, var(--mm-surface-solid) 72%, transparent);
-  backdrop-filter: blur(16px);
+  background: var(--mm-surface-solid);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -188,12 +185,12 @@
   height: 34px;
   flex: 0 0 auto;
   padding: 0;
-  border: 1px solid var(--mm-border-soft);
-  border-radius: 999px;
-  background: var(--mm-surface-muted);
+  border: 1px solid var(--mm-glass-border);
+  border-radius: 50%;
+  background: var(--mm-glass-bg-subtle);
   color: var(--mm-primary-text);
   cursor: pointer;
-  box-shadow: none;
+  box-shadow: var(--mm-shadow-inset);
   transition:
     background 160ms ease,
     border-color 160ms ease,
@@ -204,14 +201,14 @@
 
 .theme-toggle:hover,
 .theme-toggle:focus-visible {
-  border-color: var(--mm-primary-border-strong);
-  background: var(--mm-primary-soft);
+  border-color: var(--mm-glass-border-strong);
+  background: var(--mm-glass-bg);
   color: var(--mm-primary-strong);
   box-shadow: var(--mm-shadow-soft);
 }
 
 .theme-toggle:active {
-  transform: scale(0.96);
+  transform: scale(0.94);
 }
 
 .theme-toggle:focus-visible {

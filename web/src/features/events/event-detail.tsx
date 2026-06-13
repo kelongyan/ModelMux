@@ -1,6 +1,7 @@
 import { Button, Space, Typography } from "antd";
 
 import type { AdminEvent } from "../../types/admin";
+import { formatLatencySec } from "../stats/stats-format";
 import { buildExpandedPayload } from "./events-utils";
 
 type EventDetailProps = {
@@ -106,5 +107,5 @@ function formatBoolean(value: boolean | undefined): string | undefined {
 
 function formatLatency(value: number | undefined): string | undefined {
   if (typeof value !== "number") return undefined;
-  return `${value}ms`;
+  return formatLatencySec(value);
 }

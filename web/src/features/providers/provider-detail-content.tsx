@@ -4,6 +4,7 @@ import type { TableColumnsType } from "antd";
 import { CooldownText } from "../../components/cooldown-text";
 import { formatDateTime } from "../../components/format-time";
 import type { AdminKeyStatus, AdminProviderDetailResponse } from "../../types/admin";
+import { formatLatencySec } from "../stats/stats-format";
 import { renderKeyState } from "./provider-utils";
 
 type ProviderDetailContentProps = {
@@ -115,7 +116,7 @@ export function ProviderDetailContent({
       dataIndex: "avg_latency_ms",
       key: "avg_latency_ms",
       width: 102,
-      render: (value: number) => (value > 0 ? `${Math.round(value)} ms` : "-"),
+      render: (value: number) => (value > 0 ? formatLatencySec(value) : "-"),
     },
     {
       title: "操作",

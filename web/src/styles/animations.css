@@ -1,17 +1,17 @@
 /* ================================================================
-   Animations — all @keyframes + utility classes for ModelMux UI.
+   Animations — Anthropic warm, restrained motion.
    Zero JS dependency, pure CSS.
    ================================================================ */
 
 /* ── Entry and reveal animations ── */
 
 @keyframes anim-fade-slide-up {
-  from { opacity: 0; transform: translateY(14px); }
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes anim-fade-slide-down {
-  from { opacity: 0; transform: translateY(-10px); }
+  from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -26,7 +26,7 @@
 }
 
 @keyframes anim-reveal {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -49,7 +49,7 @@
 }
 
 @keyframes anim-slide-in-right {
-  from { opacity: 0; transform: translateX(18px); }
+  from { opacity: 0; transform: translateX(12px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
@@ -89,20 +89,20 @@
 }
 
 .card-lift:hover {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   box-shadow:
     var(--mm-shadow-hover),
     0 2px 0 color-mix(in srgb, var(--mm-surface-strong) 86%, transparent) inset !important;
 }
 
-/* ── Skeleton shimmer ── */
+/* ── Skeleton shimmer — warm tones ── */
 
 .skeleton-shimmer {
   background: linear-gradient(
     110deg,
-    var(--mm-surface-muted) 30%,
-    var(--mm-surface-soft) 50%,
-    var(--mm-surface-muted) 70%
+    #efe9de 30%,
+    #f5efe6 50%,
+    #efe9de 70%
   );
   background-size: 200% 100%;
   animation: anim-shimmer 1.6s ease-in-out infinite;
