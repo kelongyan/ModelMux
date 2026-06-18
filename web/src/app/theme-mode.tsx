@@ -1,4 +1,5 @@
 import { ConfigProvider } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { createAppTheme, type AppThemeMode } from "./app-theme";
@@ -60,7 +61,7 @@ export function AppThemeProvider({ children }: AppThemeProviderProps): JSX.Eleme
 
   return (
     <ThemeModeContext.Provider value={contextValue}>
-      <ConfigProvider theme={themeConfig}>{children}</ConfigProvider>
+      <ConfigProvider locale={zhCN} theme={themeConfig}>{children}</ConfigProvider>
     </ThemeModeContext.Provider>
   );
 }

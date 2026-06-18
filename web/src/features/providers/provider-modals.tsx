@@ -1,6 +1,16 @@
-import { Checkbox, Form, Input, Modal, Space, Tag, Typography } from "antd";
+import { Button, Checkbox, Form, Input, Modal, Space, Tag, Typography } from "antd";
 import type { FormInstance } from "antd/es/form";
 import type { AdminKeysPreviewResponse } from "../../types/admin";
+
+function pasteFromClipboard(form: FormInstance, fieldName: string): void {
+  void navigator.clipboard.readText().then((text) => {
+    if (text) {
+      const existing = (form.getFieldValue(fieldName) as string) ?? "";
+      const combined = existing ? existing + "\n" + text : text;
+      form.setFieldValue(fieldName, combined);
+    }
+  });
+}
 
 import type {
   KeyFormValues,
@@ -67,7 +77,14 @@ export function ProviderEditorModal({
             label="Keys"
             name="keys_text"
             rules={[{ required: true, message: "请至少输入一个 key" }]}
-            extra="一行一个 key，保存时会自动去重并忽略空行。"
+            extra={
+              <Space>
+                <span>一行一个 key，保存时会自动去重并忽略空行。</span>
+                <Button type="link" size="small" onClick={() => pasteFromClipboard(form, "keys_text")}>
+                  从剪贴板粘贴
+                </Button>
+              </Space>
+            }
           >
             <Input.TextArea rows={8} placeholder={"sk-key-1\nsk-key-2"} />
           </Form.Item>
@@ -102,7 +119,14 @@ export function KeyEditorModal({ state, form, confirmLoading, onCancel, onSubmit
           label="Keys"
           name="keys_text"
           rules={[{ required: true, message: "请至少输入一个 key" }]}
-          extra={state.mode === "append" ? "新 key 会自动去重后进入预览。" : "替换会覆盖当前 provider 下的全部 keys，并先进入预览。"}
+          extra={
+            <Space direction="vertical" size={2}>
+              <span>{state.mode === "append" ? "新 key 会自动去重后进入预览。" : "替换会覆盖当前 provider 下的全部 keys，并先进入预览。"}</span>
+              <Button type="link" size="small" onClick={() => pasteFromClipboard(form, "keys_text")}>
+                从剪贴板粘贴
+              </Button>
+            </Space>
+          }
         >
           <Input.TextArea rows={10} placeholder={"sk-key-a\nsk-key-b"} />
         </Form.Item>

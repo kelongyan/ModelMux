@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Empty, Result, Space, Spin, Typography, message } from "antd";
+import { Button, Card, Empty, Result, Skeleton, Space, Typography, message } from "antd";
 import { startTransition } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -8,17 +8,19 @@ import { queryKeys } from "../api/query-keys";
 import { ProgressBar } from "../components/charts/progress-bar";
 import { formatClockShort } from "../components/format-time";
 import { HealthDot } from "../components/health-dot";
+import { useVisibilityRefetchInterval } from "../components/use-visibility-polling";
 import type { AdminDashboardResponse, AdminProviderCircuit, AdminProviderSummary, AdminStatsHealth } from "../types/admin";
 
 export function DashboardPage(): JSX.Element {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
+  const pollInterval = useVisibilityRefetchInterval(5000);
 
   const dashboardQuery = useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: fetchDashboard,
-    refetchInterval: 5000,
+    refetchInterval: pollInterval,
   });
 
   const settingsQuery = useQuery({
@@ -69,7 +71,7 @@ export function DashboardPage(): JSX.Element {
   if (dashboardQuery.isLoading) {
     return (
       <div className="console-loading">
-        <Spin size="large" />
+        <Skeleton active paragraph={{ rows: 10 }} />
       </div>
     );
   }

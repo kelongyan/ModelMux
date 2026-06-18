@@ -1,0 +1,15 @@
+import { useEffect, useState } from "react";
+
+export function useVisibilityRefetchInterval(
+  baseInterval: number | false,
+): number | false {
+  const [visible, setVisible] = useState(() => !document.hidden);
+
+  useEffect(() => {
+    const handler = (): void => setVisible(!document.hidden);
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, []);
+
+  return visible ? baseInterval : false;
+}

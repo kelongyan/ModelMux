@@ -63,21 +63,21 @@ func main() {
 
 	statsStore, err := newStatsStoreFromConfig(cfg)
 	if err != nil {
-		slog.Warn("stats store init failed", logx.Fields("stats", "stats.init_failed",
+		slog.Warn("stats store init failed", logx.Fields(logx.CategoryStats, logx.EventStatsInitFailed,
 			"path", cfg.StatsDir,
 			"err", err,
 		)...)
-		eventBuffer.Add("warn", "stats", "stats.init_failed", "stats store init failed", map[string]any{
+		eventBuffer.Add("warn", logx.CategoryStats, logx.EventStatsInitFailed, "stats store init failed", map[string]any{
 			"path":  cfg.StatsDir,
 			"error": err.Error(),
 		})
 	} else if statsStore != nil {
-		slog.Info("stats store initialized", logx.Fields("stats", "stats.initialized",
+		slog.Info("stats store initialized", logx.Fields(logx.CategoryStats, logx.EventStatsInitialized,
 			"path", cfg.StatsDir,
 			"retention_days", cfg.StatsRetentionDays,
 			"max_recent_records", cfg.StatsMaxRecentRecords,
 		)...)
-		eventBuffer.Add("info", "stats", "stats.initialized", "stats store initialized", map[string]any{
+		eventBuffer.Add("info", logx.CategoryStats, logx.EventStatsInitialized, "stats store initialized", map[string]any{
 			"path": cfg.StatsDir,
 		})
 	}
@@ -224,12 +224,19 @@ func main() {
 		})
 	} else {
 		configWatcher = watcher
+		configManager.SetWatcher(watcher)
 		slog.Info("config watch started", logx.Fields(logx.CategoryConfig, logx.EventConfigWatchStarted,
 			"path", *configPath,
 		)...)
 		eventBuffer.Add("info", logx.CategoryConfig, logx.EventConfigWatchStarted, "config watch started", map[string]any{
 			"path": *configPath,
 		})
+	}
+
+	if cfg.AdminAPIKey == "" {
+		slog.Warn("admin API has no authentication configured; all management endpoints are open", logx.Fields(logx.CategoryAdmin, "admin.no_auth",
+			"hint", "set admin_api_key in config to enable authentication",
+		)...)
 	}
 
 	adminSrv := &http.Server{
@@ -296,7 +303,7 @@ func main() {
 	}
 	if statsStore != nil {
 		if err := statsStore.Close(); err != nil {
-			slog.Warn("stats store close failed", logx.Fields("stats", "stats.close_failed",
+			slog.Warn("stats store close failed", logx.Fields(logx.CategoryStats, logx.EventStatsCloseFailed,
 				"path", cfg.StatsDir,
 				"err", err,
 			)...)

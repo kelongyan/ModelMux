@@ -14,12 +14,14 @@ import (
 const defaultWatchDebounce = 300 * time.Millisecond
 
 type Watcher struct {
-	watcher  *fsnotify.Watcher
-	done     chan struct{}
-	once     sync.Once
-	path     string
-	reloadFn func(string) error
-	debounce time.Duration
+	watcher       *fsnotify.Watcher
+	done          chan struct{}
+	once          sync.Once
+	path          string
+	reloadFn      func(string) error
+	debounce      time.Duration
+	mu            sync.Mutex
+	suppressUntil time.Time
 }
 
 // Watch 监听配置文件所在目录，并在目标文件变化后防抖触发 reloadFn。
@@ -59,6 +61,13 @@ func (w *Watcher) Close() error {
 		err = w.watcher.Close()
 	})
 	return err
+}
+
+// Suppress 在指定时间内忽略 fsnotify 事件，防止 Manager.Update 写文件后触发双重 reload。
+func (w *Watcher) Suppress(d time.Duration) {
+	w.mu.Lock()
+	w.suppressUntil = time.Now().Add(d)
+	w.mu.Unlock()
 }
 
 // run 消费 fsnotify 事件并对同一次保存动作做防抖合并。
@@ -105,6 +114,12 @@ func (w *Watcher) run() {
 
 // shouldReload 判断文件事件是否命中目标配置文件和需要 reload 的操作类型。
 func (w *Watcher) shouldReload(event fsnotify.Event) bool {
+	w.mu.Lock()
+	suppressed := time.Now().Before(w.suppressUntil)
+	w.mu.Unlock()
+	if suppressed {
+		return false
+	}
 	if !samePath(w.path, event.Name) {
 		return false
 	}

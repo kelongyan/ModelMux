@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Button, Card, Drawer, Empty, Input, Result, Select, Space, Spin, Switch, Table, Typography } from "antd";
+import { Button, Card, Drawer, Empty, Input, Result, Select, Skeleton, Space, Switch, Table, Typography } from "antd";
 import { useMemo, useState } from "react";
 
 import { fetchRecentEvents } from "../api/admin";
@@ -50,7 +50,7 @@ export function EventsPage(): JSX.Element {
   if (eventsQuery.isLoading) {
     return (
       <div className="console-loading">
-        <Spin size="large" />
+        <Skeleton active paragraph={{ rows: 8 }} />
       </div>
     );
   }
@@ -61,6 +61,7 @@ export function EventsPage(): JSX.Element {
         status="error"
         title="事件列表加载失败"
         subTitle={eventsQuery.error instanceof Error ? eventsQuery.error.message : "未知错误"}
+        extra={<Button onClick={() => void eventsQuery.refetch()}>重试</Button>}
       />
     );
   }
@@ -133,7 +134,7 @@ export function EventsPage(): JSX.Element {
         title={selectedEvent ? selectedEvent.message : "事件详情"}
         open={selectedEvent !== null}
         onClose={() => setSelectedEvent(null)}
-        width={720}
+        width={Math.min(720, typeof window !== "undefined" ? window.innerWidth * 0.92 : 720)}
       >
         {selectedEvent ? <EventDetail event={selectedEvent} /> : null}
       </Drawer>

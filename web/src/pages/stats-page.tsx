@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { fetchStatsLogs, fetchStatsModels, fetchStatsSummary } from "../api/admin";
 import { queryKeys } from "../api/query-keys";
+import { useVisibilityRefetchInterval } from "../components/use-visibility-polling";
 import { StatsLogsCard } from "../features/stats/stats-logs-card";
 import { StatsSummaryCard } from "../features/stats/stats-summary-card";
 import type { AdminStatsSummary, AdminStatsWindow } from "../types/admin";
@@ -15,23 +16,25 @@ export function StatsPage(): JSX.Element {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
+  const pollInterval = useVisibilityRefetchInterval(10_000);
+
   const summaryQuery = useQuery({
     queryKey: queryKeys.statsSummary(window),
     queryFn: () => fetchStatsSummary(window),
-    refetchInterval: 10_000,
+    refetchInterval: pollInterval,
   });
 
   const modelsQuery = useQuery({
     queryKey: queryKeys.statsModels(window),
     queryFn: () => fetchStatsModels(window),
-    refetchInterval: 10_000,
+    refetchInterval: pollInterval,
   });
 
   const logsQuery = useQuery({
     queryKey: queryKeys.statsLogs({ window, model, status, page, pageSize }),
     queryFn: () =>
       fetchStatsLogs({ window, model: model || undefined, status: status || undefined, page, page_size: pageSize }),
-    refetchInterval: 10_000,
+    refetchInterval: pollInterval,
   });
 
   const modelOptions = useMemo(() => {
@@ -44,26 +47,6 @@ export function StatsPage(): JSX.Element {
     return options;
   }, [modelsQuery.data]);
 
-  if (summaryQuery.isLoading || logsQuery.isLoading || modelsQuery.isLoading) {
-    return (
-      <div className="console-loading">
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  if (summaryQuery.isError || logsQuery.isError || modelsQuery.isError) {
-    const error = summaryQuery.error ?? logsQuery.error ?? modelsQuery.error;
-    return (
-      <Result
-        status="error"
-        title="调用统计加载失败"
-        subTitle={error instanceof Error ? error.message : "未知错误"}
-        extra={<Button onClick={() => void refetchAll()}>重新获取</Button>}
-      />
-    );
-  }
-
   const summary = summaryQuery.data?.summary ?? emptySummary();
   const droppedRecords = summaryQuery.data?.dropped_records ?? 0;
   const queueDepth = summaryQuery.data?.queue_depth ?? 0;
@@ -73,41 +56,60 @@ export function StatsPage(): JSX.Element {
 
   return (
     <Space direction="vertical" size={20} className="console-stack">
-      <StatsSummaryCard
-        summary={summary}
-        droppedRecords={droppedRecords}
-        queueDepth={queueDepth}
-        queueCapacity={queueCapacity}
-        window={window}
-        onWindowChange={(nextWindow) => {
-          setWindow(nextWindow);
-          setPage(1);
-        }}
-        onRefresh={() => void refetchAll()}
-      />
+      {summaryQuery.isError ? (
+        <Result
+          status="error"
+          title="统计摘要加载失败"
+          subTitle={summaryQuery.error instanceof Error ? summaryQuery.error.message : "未知错误"}
+          extra={<Button onClick={() => void summaryQuery.refetch()}>重试</Button>}
+        />
+      ) : (
+        <StatsSummaryCard
+          summary={summary}
+          droppedRecords={droppedRecords}
+          queueDepth={queueDepth}
+          queueCapacity={queueCapacity}
+          window={window}
+          loading={summaryQuery.isLoading}
+          onWindowChange={(nextWindow) => {
+            setWindow(nextWindow);
+            setPage(1);
+          }}
+          onRefresh={() => void refetchAll()}
+        />
+      )}
 
-      <StatsLogsCard
-        logs={logs}
-        total={total}
-        loading={logsQuery.isFetching}
-        model={model}
-        modelOptions={modelOptions}
-        status={status}
-        page={page}
-        pageSize={pageSize}
-        onModelChange={(nextModel) => {
-          setModel(nextModel);
-          setPage(1);
-        }}
-        onStatusChange={(nextStatus) => {
-          setStatus(nextStatus);
-          setPage(1);
-        }}
-        onPageChange={(nextPage, nextPageSize) => {
-          setPage(nextPage);
-          setPageSize(nextPageSize);
-        }}
-      />
+      {logsQuery.isError ? (
+        <Result
+          status="error"
+          title="调用日志加载失败"
+          subTitle={logsQuery.error instanceof Error ? logsQuery.error.message : "未知错误"}
+          extra={<Button onClick={() => void logsQuery.refetch()}>重试</Button>}
+        />
+      ) : (
+        <StatsLogsCard
+          logs={logs}
+          total={total}
+          loading={logsQuery.isLoading || logsQuery.isFetching}
+          model={model}
+          modelOptions={modelOptions}
+          status={status}
+          page={page}
+          pageSize={pageSize}
+          onModelChange={(nextModel) => {
+            setModel(nextModel);
+            setPage(1);
+          }}
+          onStatusChange={(nextStatus) => {
+            setStatus(nextStatus);
+            setPage(1);
+          }}
+          onPageChange={(nextPage, nextPageSize) => {
+            setPage(nextPage);
+            setPageSize(nextPageSize);
+          }}
+        />
+      )}
     </Space>
   );
 

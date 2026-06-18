@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 )
 
 var (
@@ -27,6 +28,7 @@ var (
 		"provider_circuit_max_open_seconds",
 		"provider_circuit_half_open_max",
 		"max_body_bytes",
+		"admin_api_key",
 	}
 	// RestartRequiredFields 列出保存后需要重启进程才能完全生效的字段。
 	RestartRequiredFields = []string{
@@ -55,6 +57,14 @@ type Manager struct {
 	path     string
 	reloadFn func(string) error
 	mu       sync.Mutex
+	watcher  *Watcher
+}
+
+// SetWatcher 关联文件监听器，使 Update 写文件前可抑制重复 reload。
+func (m *Manager) SetWatcher(w *Watcher) {
+	m.mu.Lock()
+	m.watcher = w
+	m.mu.Unlock()
 }
 
 // UpdateResult 描述一次配置变更的结果，便于前端提示热生效与重启影响。
@@ -125,6 +135,9 @@ func (m *Manager) Update(mutator func(*Config) error) (*UpdateResult, error) {
 		return result, nil
 	}
 
+	if m.watcher != nil {
+		m.watcher.Suppress(2 * time.Second)
+	}
 	if err := writeFileAtomic(m.path, next); err != nil {
 		return nil, err
 	}
@@ -194,6 +207,7 @@ func diffFields(before, after *Config) []string {
 	appendIfChanged("stats_dir", before.StatsDir == after.StatsDir)
 	appendIfChanged("stats_retention_days", before.StatsRetentionDays == after.StatsRetentionDays)
 	appendIfChanged("stats_max_recent_records", before.StatsMaxRecentRecords == after.StatsMaxRecentRecords)
+	appendIfChanged("admin_api_key", before.AdminAPIKey == after.AdminAPIKey)
 	return changed
 }
 

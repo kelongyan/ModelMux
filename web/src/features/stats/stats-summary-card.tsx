@@ -1,4 +1,4 @@
-import { Button, Card, Col, Row, Segmented, Space, Typography } from "antd";
+import { Button, Card, Col, Row, Segmented, Space, Spin, Typography } from "antd";
 
 import type { AdminStatsSummary, AdminStatsWindow } from "../../types/admin";
 import { formatNumber, formatLatencySec, formatPercent } from "./stats-format";
@@ -10,6 +10,7 @@ type StatsSummaryCardProps = {
   queueDepth: number;
   queueCapacity: number;
   window: AdminStatsWindow;
+  loading?: boolean;
   onWindowChange: (window: AdminStatsWindow) => void;
   onRefresh: () => void;
 };
@@ -29,11 +30,13 @@ export function StatsSummaryCard({
   queueDepth,
   queueCapacity,
   window,
+  loading,
   onWindowChange,
   onRefresh,
 }: StatsSummaryCardProps): JSX.Element {
   return (
     <Card className="surface-card reveal-card reveal-delay-0" bordered={false}>
+      <Spin spinning={!!loading}>
       <div className="section-heading">
         <div>
           <Typography.Text className="placeholder-kicker">Usage</Typography.Text>
@@ -54,6 +57,7 @@ export function StatsSummaryCard({
         <KPI label="成功率" value={formatPercent(summary.success_calls, summary.total_calls)} tone="green" />
         <KPI label="平均延迟" value={formatLatencySec(summary.avg_latency_ms)} tone="red" />
       </Row>
+      </Spin>
     </Card>
   );
 }

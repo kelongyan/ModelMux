@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Collapse, Form, Result, Space, Spin, Typography, message } from "antd";
+import { Button, Card, Collapse, Form, Result, Skeleton, Space, Typography, message } from "antd";
 import { startTransition, useEffect, useMemo, useState } from "react";
 
 import { fetchSettings, updateSettings } from "../api/admin";
@@ -79,7 +79,7 @@ export function SettingsPage(): JSX.Element {
   if (settingsQuery.isLoading) {
     return (
       <div className="console-loading">
-        <Spin size="large" />
+        <Skeleton active paragraph={{ rows: 8 }} />
       </div>
     );
   }
@@ -90,6 +90,7 @@ export function SettingsPage(): JSX.Element {
         status="error"
         title="设置加载失败"
         subTitle={settingsQuery.error instanceof Error ? settingsQuery.error.message : "未知错误"}
+        extra={<Button onClick={() => void settingsQuery.refetch()}>重试</Button>}
       />
     );
   }

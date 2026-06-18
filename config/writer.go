@@ -45,6 +45,7 @@ type persistedConfig struct {
 	StatsDir                        string           `json:"stats_dir"`
 	StatsRetentionDays              int              `json:"stats_retention_days"`
 	StatsMaxRecentRecords           int              `json:"stats_max_recent_records"`
+	AdminAPIKey                     string           `json:"admin_api_key,omitempty"`
 }
 
 // writeFileAtomic 把配置以首选 schema 原子写回磁盘，避免保存半截 JSON。
@@ -89,6 +90,7 @@ func writeFileAtomic(path string, cfg *Config) error {
 		StatsDir:                        cfg.StatsDir,
 		StatsRetentionDays:              cfg.StatsRetentionDays,
 		StatsMaxRecentRecords:           cfg.StatsMaxRecentRecords,
+		AdminAPIKey:                     cfg.AdminAPIKey,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {

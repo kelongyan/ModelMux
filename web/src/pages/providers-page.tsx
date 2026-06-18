@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Drawer, Empty, Form, Result, Space, Spin, Typography, message } from "antd";
-import { useEffect, useState } from "react";
+import { Button, Card, Drawer, Empty, Form, Input, Result, Skeleton, Space, Typography, message } from "antd";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import {
@@ -51,6 +51,7 @@ export function ProvidersPage(): JSX.Element {
   const [messageApi, contextHolder] = message.useMessage();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedProviderID, setSelectedProviderID] = useState<string | null>(() => searchParams.get("provider"));
+  const [providerSearch, setProviderSearch] = useState("");
   const [selectedKeyIDs, setSelectedKeyIDs] = useState<string[]>([]);
   const [providerModal, setProviderModal] = useState<ProviderModalState>({ open: false, mode: "create" });
   const [keyModal, setKeyModal] = useState<KeyModalState>({ open: false, mode: "append" });
@@ -299,10 +300,17 @@ export function ProvidersPage(): JSX.Element {
   const providerDetail = providerDetailQuery.data;
   const detailLoading = providerDetailQuery.isLoading && selectedProviderID !== null;
 
+  const filteredProviders = useMemo(() => {
+    const all = providersQuery.data?.providers ?? [];
+    if (!providerSearch.trim()) return all;
+    const q = providerSearch.toLowerCase();
+    return all.filter((p) => p.id.toLowerCase().includes(q) || p.target_url.toLowerCase().includes(q));
+  }, [providersQuery.data, providerSearch]);
+
   if (providersQuery.isLoading) {
     return (
       <div className="console-loading">
-        <Spin size="large" />
+        <Skeleton active paragraph={{ rows: 8 }} />
       </div>
     );
   }
@@ -313,6 +321,7 @@ export function ProvidersPage(): JSX.Element {
         status="error"
         title="Provider 列表加载失败"
         subTitle={providersQuery.error instanceof Error ? providersQuery.error.message : "未知错误"}
+        extra={<Button onClick={() => void providersQuery.refetch()}>重试</Button>}
       />
     );
   }
@@ -336,8 +345,15 @@ export function ProvidersPage(): JSX.Element {
               </Button>
             </Space>
           </div>
+          <Input.Search
+            placeholder="按 ID 或 URL 搜索 Provider"
+            allowClear
+            style={{ marginBottom: 12, maxWidth: 360 }}
+            onSearch={setProviderSearch}
+            onChange={(e) => { if (!e.target.value) setProviderSearch(""); }}
+          />
           <ProviderTable
-            providers={providersQuery.data.providers}
+            providers={filteredProviders}
             activating={activateProviderMutation.isPending}
             deleting={deleteProviderMutation.isPending}
             onOpenDetail={setSelectedProvider}
@@ -386,13 +402,13 @@ export function ProvidersPage(): JSX.Element {
 
       <Drawer
         open={selectedProviderID !== null}
-        width={860}
+        width={Math.min(860, typeof window !== "undefined" ? window.innerWidth * 0.92 : 860)}
         title={selectedProvider ? `Provider 详情：${selectedProvider.id}` : "Provider 详情"}
         onClose={() => setSelectedProvider(null)}
       >
         {detailLoading ? (
           <div className="console-loading">
-            <Spin />
+            <Skeleton active paragraph={{ rows: 6 }} />
           </div>
         ) : providerDetailQuery.isError ? (
           <Result

@@ -46,6 +46,7 @@
 
 .settings-form-item--inactive {
   opacity: 0.52;
+  pointer-events: none;
 }
 
 .settings-form-item--inactive .settings-field-hint::after {

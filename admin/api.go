@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"runtime"
 	"sort"
 	"strconv"
@@ -55,6 +57,8 @@ type apiSettingsPayload struct {
 	StatsDir                        string `json:"stats_dir"`
 	StatsRetentionDays              int    `json:"stats_retention_days"`
 	StatsMaxRecentRecords           int    `json:"stats_max_recent_records"`
+	HasAdminAPIKey                  bool   `json:"has_admin_api_key"`
+	AdminAPIKey                     string `json:"admin_api_key,omitempty"`
 }
 
 type apiProviderSummary struct {
@@ -221,8 +225,15 @@ type apiAboutResponse struct {
 	BackupEndpoints []string `json:"backup_endpoints"`
 }
 
+const adminMaxRequestBody = 1 << 20 // 1 MB
+
 func decodeJSONBody[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, adminMaxRequestBody)
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		if err.Error() == "http: request body too large" {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": "request body too large"})
+			return false
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json body"})
 		return false
 	}
@@ -239,25 +250,26 @@ func (h *Handler) requireConfigManager(w http.ResponseWriter) bool {
 
 // registerAPIRoutes 注册管理台 API 路由。
 func (h *Handler) registerAPIRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/admin/api/v1/dashboard", h.dashboard)
-	mux.HandleFunc("/admin/api/v1/providers", h.providersIndex)
-	mux.HandleFunc("/admin/api/v1/providers/", h.providersDetail)
-	mux.HandleFunc("/admin/api/v1/settings", h.settings)
-	mux.HandleFunc("/admin/api/v1/events", h.eventsIndex)
-	mux.HandleFunc("/admin/api/v1/about", h.about)
-	mux.HandleFunc("/admin/api/v1/reload", h.apiReload)
-	mux.HandleFunc("/admin/api/v1/stats/summary", h.statsSummary)
-	mux.HandleFunc("/admin/api/v1/stats/models", h.statsModels)
-	mux.HandleFunc("/admin/api/v1/stats/recent", h.statsRecent)
-	mux.HandleFunc("/admin/api/v1/stats/logs", h.statsLogs)
-	mux.HandleFunc("/admin/api/v1/config/backup", h.backupConfig)
-	mux.HandleFunc("/admin/api/v1/state/backup", h.backupState)
+	auth := h.requireAuth
+	mux.HandleFunc("/admin/api/v1/dashboard", auth(h.dashboard))
+	mux.HandleFunc("/admin/api/v1/providers", auth(h.providersIndex))
+	mux.HandleFunc("/admin/api/v1/providers/", auth(h.providersDetail))
+	mux.HandleFunc("/admin/api/v1/settings", auth(h.settings))
+	mux.HandleFunc("/admin/api/v1/events", auth(h.eventsIndex))
+	mux.HandleFunc("/admin/api/v1/about", auth(h.about))
+	mux.HandleFunc("/admin/api/v1/reload", auth(h.apiReload))
+	mux.HandleFunc("/admin/api/v1/stats/summary", auth(h.statsSummary))
+	mux.HandleFunc("/admin/api/v1/stats/models", auth(h.statsModels))
+	mux.HandleFunc("/admin/api/v1/stats/recent", auth(h.statsRecent))
+	mux.HandleFunc("/admin/api/v1/stats/logs", auth(h.statsLogs))
+	mux.HandleFunc("/admin/api/v1/config/backup", auth(h.backupConfig))
+	mux.HandleFunc("/admin/api/v1/state/backup", auth(h.backupState))
 }
 
 // dashboard 输出面向前端首页的聚合视图。
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 
@@ -290,7 +302,7 @@ func (h *Handler) providersIndex(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.createProvider(w, r)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 	}
 }
 
@@ -322,7 +334,7 @@ func (h *Handler) providersDetail(w http.ResponseWriter, r *http.Request) {
 		case http.MethodDelete:
 			h.deleteProvider(w, r, id)
 		default:
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		}
 	case "activate":
 		h.activateProvider(w, r, id)
@@ -354,7 +366,7 @@ func (h *Handler) providersDetail(w http.ResponseWriter, r *http.Request) {
 // providerDetail 返回单个 provider 的详细状态。
 func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -363,7 +375,7 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 
 	cfg, err := h.cfgManager.Snapshot()
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+		writeAdminError(w, http.StatusServiceUnavailable, err, "failed to read configuration")
 		return
 	}
 	providerCfg, ok := findProviderConfig(cfg.ProviderConfigs(), id)
@@ -398,7 +410,7 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 // activateProvider 切换 active provider，并通过配置管理器提交变更。
 func (h *Handler) activateProvider(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if h.cfgManager == nil {
@@ -434,7 +446,7 @@ func (h *Handler) activateProvider(w http.ResponseWriter, r *http.Request, id st
 // createProvider 新增一个 provider，并触发配置热重载。
 func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -490,7 +502,7 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 // updateProvider 更新 provider 的基础信息，阶段 3 只开放 target_url 编辑。
 func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -536,7 +548,7 @@ func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request, id stri
 // deleteProvider 删除非活跃 provider，避免误删当前生效目标。
 func (h *Handler) deleteProvider(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -580,7 +592,7 @@ func (h *Handler) deleteProvider(w http.ResponseWriter, r *http.Request, id stri
 // appendProviderKeys 追加新的 keys，并自动去重保留原顺序。
 func (h *Handler) appendProviderKeys(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 
@@ -608,7 +620,7 @@ func (h *Handler) appendProviderKeys(w http.ResponseWriter, r *http.Request, id 
 // replaceProviderKeys 全量替换 provider keys。
 func (h *Handler) replaceProviderKeys(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 
@@ -636,7 +648,7 @@ func (h *Handler) replaceProviderKeys(w http.ResponseWriter, r *http.Request, id
 // deleteProviderKeys 按 key_id 删除 provider 内的 keys，但必须至少保留一个。
 func (h *Handler) deleteProviderKeys(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -700,7 +712,7 @@ func (h *Handler) deleteProviderKeys(w http.ResponseWriter, r *http.Request, id 
 // resetProviderKey 手动恢复单个 key 为 active，并立即触发状态保存。
 func (h *Handler) resetProviderKey(w http.ResponseWriter, r *http.Request, id, keyID string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if keyID == "" {
@@ -728,7 +740,7 @@ func (h *Handler) resetProviderKey(w http.ResponseWriter, r *http.Request, id, k
 // replaceProviderModels 替换 provider 的模型 ID 记录列表。
 func (h *Handler) replaceProviderModels(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -769,7 +781,7 @@ func (h *Handler) replaceProviderModels(w http.ResponseWriter, r *http.Request, 
 // fetchProviderModels 从上游 API 拉取可用模型列表并返回（不自动保存）。
 func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -778,7 +790,7 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id
 
 	cfg, err := h.cfgManager.Snapshot()
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+		writeAdminError(w, http.StatusServiceUnavailable, err, "failed to read configuration")
 		return
 	}
 	providerCfg, ok := findProviderConfig(cfg.ProviderConfigs(), id)
@@ -804,6 +816,10 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id
 	}
 
 	modelsURL := strings.TrimRight(providerCfg.TargetURL, "/") + "/models"
+	if err := validateUpstreamURL(modelsURL); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "upstream URL is not allowed for security reasons"})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
@@ -909,7 +925,7 @@ func (h *Handler) settings(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		h.updateSettings(w, r)
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 	}
 }
 
@@ -961,6 +977,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			StatsDir:                        cfg.StatsDir,
 			StatsRetentionDays:              cfg.StatsRetentionDays,
 			StatsMaxRecentRecords:           cfg.StatsMaxRecentRecords,
+			HasAdminAPIKey:                  cfg.AdminAPIKey != "",
 		},
 		HotReloadFields:       append([]string(nil), config.HotReloadFields...),
 		RestartRequiredFields: append([]string(nil), config.RestartRequiredFields...),
@@ -1039,6 +1056,9 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		cfg.StatsDir = req.StatsDir
 		cfg.StatsRetentionDays = req.StatsRetentionDays
 		cfg.StatsMaxRecentRecords = req.StatsMaxRecentRecords
+		if req.AdminAPIKey != "" {
+			cfg.AdminAPIKey = req.AdminAPIKey
+		}
 		return nil
 	})
 	if err != nil {
@@ -1063,7 +1083,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 // eventsIndex 返回最近发生的管理事件。
 func (h *Handler) eventsIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 
@@ -1081,7 +1101,7 @@ func (h *Handler) eventsIndex(w http.ResponseWriter, r *http.Request) {
 // apiReload 复用主流程的热重载逻辑，供前端按钮和命令行均能触发。
 func (h *Handler) apiReload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -1100,7 +1120,7 @@ func (h *Handler) apiReload(w http.ResponseWriter, r *http.Request) {
 // about 输出管理台和运行环境信息，供关于页展示与交付排查使用。
 func (h *Handler) about(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if h.cfgManager == nil {
@@ -1155,7 +1175,7 @@ func (h *Handler) about(w http.ResponseWriter, r *http.Request) {
 // backupConfig 导出当前生效配置，供下载备份或交叉迁移使用。
 func (h *Handler) backupConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if h.cfgManager == nil {
@@ -1180,7 +1200,7 @@ func (h *Handler) backupConfig(w http.ResponseWriter, r *http.Request) {
 // backupState 导出当前运行状态，便于快速备份或迁移到其他机器。
 func (h *Handler) backupState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if h.pools == nil {
@@ -1474,6 +1494,54 @@ func (h *Handler) recordEvent(level, category, event, message string, data map[s
 }
 
 // writeJSON 写出统一 JSON 响应。
+// writeAdminError 向客户端返回脱敏错误消息，同时在服务端日志记录完整错误。
+func writeAdminError(w http.ResponseWriter, status int, err error, userMsg string) {
+	slog.Error(userMsg, "err", err)
+	writeJSON(w, status, map[string]any{"error": userMsg})
+}
+
+// validateUpstreamURL 校验上游 URL 不指向私有/保留 IP 段，防止 SSRF。
+func validateUpstreamURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("unsupported scheme %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("missing host")
+	}
+	if isBlockedHost(host) {
+		return fmt.Errorf("host %q is not allowed", host)
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return nil
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("resolved IP %s is in a restricted range", ip)
+		}
+	}
+	return nil
+}
+
+func isBlockedHost(host string) bool {
+	blocked := []string{
+		"169.254.169.254",
+		"metadata.google.internal",
+		"metadata.google",
+	}
+	for _, b := range blocked {
+		if strings.EqualFold(host, b) {
+			return true
+		}
+	}
+	return false
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

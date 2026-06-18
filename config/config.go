@@ -122,6 +122,7 @@ type Config struct {
 	StatsDir                        string           `json:"stats_dir"`
 	StatsRetentionDays              int              `json:"stats_retention_days"`
 	StatsMaxRecentRecords           int              `json:"stats_max_recent_records"`
+	AdminAPIKey                     string           `json:"admin_api_key,omitempty"`
 }
 
 var (

@@ -372,12 +372,17 @@ func (s *Store) runWriter() {
 	defer close(s.writerDone)
 
 	var file *os.File
+	var buf *bufio.Writer
 	var currentDay string
 	var lastErr error
 
 	closeFile := func() error {
 		if file == nil {
 			return nil
+		}
+		if buf != nil {
+			_ = buf.Flush()
+			buf = nil
 		}
 		err := file.Close()
 		file = nil
@@ -388,6 +393,12 @@ func (s *Store) runWriter() {
 	flushFile := func() error {
 		if file == nil {
 			return lastErr
+		}
+		if buf != nil {
+			if err := buf.Flush(); err != nil {
+				lastErr = err
+				return err
+			}
 		}
 		if err := file.Sync(); err != nil {
 			lastErr = err
@@ -401,7 +412,7 @@ func (s *Store) runWriter() {
 		case cmd := <-s.commands:
 			switch {
 			case cmd.hasRecord:
-				if err := s.writeRecord(&file, &currentDay, cmd.record); err != nil {
+				if err := s.writeRecord(&file, &buf, &currentDay, cmd.record); err != nil {
 					lastErr = err
 				}
 			case cmd.flush != nil:
@@ -420,7 +431,7 @@ func (s *Store) runWriter() {
 	}
 }
 
-func (s *Store) writeRecord(file **os.File, currentDay *string, record CallRecord) error {
+func (s *Store) writeRecord(file **os.File, buf **bufio.Writer, currentDay *string, record CallRecord) error {
 	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("encode stats record: %w", err)
@@ -430,6 +441,10 @@ func (s *Store) writeRecord(file **os.File, currentDay *string, record CallRecor
 	day := record.At.UTC().Format(time.DateOnly)
 	if *file == nil || *currentDay != day {
 		if *file != nil {
+			if *buf != nil {
+				_ = (*buf).Flush()
+				*buf = nil
+			}
 			if err := (*file).Close(); err != nil {
 				return fmt.Errorf("close stats file: %w", err)
 			}
@@ -443,10 +458,11 @@ func (s *Store) writeRecord(file **os.File, currentDay *string, record CallRecor
 			return fmt.Errorf("open stats file: %w", err)
 		}
 		*file = nextFile
+		*buf = bufio.NewWriter(nextFile)
 		*currentDay = day
 	}
 
-	if _, err := (*file).Write(data); err != nil {
+	if _, err := (*buf).Write(data); err != nil {
 		return fmt.Errorf("write stats file: %w", err)
 	}
 	return nil

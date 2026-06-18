@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { Empty, Popconfirm, Table } from "antd";
 import type { TableColumnsType } from "antd";
 
@@ -14,7 +15,7 @@ type ProviderTableProps = {
   onDelete: (providerID: string) => void;
 };
 
-export function ProviderTable({
+export const ProviderTable = memo(function ProviderTable({
   providers,
   activating,
   deleting,
@@ -27,7 +28,7 @@ export function ProviderTable({
     return <Empty description="当前没有 provider 配置" />;
   }
 
-  const columns: TableColumnsType<AdminProviderSummary> = [
+  const columns: TableColumnsType<AdminProviderSummary> = useMemo(() => [
     {
       title: "Provider",
       dataIndex: "id",
@@ -83,7 +84,7 @@ export function ProviderTable({
         </div>
       ),
     },
-  ];
+  ], [activating, deleting, onOpenDetail, onActivate, onEdit, onDelete]);
 
   return (
     <Table
@@ -96,4 +97,4 @@ export function ProviderTable({
       scroll={{ x: 920 }}
     />
   );
-}
+});

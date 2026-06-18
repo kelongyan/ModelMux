@@ -93,6 +93,8 @@ func (k *Key) MarkInvalid() {
 
 // MarkInvalidWithReason 将 key 标记为失效状态，并记录失效原因。
 func (k *Key) MarkInvalidWithReason(reason string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
 	k.state.Store(int32(StateInvalid))
 	k.last401At.Store(time.Now().UnixNano())
 	k.invalidReason.Store(reason)

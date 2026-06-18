@@ -2422,7 +2422,7 @@ func TestStreamBodyReturnsWriteError(t *testing.T) {
 	wantErr := errors.New("write failed")
 	writer := failingResponseWriter{err: wantErr}
 
-	err := streamBody(writer, strings.NewReader("chunk"))
+	err := streamBody(writer, strings.NewReader("chunk"), nil)
 
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
@@ -2430,7 +2430,7 @@ func TestStreamBodyReturnsWriteError(t *testing.T) {
 }
 
 func TestStreamBodyClassifiesCanceledClientWrite(t *testing.T) {
-	err := streamBody(failingResponseWriter{err: context.Canceled}, strings.NewReader("chunk"))
+	err := streamBody(failingResponseWriter{err: context.Canceled}, strings.NewReader("chunk"), nil)
 
 	side, streamErr := streamFailureDetails(err)
 	if side != streamFailureSideClientCanceled {
@@ -2442,7 +2442,7 @@ func TestStreamBodyClassifiesCanceledClientWrite(t *testing.T) {
 }
 
 func TestStreamBodyClassifiesCanceledUpstreamReadAsClientCanceled(t *testing.T) {
-	err := streamBody(httptest.NewRecorder(), &failingReadCloser{err: context.Canceled})
+	err := streamBody(httptest.NewRecorder(), &failingReadCloser{err: context.Canceled}, nil)
 
 	side, streamErr := streamFailureDetails(err)
 	if side != streamFailureSideClientCanceled {
@@ -2460,7 +2460,7 @@ func TestStreamBodyWritesSSEKeepAliveWhileWaitingForUpstream(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- streamBody(writer, reader, streamOptions{
+		errCh <- streamBody(writer, reader, func() { _ = reader.Close() }, streamOptions{
 			keepAlive:        10 * time.Millisecond,
 			idleTimeout:      time.Second,
 			contentType:      "text/event-stream",
@@ -2492,7 +2492,7 @@ func TestStreamBodyDoesNotInjectKeepAliveForNonSSE(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- streamBody(writer, reader, streamOptions{
+		errCh <- streamBody(writer, reader, func() { _ = reader.Close() }, streamOptions{
 			keepAlive:   10 * time.Millisecond,
 			idleTimeout: time.Second,
 			contentType: "application/json",
@@ -2518,7 +2518,7 @@ func TestStreamBodyFailsWhenUpstreamIdleTimeoutExpires(t *testing.T) {
 	reader := newBlockingReadCloser()
 	defer reader.Close()
 
-	err := streamBody(httptest.NewRecorder(), reader, streamOptions{
+	err := streamBody(httptest.NewRecorder(), reader, func() { _ = reader.Close() }, streamOptions{
 		idleTimeout: 10 * time.Millisecond,
 		contentType: "text/event-stream",
 	})
@@ -2539,7 +2539,7 @@ func TestStreamBodyFailsWhenMaxDurationExpires(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- streamBody(writer, reader, streamOptions{
+		errCh <- streamBody(writer, reader, func() { _ = reader.Close() }, streamOptions{
 			keepAlive:   5 * time.Millisecond,
 			maxDuration: 20 * time.Millisecond,
 			contentType: "text/event-stream",

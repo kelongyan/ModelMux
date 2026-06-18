@@ -29,7 +29,7 @@ type apiStatsRecentResponse struct {
 
 func (h *Handler) statsSummary(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	window, duration, ok := parseStatsWindow(r.URL.Query().Get("window"))
@@ -53,7 +53,7 @@ func (h *Handler) statsSummary(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) statsModels(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	window, duration, ok := parseStatsWindow(r.URL.Query().Get("window"))
@@ -74,7 +74,7 @@ func (h *Handler) statsModels(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) statsRecent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	limit := parseStatsLimit(r.URL.Query().Get("limit"))
@@ -128,7 +128,7 @@ type apiStatsLogsResponse struct {
 
 func (h *Handler) statsLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	window, duration, ok := parseStatsWindow(r.URL.Query().Get("window"))

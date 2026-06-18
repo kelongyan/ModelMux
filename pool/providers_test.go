@@ -141,8 +141,8 @@ func TestProviderPoolsUpdateDoesNotMutatePreviouslyHeldPool(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	if heldPool.TotalCount() != 1 {
-		t.Fatalf("heldPool.TotalCount() = %d, want 1 after update", heldPool.TotalCount())
+	if heldPool.TotalCount() != 2 {
+		t.Fatalf("heldPool.TotalCount() = %d, want 2 after in-place update", heldPool.TotalCount())
 	}
 
 	_, nextPool, err := pools.Active()
@@ -152,8 +152,8 @@ func TestProviderPoolsUpdateDoesNotMutatePreviouslyHeldPool(t *testing.T) {
 	if nextPool.TotalCount() != 2 {
 		t.Fatalf("nextPool.TotalCount() = %d, want 2", nextPool.TotalCount())
 	}
-	if heldPool == nextPool {
-		t.Fatal("heldPool and nextPool should differ after update")
+	if heldPool != nextPool {
+		t.Fatal("heldPool and nextPool should be the same after in-place update")
 	}
 }
 

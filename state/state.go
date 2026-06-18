@@ -123,14 +123,17 @@ func (s *Store) Save(providers []ProviderRecord) error {
 		return fmt.Errorf("close state tmp: %w", err)
 	}
 	if err := os.Rename(tmpPath, s.path); err != nil {
-		if removeErr := os.Remove(s.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		bakPath := s.path + ".bak"
+		if renameErr := os.Rename(s.path, bakPath); renameErr != nil && !errors.Is(renameErr, os.ErrNotExist) {
 			_ = os.Remove(tmpPath)
-			return fmt.Errorf("remove old state: %w", removeErr)
+			return fmt.Errorf("backup old state: %w", renameErr)
 		}
 		if renameErr := os.Rename(tmpPath, s.path); renameErr != nil {
+			_ = os.Rename(bakPath, s.path)
 			_ = os.Remove(tmpPath)
 			return fmt.Errorf("replace state: %w", renameErr)
 		}
+		_ = os.Remove(bakPath)
 	}
 	return nil
 }

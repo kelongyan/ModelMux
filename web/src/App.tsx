@@ -6,6 +6,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 import { fetchDashboard, triggerReload } from "./api/admin";
 import { queryKeys } from "./api/query-keys";
 import { ConsoleShell } from "./app/console-shell";
+import { ErrorBoundary } from "./components/error-boundary";
 import { PageTransition } from "./components/page-transition";
 import { useGlobalShortcuts } from "./components/use-global-shortcuts";
 
@@ -26,7 +27,6 @@ export function App(): JSX.Element {
   const dashboardQuery = useQuery({
     queryKey: queryKeys.dashboard,
     queryFn: fetchDashboard,
-    refetchInterval: 10000,
   });
 
   const handleReload = useCallback(async () => {
@@ -55,12 +55,12 @@ export function App(): JSX.Element {
         <PageTransition animationKey={location.pathname}>
           <Routes key={routeKey}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/providers" element={<ProvidersPage />} />
-            <Route path="/stats" element={<StatsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/events" element={<EventsPage />} />
-            <Route path="/about" element={<AboutPage />} />
+            <Route path="/dashboard" element={<ErrorBoundary><DashboardPage /></ErrorBoundary>} />
+            <Route path="/providers" element={<ErrorBoundary><ProvidersPage /></ErrorBoundary>} />
+            <Route path="/stats" element={<ErrorBoundary><StatsPage /></ErrorBoundary>} />
+            <Route path="/settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
+            <Route path="/events" element={<ErrorBoundary><EventsPage /></ErrorBoundary>} />
+            <Route path="/about" element={<ErrorBoundary><AboutPage /></ErrorBoundary>} />
           </Routes>
         </PageTransition>
       </Suspense>

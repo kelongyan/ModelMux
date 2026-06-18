@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -44,13 +45,19 @@ const (
 	statsDroppedEventInterval           = 30 * time.Second
 	connectionCoolingBase               = 2 * time.Second
 	defaultStreamKeepAliveComment       = ": modelmux keepalive\n\n"
+	maxRetryAfter                       = 5 * time.Minute
 )
+
+var streamBufPool = sync.Pool{New: func() any {
+	buf := make([]byte, 4096)
+	return &buf
+}}
 
 var toolFieldNames = []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"}
 
 type Handler struct {
 	pools                         *pool.ProviderPools
-	runtime                       atomic.Value
+	runtime                       atomic.Pointer[runtimeConfig]
 	stateChangeHook               atomic.Value
 	statsRecorder                 atomic.Value
 	eventRecorder                 atomic.Value
@@ -385,7 +392,7 @@ func (h *Handler) UpdateConfig(cfg *config.Config) error {
 		return err
 	}
 
-	old, _ := h.runtime.Load().(*runtimeConfig)
+	old := h.runtime.Load()
 	h.runtime.Store(next)
 	if old != nil && old.transport != nil {
 		old.transport.CloseIdleConnections()
@@ -407,7 +414,7 @@ func ValidateConfig(cfg *config.Config) error {
 
 // snapshot 读取当前运行时配置快照。
 func (h *Handler) snapshot() *runtimeConfig {
-	rt, _ := h.runtime.Load().(*runtimeConfig)
+	rt := h.runtime.Load()
 	return rt
 }
 
@@ -554,6 +561,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	toolsPresent := requestMeta.toolsPresent
 	toolsStripped := rt.stripTools && toolsPresent
 
+	diagCtx := diagnosticContext{
+		requestID:       requestID,
+		clientRequestID: clientRequestID,
+		request:         r,
+		runtime:         rt,
+		model:           requestModel,
+		stream:          requestStream,
+		toolsPresent:    toolsPresent,
+		toolsStripped:   toolsStripped,
+	}
+
 	callRecord := stats.CallRecord{
 		At:          start.UTC(),
 		ProviderID:  rt.providerID,
@@ -593,13 +611,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	lastScope := retryScopeNone
 	transientFailures := 0
 	waitBudget := rt.waitForKeyTimeout
+	waitRetries := rt.maxRetries
 
 	for attempt := 0; attempt <= rt.maxRetries; attempt++ {
 		key, err := rt.keyPool.Next()
 		if err != nil {
-			if errors.Is(err, pool.ErrNoAvailableKey) {
+			if errors.Is(err, pool.ErrNoAvailableKey) && waitRetries > 0 {
 				if waited := h.waitForCoolingKey(r.Context(), rt, waitBudget); waited > 0 {
 					waitBudget -= waited
+					waitRetries--
 					attempt--
 					continue
 				}
@@ -611,23 +631,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)...)
 			callRecord.Status = http.StatusServiceUnavailable
 			callRecord.Error = "no available API keys"
-			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-				level:           "error",
-				event:           logx.EventProxyRequestFailed,
-				message:         "no available API keys",
-				requestID:       requestID,
-				clientRequestID: clientRequestID,
-				request:         r,
-				runtime:         rt,
-				model:           requestModel,
-				stream:          requestStream,
-				status:          http.StatusServiceUnavailable,
-				latencyMs:       time.Since(start).Milliseconds(),
-				attempts:        attempt,
-				retryScope:      retryScopeNone,
-				toolsPresent:    toolsPresent,
-				toolsStripped:   toolsStripped,
-			}))
+			h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildEvent(
+				"error", logx.EventProxyRequestFailed, "no available API keys",
+				nil, http.StatusServiceUnavailable, time.Since(start).Milliseconds(), attempt, retryScopeNone,
+			)))
 			writeProxyError(w, http.StatusServiceUnavailable, "no available API keys")
 			return
 		}
@@ -646,25 +653,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !callRecord.Success {
 				callRecord.Error = http.StatusText(status)
 			}
-			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-				level:                levelForStatus(status),
-				event:                eventForStatus(status),
-				message:              messageForStatus(status),
-				requestID:            requestID,
-				clientRequestID:      clientRequestID,
-				request:              r,
-				runtime:              rt,
-				key:                  key,
-				model:                requestModel,
-				stream:               requestStream,
-				status:               status,
-				attempts:             attempt + 1,
-				latencyMs:            time.Since(start).Milliseconds(),
-				retryScope:           retryScopeNone,
-				toolsPresent:         toolsPresent,
-				toolsStripped:        toolsStripped,
-				upstreamErrorExcerpt: upstreamErrorExcerpt,
-			}))
+			h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildEventWithExcerpt(
+				levelForStatus(status), eventForStatus(status), messageForStatus(status),
+				key, status, time.Since(start).Milliseconds(), attempt+1, retryScopeNone, upstreamErrorExcerpt,
+			)))
 			h.notifyStateChanged(false)
 			return
 		}
@@ -682,49 +674,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			side, streamErr := streamFailureDetails(err)
 			if side == streamFailureSideClientCanceled {
 				callRecord.Status = 0
-				h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-					level:             "info",
-					event:             logx.EventClientCanceled,
-					message:           "request canceled",
-					requestID:         requestID,
-					clientRequestID:   clientRequestID,
-					request:           r,
-					runtime:           rt,
-					key:               key,
-					model:             requestModel,
-					stream:            requestStream,
-					status:            status,
-					latencyMs:         time.Since(start).Milliseconds(),
-					attempts:          attempt + 1,
-					retryScope:        retryScopeNone,
-					toolsPresent:      toolsPresent,
-					toolsStripped:     toolsStripped,
-					streamFailureSide: side,
-					streamError:       streamErr,
-				}))
+				h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildStreamFailure(
+					"info", logx.EventClientCanceled, "request canceled",
+					key, status, time.Since(start).Milliseconds(), attempt+1, retryScopeNone, side, streamErr,
+				)))
 				return
 			}
 			callRecord.Error = streamFailureMessage(side, streamErr)
-			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-				level:             "warn",
-				event:             logx.EventProxyRequestFailed,
-				message:           "stream failed",
-				requestID:         requestID,
-				clientRequestID:   clientRequestID,
-				request:           r,
-				runtime:           rt,
-				key:               key,
-				model:             requestModel,
-				stream:            requestStream,
-				status:            status,
-				latencyMs:         time.Since(start).Milliseconds(),
-				attempts:          attempt + 1,
-				retryScope:        retryScopeNone,
-				toolsPresent:      toolsPresent,
-				toolsStripped:     toolsStripped,
-				streamFailureSide: side,
-				streamError:       streamErr,
-			}))
+			h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildStreamFailure(
+				"warn", logx.EventProxyRequestFailed, "stream failed",
+				key, status, time.Since(start).Milliseconds(), attempt+1, retryScopeNone, side, streamErr,
+			)))
 			return
 		}
 
@@ -784,25 +744,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					"err", err,
 				)...)
 				callRecord.Error = err.Error()
-				h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-					level:                levelForStatus(status),
-					event:                logx.EventProxyRequestFailed,
-					message:              messageForStatus(status),
-					requestID:            requestID,
-					clientRequestID:      clientRequestID,
-					request:              r,
-					runtime:              rt,
-					key:                  key,
-					model:                requestModel,
-					stream:               requestStream,
-					status:               status,
-					latencyMs:            time.Since(start).Milliseconds(),
-					attempts:             attempt + 1,
-					retryScope:           scope,
-					toolsPresent:         toolsPresent,
-					toolsStripped:        toolsStripped,
-					upstreamErrorExcerpt: upstreamErrorExcerpt,
-				}))
+				h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildEventWithExcerpt(
+					levelForStatus(status), logx.EventProxyRequestFailed, messageForStatus(status),
+					key, status, time.Since(start).Milliseconds(), attempt+1, scope, upstreamErrorExcerpt,
+				)))
 				return
 			}
 		case retryScopeConnection:
@@ -852,25 +797,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"err", err,
 			)...)
 			callRecord.Error = err.Error()
-			h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-				level:                levelForStatus(status),
-				event:                logx.EventProxyRequestFailed,
-				message:              messageForStatus(status),
-				requestID:            requestID,
-				clientRequestID:      clientRequestID,
-				request:              r,
-				runtime:              rt,
-				key:                  key,
-				model:                requestModel,
-				stream:               requestStream,
-				status:               status,
-				latencyMs:            time.Since(start).Milliseconds(),
-				attempts:             attempt + 1,
-				retryScope:           scope,
-				toolsPresent:         toolsPresent,
-				toolsStripped:        toolsStripped,
-				upstreamErrorExcerpt: upstreamErrorExcerpt,
-			}))
+			h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildEventWithExcerpt(
+				levelForStatus(status), logx.EventProxyRequestFailed, messageForStatus(status),
+				key, status, time.Since(start).Milliseconds(), attempt+1, scope, upstreamErrorExcerpt,
+			)))
 			return
 		}
 		if stopRetrying {
@@ -887,45 +817,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if lastScope == retryScopeProvider || lastScope == retryScopeConnection {
 		callRecord.Status = http.StatusServiceUnavailable
 		callRecord.Error = "upstream temporarily unavailable after retries"
-		h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-			level:           "error",
-			event:           logx.EventProxyRequestFailed,
-			message:         "upstream temporarily unavailable after retries",
-			requestID:       requestID,
-			clientRequestID: clientRequestID,
-			request:         r,
-			runtime:         rt,
-			model:           requestModel,
-			stream:          requestStream,
-			status:          http.StatusServiceUnavailable,
-			latencyMs:       time.Since(start).Milliseconds(),
-			attempts:        callRecord.Attempts,
-			retryScope:      lastScope,
-			toolsPresent:    toolsPresent,
-			toolsStripped:   toolsStripped,
-		}))
+		h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildEvent(
+			"error", logx.EventProxyRequestFailed, "upstream temporarily unavailable after retries",
+			nil, http.StatusServiceUnavailable, time.Since(start).Milliseconds(), callRecord.Attempts, lastScope,
+		)))
 		writeProxyError(w, http.StatusServiceUnavailable, "upstream temporarily unavailable after retries")
 		return
 	}
 	callRecord.Status = http.StatusServiceUnavailable
 	callRecord.Error = "all keys exhausted after retries"
-	h.emitEvent(r.Context(), requestDiagnosticEvent(requestDiagnosticInput{
-		level:           "error",
-		event:           logx.EventProxyRequestFailed,
-		message:         "all keys exhausted after retries",
-		requestID:       requestID,
-		clientRequestID: clientRequestID,
-		request:         r,
-		runtime:         rt,
-		model:           requestModel,
-		stream:          requestStream,
-		status:          http.StatusServiceUnavailable,
-		latencyMs:       time.Since(start).Milliseconds(),
-		attempts:        callRecord.Attempts,
-		retryScope:      lastScope,
-		toolsPresent:    toolsPresent,
-		toolsStripped:   toolsStripped,
-	}))
+	h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildEvent(
+		"error", logx.EventProxyRequestFailed, "all keys exhausted after retries",
+		nil, http.StatusServiceUnavailable, time.Since(start).Milliseconds(), callRecord.Attempts, lastScope,
+	)))
 	writeProxyError(w, http.StatusServiceUnavailable, "all keys exhausted after retries")
 }
 
@@ -1047,7 +951,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 		streamOpts.maxDuration = rt.streamMaxDuration
 		streamOpts.keepAliveComment = defaultStreamKeepAliveComment
 	}
-	if err := streamBody(w, capturedBody, streamOpts); err != nil {
+	if err := streamBody(w, capturedBody, func() { _ = resp.Body.Close() }, streamOpts); err != nil {
 		side, streamErr := streamFailureDetails(err)
 		slog.Log(r.Context(), streamFailureLogLevel(side), streamFailureLogMessage(side), logx.Fields(logx.CategoryStream, logx.EventStreamFailed,
 			"path", r.URL.Path,
@@ -1121,21 +1025,22 @@ func extractRequestMeta(body []byte) requestMeta {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return requestMeta{}
 	}
-	var payload struct {
-		Model  string `json:"model"`
-		Stream bool   `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return requestMeta{}
-	}
-	meta := requestMeta{
-		model:  strings.TrimSpace(payload.Model),
-		stream: payload.Stream,
-	}
-
 	var payloadMap map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payloadMap); err != nil {
-		return meta
+		return requestMeta{}
+	}
+	meta := requestMeta{}
+	if raw, ok := payloadMap["model"]; ok {
+		var model string
+		if err := json.Unmarshal(raw, &model); err == nil {
+			meta.model = strings.TrimSpace(model)
+		}
+	}
+	if raw, ok := payloadMap["stream"]; ok {
+		var stream bool
+		if err := json.Unmarshal(raw, &stream); err == nil {
+			meta.stream = stream
+		}
 	}
 	for _, field := range toolFieldNames {
 		if _, ok := payloadMap[field]; ok {
@@ -1198,6 +1103,51 @@ type requestDiagnosticInput struct {
 	upstreamErrorExcerpt string
 	streamFailureSide    streamFailureSide
 	streamError          error
+}
+
+type diagnosticContext struct {
+	requestID       string
+	clientRequestID string
+	request         *http.Request
+	runtime         *runtimeConfig
+	model           string
+	stream          bool
+	toolsPresent    bool
+	toolsStripped   bool
+}
+
+func (dc diagnosticContext) buildEvent(level, event, message string, key *pool.Key, status int, latencyMs int64, attempts int, scope retryScope) requestDiagnosticInput {
+	return requestDiagnosticInput{
+		level:           level,
+		event:           event,
+		message:         message,
+		requestID:       dc.requestID,
+		clientRequestID: dc.clientRequestID,
+		request:         dc.request,
+		runtime:         dc.runtime,
+		key:             key,
+		model:           dc.model,
+		stream:          dc.stream,
+		status:          status,
+		latencyMs:       latencyMs,
+		attempts:        attempts,
+		retryScope:      scope,
+		toolsPresent:    dc.toolsPresent,
+		toolsStripped:   dc.toolsStripped,
+	}
+}
+
+func (dc diagnosticContext) buildEventWithExcerpt(level, event, message string, key *pool.Key, status int, latencyMs int64, attempts int, scope retryScope, excerpt string) requestDiagnosticInput {
+	input := dc.buildEvent(level, event, message, key, status, latencyMs, attempts, scope)
+	input.upstreamErrorExcerpt = excerpt
+	return input
+}
+
+func (dc diagnosticContext) buildStreamFailure(level, event, message string, key *pool.Key, status int, latencyMs int64, attempts int, scope retryScope, side streamFailureSide, streamErr error) requestDiagnosticInput {
+	input := dc.buildEvent(level, event, message, key, status, latencyMs, attempts, scope)
+	input.streamFailureSide = side
+	input.streamError = streamErr
+	return input
 }
 
 type requestMeta struct {
@@ -1356,14 +1306,42 @@ func isQuotaExhaustedBody(body []byte) bool {
 	if isQuotaExhaustedErrorCode(body) {
 		return true
 	}
-
-	normalized := strings.ToLower(string(body))
 	for _, indicator := range quotaExhaustedIndicators {
-		if strings.Contains(normalized, indicator) {
+		if bytesContainsFold(body, []byte(indicator)) {
 			return true
 		}
 	}
 	return false
+}
+
+// bytesContainsFold 在不分配内存的情况下对 s 做大小写不敏感的子串匹配。
+func bytesContainsFold(s, sub []byte) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	if len(sub) > len(s) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(sub); i++ {
+		match := true
+		for j := 0; j < len(sub); j++ {
+			if toLowerByte(s[i+j]) != sub[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+func toLowerByte(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + 32
+	}
+	return b
 }
 
 func isQuotaExhaustedErrorCode(body []byte) bool {
@@ -1471,15 +1449,19 @@ func parseRetryAfter(header string) time.Duration {
 	if header == "" {
 		return 0
 	}
+	var d time.Duration
 	if secs, err := strconv.Atoi(header); err == nil && secs > 0 {
-		return time.Duration(secs) * time.Second
+		d = time.Duration(secs) * time.Second
+	} else if t, err := http.ParseTime(header); err == nil {
+		d = time.Until(t)
 	}
-	if t, err := http.ParseTime(header); err == nil {
-		if d := time.Until(t); d > 0 {
-			return d
-		}
+	if d <= 0 {
+		return 0
 	}
-	return 0
+	if d > maxRetryAfter {
+		return maxRetryAfter
+	}
+	return d
 }
 
 // isRetryableUpstreamStatus 判断哪些网关类状态适合在同一 provider 内换 key 再试。
@@ -1555,12 +1537,14 @@ type streamOptions struct {
 }
 
 type streamReadResult struct {
+	buf *[]byte
 	n   int
 	err error
 }
 
 // streamBody 按小块转发响应体并在每次写入后刷新，保证 SSE 不被代理缓冲。
-func streamBody(w http.ResponseWriter, body io.Reader, options ...streamOptions) error {
+// closer 用于在超时或错误退出时关闭上游 body，解除阻塞的 Read goroutine。
+func streamBody(w http.ResponseWriter, body io.Reader, closer func(), options ...streamOptions) error {
 	opts := effectiveStreamOptions(options)
 	flusher, canFlush := w.(http.Flusher)
 	canKeepAlive := canFlush && opts.keepAlive > 0 && isEventStreamContentType(opts.contentType)
@@ -1571,41 +1555,49 @@ func streamBody(w http.ResponseWriter, body io.Reader, options ...streamOptions)
 		return streamBodySimple(w, body, canFlush, flusher)
 	}
 
-	buf := make([]byte, 4096)
 	readCh := make(chan streamReadResult, 1)
 	startRead := func() {
+		bufPtr := streamBufPool.Get().(*[]byte)
 		go func() {
-			n, err := body.Read(buf)
-			readCh <- streamReadResult{n: n, err: err}
+			n, err := body.Read(*bufPtr)
+			readCh <- streamReadResult{buf: bufPtr, n: n, err: err}
 		}()
+	}
+
+	cleanup := func() {
+		if closer != nil {
+			closer()
+		}
 	}
 
 	start := time.Now()
 	lastActivity := start
+
+	var keepAliveTimer, idleTimer, maxTimer *time.Timer
+	if canKeepAlive {
+		keepAliveTimer = time.NewTimer(opts.keepAlive)
+		defer keepAliveTimer.Stop()
+	}
+	if opts.idleTimeout > 0 {
+		idleTimer = time.NewTimer(opts.idleTimeout)
+		defer idleTimer.Stop()
+	}
+	if opts.maxDuration > 0 {
+		maxTimer = time.NewTimer(opts.maxDuration)
+		defer maxTimer.Stop()
+	}
+
 	startRead()
 	for {
-		var timers []*time.Timer
-		timerChan := func(after time.Duration) <-chan time.Time {
-			if after < 0 {
-				after = 0
-			}
-			timer := time.NewTimer(after)
-			timers = append(timers, timer)
-			return timer.C
+		var keepAliveC, idleC, maxC <-chan time.Time
+		if keepAliveTimer != nil {
+			keepAliveC = keepAliveTimer.C
 		}
-		var keepAliveC <-chan time.Time
-		if canKeepAlive {
-			keepAliveC = timerChan(opts.keepAlive)
+		if idleTimer != nil {
+			idleC = idleTimer.C
 		}
-		var idleC <-chan time.Time
-		if opts.idleTimeout > 0 {
-			idleAfter := opts.idleTimeout - time.Since(lastActivity)
-			idleC = timerChan(idleAfter)
-		}
-		var maxC <-chan time.Time
-		if opts.maxDuration > 0 {
-			maxAfter := opts.maxDuration - time.Since(start)
-			maxC = timerChan(maxAfter)
+		if maxTimer != nil {
+			maxC = maxTimer.C
 		}
 
 		var result streamReadResult
@@ -1613,26 +1605,30 @@ func streamBody(w http.ResponseWriter, body io.Reader, options ...streamOptions)
 		case result = <-readCh:
 		case <-keepAliveC:
 			if _, writeErr := w.Write([]byte(opts.keepAliveComment)); writeErr != nil {
+				cleanup()
 				if errors.Is(writeErr, context.Canceled) {
 					return &streamFailureError{side: streamFailureSideClientCanceled, err: writeErr}
 				}
 				return &streamFailureError{side: streamFailureSideClientWrite, err: writeErr}
 			}
 			flusher.Flush()
-			stopStreamTimers(timers)
+			resetStreamTimer(keepAliveTimer, opts.keepAlive)
+			resetStreamTimer(idleTimer, opts.idleTimeout-time.Since(lastActivity))
+			resetStreamTimer(maxTimer, opts.maxDuration-time.Since(start))
 			continue
 		case <-idleC:
-			stopStreamTimers(timers)
+			cleanup()
 			return &streamFailureError{side: streamFailureSideUpstreamRead, err: errStreamIdleTimeout}
 		case <-maxC:
-			stopStreamTimers(timers)
+			cleanup()
 			return &streamFailureError{side: streamFailureSideUpstreamRead, err: errStreamMaxDurationExceeded}
 		}
-		stopStreamTimers(timers)
 
 		n, err := result.n, result.err
 		if n > 0 {
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+			if _, writeErr := w.Write((*result.buf)[:n]); writeErr != nil {
+				streamBufPool.Put(result.buf)
+				cleanup()
 				if errors.Is(writeErr, context.Canceled) {
 					return &streamFailureError{side: streamFailureSideClientCanceled, err: writeErr}
 				}
@@ -1643,15 +1639,21 @@ func streamBody(w http.ResponseWriter, body io.Reader, options ...streamOptions)
 			}
 			lastActivity = time.Now()
 		}
+		streamBufPool.Put(result.buf)
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
+			cleanup()
 			if errors.Is(err, context.Canceled) {
 				return &streamFailureError{side: streamFailureSideClientCanceled, err: err}
 			}
 			return &streamFailureError{side: streamFailureSideUpstreamRead, err: err}
 		}
+
+		resetStreamTimer(keepAliveTimer, opts.keepAlive)
+		resetStreamTimer(idleTimer, opts.idleTimeout-time.Since(lastActivity))
+		resetStreamTimer(maxTimer, opts.maxDuration-time.Since(start))
 		startRead()
 	}
 }
@@ -1695,15 +1697,20 @@ func isEventStreamContentType(contentType string) bool {
 	return mediaType == "text/event-stream"
 }
 
-func stopStreamTimers(timers []*time.Timer) {
-	for _, timer := range timers {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
+func resetStreamTimer(t *time.Timer, d time.Duration) {
+	if t == nil {
+		return
+	}
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
 		}
 	}
+	if d < 0 {
+		d = 0
+	}
+	t.Reset(d)
 }
 
 // writeProxyError 输出统一代理 JSON 错误，使用编码器保证消息被正确转义。

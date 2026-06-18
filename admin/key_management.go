@@ -13,7 +13,7 @@ import (
 
 func (h *Handler) updateProviderKeyMetadata(w http.ResponseWriter, r *http.Request, id, keyID string) {
 	if r.Method != http.MethodPatch {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -88,7 +88,7 @@ func (h *Handler) updateProviderKeyMetadata(w http.ResponseWriter, r *http.Reque
 
 func (h *Handler) previewProviderKeys(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {
@@ -129,7 +129,7 @@ func (h *Handler) previewProviderKeys(w http.ResponseWriter, r *http.Request, id
 
 func (h *Handler) resetAllProviderKeys(w http.ResponseWriter, r *http.Request, id string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 
@@ -151,7 +151,7 @@ func (h *Handler) resetAllProviderKeys(w http.ResponseWriter, r *http.Request, i
 
 func (h *Handler) testProviderKey(w http.ResponseWriter, r *http.Request, id, keyID string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 	if !h.requireConfigManager(w) {

@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Button, Card, Result, Space, Spin, Typography, message } from "antd";
+import { Button, Card, Result, Skeleton, Space, Typography, message } from "antd";
 import { DownloadOutlined, FileProtectOutlined, CloudServerOutlined, BranchesOutlined } from "@ant-design/icons";
 
 import { downloadConfigBackup, downloadStateBackup, fetchAbout } from "../api/admin";
@@ -27,7 +27,7 @@ export function AboutPage(): JSX.Element {
   if (aboutQuery.isLoading) {
     return (
       <div className="console-loading">
-        <Spin size="large" />
+        <Skeleton active paragraph={{ rows: 8 }} />
       </div>
     );
   }
@@ -38,6 +38,7 @@ export function AboutPage(): JSX.Element {
         status="error"
         title="关于页加载失败"
         subTitle={aboutQuery.error instanceof Error ? aboutQuery.error.message : "未知错误"}
+        extra={<Button onClick={() => void aboutQuery.refetch()}>重试</Button>}
       />
     );
   }
