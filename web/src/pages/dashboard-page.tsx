@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Empty, Result, Skeleton, Space, Typography, message } from "antd";
+import { Button, Card, Empty, Popconfirm, Result, Skeleton, Space, Typography, message } from "antd";
 import { startTransition } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { activateProvider, fetchDashboard, fetchSettings, triggerReload } from "../api/admin";
+import { activateProvider, deleteProvider, fetchDashboard, fetchSettings, triggerReload } from "../api/admin";
 import { queryKeys } from "../api/query-keys";
 import { ProgressBar } from "../components/charts/progress-bar";
 import { formatClockShort } from "../components/format-time";
@@ -65,6 +65,20 @@ export function DashboardPage(): JSX.Element {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.dashboard, context.previous);
       }
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteProvider,
+    onSuccess: async (_, providerID) => {
+      messageApi.success(`已删除 provider ${providerID}`);
+      startTransition(() => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.providers });
+      });
+    },
+    onError: (error: Error) => {
+      messageApi.error(`删除失败：${error.message}`);
     },
   });
 
@@ -184,7 +198,9 @@ export function DashboardPage(): JSX.Element {
                   key={provider.id}
                   provider={provider}
                   activating={activateMutation.isPending && activateMutation.variables === provider.id}
+                  deleting={deleteMutation.isPending && deleteMutation.variables === provider.id}
                   onActivate={() => activateMutation.mutate(provider.id)}
+                  onDelete={() => deleteMutation.mutate(provider.id)}
                   onOpenDetail={() => navigate(`/providers?provider=${encodeURIComponent(provider.id)}`)}
                 />
               ))}
@@ -200,11 +216,13 @@ export function DashboardPage(): JSX.Element {
 type ProviderRowProps = {
   provider: AdminProviderSummary;
   activating: boolean;
+  deleting: boolean;
   onActivate: () => void;
+  onDelete: () => void;
   onOpenDetail: () => void;
 };
 
-function ProviderRow({ provider, activating, onActivate, onOpenDetail }: ProviderRowProps): JSX.Element {
+function ProviderRow({ provider, activating, deleting, onActivate, onDelete, onOpenDetail }: ProviderRowProps): JSX.Element {
   const tone = computeCardTone(provider);
   const className = `provider-row provider-row--${tone}${provider.active ? " provider-row--current" : ""}`;
   const configuredKeys = provider.total_keys + provider.disabled_keys;
@@ -239,6 +257,18 @@ function ProviderRow({ provider, activating, onActivate, onOpenDetail }: Provide
           </Button>
         )}
         <Button size="small" type="link" onClick={onOpenDetail}>详情</Button>
+        {!provider.active ? (
+          <Popconfirm
+            title={`确认删除 provider ${provider.id}？`}
+            description="删除后将同时移除其全部 keys。"
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={onDelete}
+          >
+            <Button size="small" type="link" danger loading={deleting}>删除</Button>
+          </Popconfirm>
+        ) : null}
       </div>
     </div>
   );
