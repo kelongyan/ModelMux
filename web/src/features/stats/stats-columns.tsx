@@ -2,7 +2,8 @@ import { Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import type { AdminCallRecord } from "../../types/admin";
-import { deriveTotalTokens, formatLocalDateTime, formatNumber, formatLatencySec, latencyClass } from "./stats-format";
+import { deriveTotalTokens, formatNumber, formatLatencySec, latencyClass } from "./stats-format";
+import { formatDateTime } from "../../components/format-time";
 
 export function buildStatsLogColumns(): ColumnsType<AdminCallRecord> {
   return [
@@ -11,7 +12,7 @@ export function buildStatsLogColumns(): ColumnsType<AdminCallRecord> {
       dataIndex: "at",
       key: "at",
       width: 165,
-      render: (value: string) => formatLocalDateTime(value),
+      render: (value: string) => formatDateTime(value),
     },
     {
       title: "模型",

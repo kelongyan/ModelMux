@@ -8,7 +8,7 @@ import { formatDateTime } from "../components/format-time";
 import { EventDetail } from "../features/events/event-detail";
 import { buildEventColumns } from "../features/events/events-columns";
 import { eventLevelOptions } from "../features/events/events-options";
-import { buildEventSelectOptions, filterEvents, summarizeEvents } from "../features/events/events-utils";
+import { buildEventSelectOptions, dedupeEvents, filterEvents, summarizeEvents } from "../features/events/events-utils";
 import type { AdminEvent } from "../types/admin";
 
 const eventsLimit = 200;
@@ -27,7 +27,7 @@ export function EventsPage(): JSX.Element {
     refetchInterval: autoRefresh ? 8000 : false,
   });
 
-  const events = eventsQuery.data?.events ?? [];
+  const events = useMemo(() => dedupeEvents(eventsQuery.data?.events ?? []), [eventsQuery.data]);
 
   const filteredEvents = useMemo(
     () => filterEvents(events, keyword, level, category, provider),

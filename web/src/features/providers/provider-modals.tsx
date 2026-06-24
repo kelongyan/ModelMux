@@ -5,13 +5,21 @@ import type { AdminKeysPreviewResponse } from "../../types/admin";
 import { buildModelSaveList, type ModelSaveMode, summarizeModelSync } from "./model-sync";
 
 function pasteFromClipboard(form: FormInstance, fieldName: string): void {
-  void navigator.clipboard.readText().then((text) => {
-    if (text) {
-      const existing = (form.getFieldValue(fieldName) as string) ?? "";
-      const combined = existing ? existing + "\n" + text : text;
-      form.setFieldValue(fieldName, combined);
-    }
-  });
+  if (!navigator.clipboard?.readText) {
+    return;
+  }
+  navigator.clipboard
+    .readText()
+    .then((text) => {
+      if (text) {
+        const existing = (form.getFieldValue(fieldName) as string) ?? "";
+        const combined = existing ? existing + "\n" + text : text;
+        form.setFieldValue(fieldName, combined);
+      }
+    })
+    .catch(() => {
+      // 用户拒绝剪贴板权限或浏览器不支持时静默忽略
+    });
 }
 
 import type {

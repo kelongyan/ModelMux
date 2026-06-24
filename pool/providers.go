@@ -139,16 +139,11 @@ func (p *ProviderPools) ProviderCount() int {
 // Snapshot 返回所有 provider 的可持久化状态快照，按配置顺序输出。
 func (p *ProviderPools) Snapshot() []state.ProviderRecord {
 	p.mu.RLock()
-	order := append([]string(nil), p.order...)
-	providers := make(map[string]*Pool, len(p.providers))
-	for id, keyPool := range p.providers {
-		providers[id] = keyPool
-	}
-	p.mu.RUnlock()
+	defer p.mu.RUnlock()
 
-	records := make([]state.ProviderRecord, 0, len(order))
-	for _, id := range order {
-		keyPool, ok := providers[id]
+	records := make([]state.ProviderRecord, 0, len(p.order))
+	for _, id := range p.order {
+		keyPool, ok := p.providers[id]
 		if !ok {
 			continue
 		}
@@ -168,14 +163,10 @@ func (p *ProviderPools) Restore(records []state.ProviderRecord, invalidTTL time.
 	}
 
 	p.mu.RLock()
-	providers := make(map[string]*Pool, len(p.providers))
-	for id, keyPool := range p.providers {
-		providers[id] = keyPool
-	}
-	p.mu.RUnlock()
+	defer p.mu.RUnlock()
 
 	for id, keyRecords := range byID {
-		if keyPool, ok := providers[id]; ok {
+		if keyPool, ok := p.providers[id]; ok {
 			keyPool.Restore(keyRecords, invalidTTL)
 		}
 	}
@@ -185,16 +176,11 @@ func (p *ProviderPools) Restore(records []state.ProviderRecord, invalidTTL time.
 func (p *ProviderPools) Status() []ProviderStatus {
 	p.mu.RLock()
 	activeID := p.activeID
-	order := append([]string(nil), p.order...)
-	providers := make(map[string]*Pool, len(p.providers))
-	for id, keyPool := range p.providers {
-		providers[id] = keyPool
-	}
-	p.mu.RUnlock()
+	defer p.mu.RUnlock()
 
-	statuses := make([]ProviderStatus, 0, len(order))
-	for _, id := range order {
-		keyPool, ok := providers[id]
+	statuses := make([]ProviderStatus, 0, len(p.order))
+	for _, id := range p.order {
+		keyPool, ok := p.providers[id]
 		if !ok {
 			continue
 		}

@@ -102,16 +102,6 @@ export function ProvidersPage(): JSX.Element {
 
   useEffect(() => {
     setSelectedKeyIDs([]);
-  }, [selectedProviderID]);
-
-  useEffect(() => {
-    const fromUrl = searchParams.get("provider");
-    if (fromUrl !== selectedProviderID) {
-      setSelectedProviderID(fromUrl);
-    }
-  }, [searchParams, selectedProviderID]);
-
-  useEffect(() => {
     setKeyMetadataModal({ open: false });
     setKeyPreviewModal({
       open: false,

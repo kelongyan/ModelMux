@@ -1,10 +1,9 @@
 import type { AdminEvent } from "../../types/admin";
 
 export function filterEvents(events: AdminEvent[], keyword: string, level: string, category: string, provider: string): AdminEvent[] {
-  const unique = dedupeEvents(events);
   const normalizedKeyword = keyword.trim().toLowerCase();
 
-  return unique.filter((event) => {
+  return events.filter((event) => {
     if (level !== "all" && event.level !== level) {
       return false;
     }
@@ -23,7 +22,7 @@ export function filterEvents(events: AdminEvent[], keyword: string, level: strin
 
 export function buildEventSelectOptions(events: AdminEvent[], field: "category" | "provider_id") {
   const values = new Set<string>();
-  for (const event of dedupeEvents(events)) {
+  for (const event of events) {
     const value = event[field];
     if (value) {
       values.add(value);
@@ -35,13 +34,12 @@ export function buildEventSelectOptions(events: AdminEvent[], field: "category" 
 }
 
 export function summarizeEvents(events: AdminEvent[]) {
-  const unique = dedupeEvents(events);
   return {
-    total: unique.length,
-    info: unique.filter((event) => event.level === "info").length,
-    warn: unique.filter((event) => event.level === "warn").length,
-    error: unique.filter((event) => event.level === "error").length,
-    lastErrorAt: unique.find((event) => event.level === "error")?.at,
+    total: events.length,
+    info: events.filter((event) => event.level === "info").length,
+    warn: events.filter((event) => event.level === "warn").length,
+    error: events.filter((event) => event.level === "error").length,
+    lastErrorAt: events.find((event) => event.level === "error")?.at,
   };
 }
 
@@ -66,7 +64,7 @@ export function buildExpandedPayload(event: AdminEvent): Record<string, unknown>
   };
 }
 
-function dedupeEvents(events: AdminEvent[]): AdminEvent[] {
+export function dedupeEvents(events: AdminEvent[]): AdminEvent[] {
   const seen = new Set<number>();
   const unique: AdminEvent[] = [];
   for (const event of events) {

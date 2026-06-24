@@ -23,7 +23,12 @@ export function formatClockShort(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString("zh-CN", { hour12: false });
 }
 
-// formatDateTime 把 ISO 时间字符串格式化为本地日期时间。
+// formatDateTime 把 ISO 时间字符串格式化为本地日期时间（YYYY-MM-DD HH:mm:ss）。
+// 空值返回 "-"，无效日期返回原始输入。
 export function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }

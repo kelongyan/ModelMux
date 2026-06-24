@@ -271,10 +271,16 @@ func (s *Store) loadRecentRecords() error {
 	})
 
 	cutoff := cutoffDate(s.now().UTC(), s.retentionDays)
+	// 启动时只加载最近 2 天的文件到内存，减少启动 I/O。
+	// 更早的记录按需通过 recordsSinceFromFiles 从文件查询。
+	loadCutoff := s.now().UTC().AddDate(0, 0, -1)
 	records := make([]CallRecord, 0)
 	for _, file := range files {
 		fileDate, ok := parseCallFileDate(filepath.Base(file))
 		if !ok || fileDate.Before(cutoff) {
+			continue
+		}
+		if fileDate.Before(loadCutoff) {
 			continue
 		}
 		if err := loadRecordsFromFile(file, func(record CallRecord) {

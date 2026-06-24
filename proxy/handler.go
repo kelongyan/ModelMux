@@ -640,7 +640,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		status, retryAfter, scope, usage, upstreamErrorExcerpt, err := h.forward(w, r, rt, key, body, requestStream)
+		status, retryAfter, scope, usage, upstreamErrorExcerpt, err := h.forward(w, r, rt, key, body, requestStream, requestMeta)
 		key.FinishRequest()
 		callRecord.Attempts = attempt + 1
 		callRecord.Status = status
@@ -879,9 +879,9 @@ func connectionCoolingDuration(cap time.Duration, priorConnectionFailures int64)
 
 // forward 使用指定 key 请求上游，并把上游响应流式写回客户端。
 // 成功时返回状态码和 nil；429、401 和余额不足类 403 返回可重试错误；其他错误会在本函数内写出响应。
-func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte, requestStream bool) (int, time.Duration, retryScope, stats.Usage, string, error) {
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeConfig, key *pool.Key, body []byte, requestStream bool, meta requestMeta) (int, time.Duration, retryScope, stats.Usage, string, error) {
 	unknownUsage := stats.Usage{Source: stats.UsageSourceUnknown}
-	outReq, err := buildRequest(rt, r, key, body)
+	outReq, err := buildRequest(rt, r, key, body, meta)
 	if err != nil {
 		writeProxyError(w, http.StatusInternalServerError, "failed to build request")
 		return http.StatusInternalServerError, 0, retryScopeNone, unknownUsage, "", err
@@ -1034,7 +1034,7 @@ func extractRequestMeta(body []byte) requestMeta {
 	if err := json.Unmarshal(body, &payloadMap); err != nil {
 		return requestMeta{}
 	}
-	meta := requestMeta{}
+	meta := requestMeta{payload: payloadMap}
 	if raw, ok := payloadMap["model"]; ok {
 		var model string
 		if err := json.Unmarshal(raw, &model); err == nil {
@@ -1205,6 +1205,7 @@ type requestMeta struct {
 	model        string
 	stream       bool
 	toolsPresent bool
+	payload      map[string]json.RawMessage // 预解析的请求体，供 rewriteRequestBody 复用
 }
 
 func requestDiagnosticEvent(input requestDiagnosticInput) logx.Event {
@@ -1332,67 +1333,45 @@ func errorExcerpt(body []byte) string {
 	return strings.TrimSpace(string(body))
 }
 
-// quotaExhaustedIndicators 覆盖常见中英文余额、额度和信用不足错误文案。
-var quotaExhaustedIndicators = []string{
-	"预扣费额度失败",
-	"用户剩余额度",
-	"余额不足",
-	"额度不足",
-	"insufficient_balance",
-	"insufficient account balance",
-	"insufficient_quota",
-	"insufficient quota",
-	"quota_exceeded",
-	"quota exceeded",
-	"insufficient credit",
-	"insufficient credits",
-	"insufficient balance",
-	"not enough credit",
-	"not enough credits",
-	"balance not enough",
-}
+// quotaExhaustedIndicators 覆盖常见中英文余额、额度和信用不足错误文案（统一小写）。
+var quotaExhaustedIndicators = func() [][]byte {
+	raw := []string{
+		"预扣费额度失败",
+		"用户剩余额度",
+		"余额不足",
+		"额度不足",
+		"insufficient_balance",
+		"insufficient account balance",
+		"insufficient_quota",
+		"insufficient quota",
+		"quota_exceeded",
+		"quota exceeded",
+		"insufficient credit",
+		"insufficient credits",
+		"insufficient balance",
+		"not enough credit",
+		"not enough credits",
+		"balance not enough",
+	}
+	out := make([][]byte, len(raw))
+	for i, s := range raw {
+		out[i] = []byte(strings.ToLower(s))
+	}
+	return out
+}()
 
 // isQuotaExhaustedBody 判断 403 响应是否属于 key 级余额或额度不足。
 func isQuotaExhaustedBody(body []byte) bool {
 	if isQuotaExhaustedErrorCode(body) {
 		return true
 	}
+	lowered := bytes.ToLower(body)
 	for _, indicator := range quotaExhaustedIndicators {
-		if bytesContainsFold(body, []byte(indicator)) {
+		if bytes.Contains(lowered, indicator) {
 			return true
 		}
 	}
 	return false
-}
-
-// bytesContainsFold 在不分配内存的情况下对 s 做大小写不敏感的子串匹配。
-func bytesContainsFold(s, sub []byte) bool {
-	if len(sub) == 0 {
-		return true
-	}
-	if len(sub) > len(s) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(sub); i++ {
-		match := true
-		for j := 0; j < len(sub); j++ {
-			if toLowerByte(s[i+j]) != sub[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
-
-func toLowerByte(b byte) byte {
-	if b >= 'A' && b <= 'Z' {
-		return b + 32
-	}
-	return b
 }
 
 func isQuotaExhaustedErrorCode(body []byte) bool {
@@ -1414,11 +1393,11 @@ func isQuotaExhaustedErrorCode(body []byte) bool {
 
 // buildRequest 基于原请求构造上游请求，并覆盖认证头为当前选中的 key。
 func (h *Handler) buildRequest(r *http.Request, key *pool.Key, body []byte) (*http.Request, error) {
-	return buildRequest(h.snapshot(), r, key, body)
+	return buildRequest(h.snapshot(), r, key, body, requestMeta{})
 }
 
 // buildRequest 基于指定运行时快照构造上游请求，并覆盖认证头为当前选中的 key。
-func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte) (*http.Request, error) {
+func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte, meta requestMeta) (*http.Request, error) {
 	if rt == nil || rt.targetURL == nil {
 		return nil, errors.New("proxy runtime config is not ready")
 	}
@@ -1427,7 +1406,7 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	outURL.Path = singleJoiningSlash(rt.targetURL.Path, r.URL.Path)
 	outURL.RawQuery = r.URL.RawQuery
 
-	outBody := rewriteRequestBody(body, rt.stripTools)
+	outBody := rewriteRequestBody(body, rt.stripTools, meta)
 
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(outBody))
 	if err != nil {
@@ -1444,14 +1423,19 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	return outReq, nil
 }
 
-func rewriteRequestBody(body []byte, stripTools bool) []byte {
+func rewriteRequestBody(body []byte, stripTools bool, meta requestMeta) []byte {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return body
 	}
 
+	// 复用 extractRequestMeta 预解析的 payload，避免重复 JSON 解析。
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return body
+	if meta.payload != nil {
+		payload = meta.payload
+	} else {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return body
+		}
 	}
 
 	changed := false
