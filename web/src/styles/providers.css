@@ -28,6 +28,21 @@
   line-height: 1.4;
 }
 
+.provider-key-cell--quota strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.provider-key-quota-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--mm-error);
+  box-shadow: 0 0 0 3px var(--mm-error-soft);
+}
+
 .provider-key-id {
   margin-top: 3px;
   font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
@@ -52,12 +67,14 @@
 
 .detail-stats-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 12px;
 }
 
 .detail-stat {
-  flex: 1;
+  flex: 1 1 86px;
+  min-width: 82px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -89,6 +106,10 @@
   font-variant-numeric: tabular-nums;
   color: var(--mm-text);
   line-height: 1.2;
+}
+
+.detail-stat--quota strong {
+  color: var(--mm-error-text);
 }
 
 .detail-target-url {

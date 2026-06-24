@@ -29,6 +29,7 @@ export type AdminProviderSummary = {
   target_url: string;
   total_keys: number;
   disabled_keys: number;
+  quota_exhausted_keys: number;
   active_keys: number;
   cooling_keys: number;
   invalid_keys: number;
@@ -75,6 +76,7 @@ export type AdminProviderDetailResponse = {
   target_url: string;
   total_keys: number;
   disabled_keys: number;
+  quota_exhausted_keys: number;
   active_keys: number;
   cooling_keys: number;
   invalid_keys: number;

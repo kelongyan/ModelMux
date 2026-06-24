@@ -62,29 +62,31 @@ type apiSettingsPayload struct {
 }
 
 type apiProviderSummary struct {
-	ID           string   `json:"id"`
-	Active       bool     `json:"active"`
-	TargetURL    string   `json:"target_url"`
-	TotalKeys    int      `json:"total_keys"`
-	DisabledKeys int      `json:"disabled_keys"`
-	ActiveKeys   int      `json:"active_keys"`
-	CoolingKeys  int      `json:"cooling_keys"`
-	InvalidKeys  int      `json:"invalid_keys"`
-	Models       []string `json:"models"`
+	ID                 string   `json:"id"`
+	Active             bool     `json:"active"`
+	TargetURL          string   `json:"target_url"`
+	TotalKeys          int      `json:"total_keys"`
+	DisabledKeys       int      `json:"disabled_keys"`
+	QuotaExhaustedKeys int      `json:"quota_exhausted_keys"`
+	ActiveKeys         int      `json:"active_keys"`
+	CoolingKeys        int      `json:"cooling_keys"`
+	InvalidKeys        int      `json:"invalid_keys"`
+	Models             []string `json:"models"`
 }
 
 type apiProviderDetail struct {
-	ID           string                 `json:"id"`
-	Active       bool                   `json:"active"`
-	TargetURL    string                 `json:"target_url"`
-	TotalKeys    int                    `json:"total_keys"`
-	DisabledKeys int                    `json:"disabled_keys"`
-	ActiveKeys   int                    `json:"active_keys"`
-	CoolingKeys  int                    `json:"cooling_keys"`
-	InvalidKeys  int                    `json:"invalid_keys"`
-	Keys         []apiProviderKeyDetail `json:"keys"`
-	Models       []string               `json:"models"`
-	StripTools   bool                   `json:"strip_tools"`
+	ID                 string                 `json:"id"`
+	Active             bool                   `json:"active"`
+	TargetURL          string                 `json:"target_url"`
+	TotalKeys          int                    `json:"total_keys"`
+	DisabledKeys       int                    `json:"disabled_keys"`
+	QuotaExhaustedKeys int                    `json:"quota_exhausted_keys"`
+	ActiveKeys         int                    `json:"active_keys"`
+	CoolingKeys        int                    `json:"cooling_keys"`
+	InvalidKeys        int                    `json:"invalid_keys"`
+	Keys               []apiProviderKeyDetail `json:"keys"`
+	Models             []string               `json:"models"`
+	StripTools         bool                   `json:"strip_tools"`
 }
 
 type apiProviderKeyDetail struct {
@@ -393,17 +395,18 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 	keyDetails := buildProviderKeyDetails(providerCfg, keyStatuses)
 	summary := buildProviderSummary(providerCfg, id == h.pools.ActiveID(), keyStatuses)
 	writeJSON(w, http.StatusOK, apiProviderDetail{
-		ID:           summary.ID,
-		Active:       summary.Active,
-		TargetURL:    summary.TargetURL,
-		TotalKeys:    summary.TotalKeys,
-		DisabledKeys: summary.DisabledKeys,
-		ActiveKeys:   summary.ActiveKeys,
-		CoolingKeys:  summary.CoolingKeys,
-		InvalidKeys:  summary.InvalidKeys,
-		Keys:         keyDetails,
-		Models:       safeModels(providerCfg.Models),
-		StripTools:   providerCfg.StripTools,
+		ID:                 summary.ID,
+		Active:             summary.Active,
+		TargetURL:          summary.TargetURL,
+		TotalKeys:          summary.TotalKeys,
+		DisabledKeys:       summary.DisabledKeys,
+		QuotaExhaustedKeys: summary.QuotaExhaustedKeys,
+		ActiveKeys:         summary.ActiveKeys,
+		CoolingKeys:        summary.CoolingKeys,
+		InvalidKeys:        summary.InvalidKeys,
+		Keys:               keyDetails,
+		Models:             safeModels(providerCfg.Models),
+		StripTools:         providerCfg.StripTools,
 	})
 }
 
@@ -1283,6 +1286,9 @@ func buildProviderSummary(providerCfg config.ProviderConfig, active bool, status
 			summary.CoolingKeys++
 		case "invalid":
 			summary.InvalidKeys++
+			if keyStatus.InvalidReason == pool.InvalidReasonQuotaExhausted {
+				summary.QuotaExhaustedKeys++
+			}
 		}
 	}
 	return summary

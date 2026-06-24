@@ -610,6 +610,66 @@ func TestProviderDetailIncludesKeyMetadataAndDisabledKeys(t *testing.T) {
 	}
 }
 
+func TestProviderSummaryAndDetailCountQuotaExhaustedKeys(t *testing.T) {
+	h, pools, _ := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{{
+			ID:        "p1",
+			TargetURL: "https://one.example.com",
+			Keys:      []string{"k1", "k2"},
+		}},
+	})
+	keyPool, err := pools.Get("p1")
+	if err != nil {
+		t.Fatalf("Get(p1) error = %v", err)
+	}
+	key1, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+	key1.MarkInvalidWithReason(pool.InvalidReasonQuotaExhausted)
+	key1.FinishRequest()
+	key2, err := keyPool.Next()
+	if err != nil {
+		t.Fatalf("Next() second key error = %v", err)
+	}
+	key2.MarkInvalid()
+	key2.FinishRequest()
+
+	summaries := h.buildProviderSummaries()
+	if len(summaries) != 1 {
+		t.Fatalf("len(summaries) = %d, want 1", len(summaries))
+	}
+	if summaries[0].InvalidKeys != 2 {
+		t.Fatalf("summary InvalidKeys = %d, want 2", summaries[0].InvalidKeys)
+	}
+	if summaries[0].QuotaExhaustedKeys != 1 {
+		t.Fatalf("summary QuotaExhaustedKeys = %d, want 1", summaries[0].QuotaExhaustedKeys)
+	}
+
+	mux := http.NewServeMux()
+	h.Register(mux)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/admin/api/v1/providers/p1", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var body apiProviderDetail
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if body.InvalidKeys != 2 {
+		t.Fatalf("detail InvalidKeys = %d, want 2", body.InvalidKeys)
+	}
+	if body.QuotaExhaustedKeys != 1 {
+		t.Fatalf("detail QuotaExhaustedKeys = %d, want 1", body.QuotaExhaustedKeys)
+	}
+	quotaKey := requireProviderKey(t, body.Keys, poolKeyID("k1"))
+	if quotaKey.InvalidReason != pool.InvalidReasonQuotaExhausted {
+		t.Fatalf("quota key InvalidReason = %q, want %q", quotaKey.InvalidReason, pool.InvalidReasonQuotaExhausted)
+	}
+}
+
 func TestUpdateProviderKeyMetadataPersistsAndDisablesKey(t *testing.T) {
 	h, pools, path := newTestHandler(t, &config.Config{
 		ActiveProvider: "p1",

@@ -5,6 +5,7 @@ import { CooldownText } from "../../components/cooldown-text";
 import { formatDateTime } from "../../components/format-time";
 import type { AdminKeyStatus, AdminProviderDetailResponse } from "../../types/admin";
 import { formatLatencySec } from "../stats/stats-format";
+import { isQuotaExhaustedKey } from "./provider-key-status";
 import { renderKeyState } from "./provider-utils";
 
 type ProviderDetailContentProps = {
@@ -59,8 +60,11 @@ export function ProviderDetailContent({
       key: "masked_key",
       width: 280,
       render: (maskedKey: string, record) => (
-        <div className="provider-key-cell">
-          <strong>{maskedKey}</strong>
+        <div className={isQuotaExhaustedKey(record) ? "provider-key-cell provider-key-cell--quota" : "provider-key-cell"}>
+          <strong>
+            {isQuotaExhaustedKey(record) ? <span className="provider-key-quota-dot" title="余额不足" aria-label="余额不足" /> : null}
+            {maskedKey}
+          </strong>
           <div className="table-subtext provider-key-id">{record.key_id}</div>
         </div>
       ),
@@ -173,6 +177,10 @@ export function ProviderDetailContent({
           <div className="detail-stat">
             <span>停用</span>
             <strong>{detail.disabled_keys}</strong>
+          </div>
+          <div className="detail-stat detail-stat--quota">
+            <span>余额不足</span>
+            <strong>{detail.quota_exhausted_keys}</strong>
           </div>
         </div>
         <div className="detail-target-url">

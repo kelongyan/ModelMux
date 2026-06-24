@@ -47,6 +47,7 @@ export const ProviderTable = memo(function ProviderTable({
       render: (_: unknown, record) => record.total_keys + record.disabled_keys,
     },
     { title: "停用", dataIndex: "disabled_keys", key: "disabled_keys" },
+    { title: "余额不足", dataIndex: "quota_exhausted_keys", key: "quota_exhausted_keys" },
     { title: "可用", dataIndex: "active_keys", key: "active_keys" },
     { title: "冷却", dataIndex: "cooling_keys", key: "cooling_keys" },
     { title: "失效", dataIndex: "invalid_keys", key: "invalid_keys" },
@@ -94,7 +95,7 @@ export const ProviderTable = memo(function ProviderTable({
       pagination={false}
       rowKey="id"
       rowClassName={(record) => (record.active ? "provider-table-row--active" : "")}
-      scroll={{ x: 920 }}
+      scroll={{ x: 1020 }}
     />
   );
 });
