@@ -35,6 +35,11 @@ func normalizeUsageFields(record *CallRecord) {
 }
 
 // ExtractUsage 从 OpenAI 兼容响应体中提取上游返回的 token usage。
+// 支持非流式 JSON 与 SSE 流式响应，覆盖多种 provider 的字段命名约定：
+//   - OpenAI Chat Completions: 顶层 usage.{prompt_tokens, completion_tokens, total_tokens}
+//   - OpenAI Responses API:    SSE 事件 response.completed 中的 response.usage.{input_tokens, output_tokens, total_tokens}
+//   - Anthropic Messages:      顶层或 message_delta 事件中的 usage.{input_tokens, output_tokens}
+//   - Google Gemini:           顶层 usageMetadata.{promptTokenCount, candidatesTokenCount, totalTokenCount}
 func ExtractUsage(body []byte) Usage {
 	unknown := Usage{Source: UsageSourceUnknown}
 	body = bytes.TrimSpace(body)
@@ -48,6 +53,8 @@ func ExtractUsage(body []byte) Usage {
 	return extractUsageFromSSE(body)
 }
 
+// extractUsageFromJSON 从单个 JSON 对象中按多个常见路径查找 usage。
+// 依次尝试: 顶层 usage -> response.usage (Responses API) -> usageMetadata (Gemini)。
 func extractUsageFromJSON(body []byte) Usage {
 	unknown := Usage{Source: UsageSourceUnknown}
 
@@ -55,23 +62,45 @@ func extractUsageFromJSON(body []byte) Usage {
 	if err := json.Unmarshal(body, &root); err != nil {
 		return unknown
 	}
-	rawUsage, ok := root["usage"]
-	if !ok {
-		return unknown
+
+	if usage := readUsageObject(root["usage"]); usage.Source == UsageSourceUpstream {
+		return usage
 	}
 
+	if rawResponse, ok := root["response"]; ok {
+		var responseObj map[string]json.RawMessage
+		if err := json.Unmarshal(rawResponse, &responseObj); err == nil {
+			if usage := readUsageObject(responseObj["usage"]); usage.Source == UsageSourceUpstream {
+				return usage
+			}
+		}
+	}
+
+	if usage := readGeminiUsageMetadata(root["usageMetadata"]); usage.Source == UsageSourceUpstream {
+		return usage
+	}
+
+	return unknown
+}
+
+// readUsageObject 从 usage 对象中读取 token 计数。
+// 兼容 OpenAI (prompt_tokens/completion_tokens/total_tokens) 与
+// Anthropic/Responses API (input_tokens/output_tokens) 两套命名。
+func readUsageObject(raw json.RawMessage) Usage {
+	unknown := Usage{Source: UsageSourceUnknown}
+	if len(raw) == 0 {
+		return unknown
+	}
 	var usage map[string]json.RawMessage
-	if err := json.Unmarshal(rawUsage, &usage); err != nil {
+	if err := json.Unmarshal(raw, &usage); err != nil {
 		return unknown
 	}
-
 	prompt := firstTokenValue(usage, "prompt_tokens", "input_tokens", "input_token_count")
 	completion := firstTokenValue(usage, "completion_tokens", "output_tokens", "output_token_count")
 	total := deriveTotalTokens(prompt, completion, firstTokenValue(usage, "total_tokens", "total_token_count"))
 	if prompt == nil && completion == nil && total == nil {
 		return unknown
 	}
-
 	return Usage{
 		PromptTokens:     prompt,
 		CompletionTokens: completion,
@@ -80,6 +109,35 @@ func extractUsageFromJSON(body []byte) Usage {
 	}
 }
 
+// readGeminiUsageMetadata 从 Google Gemini 的 usageMetadata 对象读取 token 计数。
+func readGeminiUsageMetadata(raw json.RawMessage) Usage {
+	unknown := Usage{Source: UsageSourceUnknown}
+	if len(raw) == 0 {
+		return unknown
+	}
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return unknown
+	}
+	prompt := firstTokenValue(meta, "promptTokenCount", "inputTokenCount", "prompt_tokens", "input_tokens")
+	completion := firstTokenValue(meta, "candidatesTokenCount", "outputTokenCount", "completion_tokens", "output_tokens")
+	total := deriveTotalTokens(prompt, completion, firstTokenValue(meta, "totalTokenCount", "total_tokens"))
+	if prompt == nil && completion == nil && total == nil {
+		return unknown
+	}
+	return Usage{
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+		TotalTokens:      total,
+		Source:           UsageSourceUpstream,
+	}
+}
+
+// extractUsageFromSSE 遍历 SSE 事件，按时间顺序寻找最后一条包含 usage 的 payload。
+// 覆盖三种常见形态：
+//   - Chat Completions + include_usage: 独立 usage chunk (顶层 usage)
+//   - Responses API: response.completed 事件 (response.usage)
+//   - Anthropic Messages: message_delta 事件 (顶层 usage)
 func extractUsageFromSSE(body []byte) Usage {
 	var found Usage
 	for _, line := range strings.Split(string(body), "\n") {
