@@ -895,7 +895,11 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 	upstreamStart := time.Now()
 	resp, err := rt.client.Do(outReq)
 	if err != nil {
-		if errors.Is(r.Context().Err(), context.Canceled) {
+		// 客户端主动取消或代理请求超时都不应被视为 key 级故障，
+		// 用 outReq.Context() 而非 r.Context() 可以同时覆盖两种情况：
+		// 非流式请求的 ctx 是从 r.Context() 派生的 WithTimeout，超时后返回 DeadlineExceeded；
+		// 流式请求直接用 r.Context()，客户端断开返回 Canceled。
+		if ctxErr := outReq.Context().Err(); ctxErr != nil {
 			return 0, 0, retryScopeNone, unknownUsage, "", errClientCanceled
 		}
 		scope := classifyTransportRetryScope(err)
@@ -1471,11 +1475,6 @@ func rewriteRequestBody(body []byte, stripTools bool) []byte {
 		return body
 	}
 	return out
-}
-
-// stripToolFields removes OpenAI tool-calling fields for providers that reject them.
-func stripToolFields(body []byte) []byte {
-	return rewriteRequestBody(body, true)
 }
 
 func ensureStreamIncludeUsage(payload map[string]json.RawMessage) bool {

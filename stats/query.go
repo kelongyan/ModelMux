@@ -137,6 +137,13 @@ func (s *Store) recordsSince(since time.Time) ([]CallRecord, error) {
 	}
 
 	requestSince := since.UTC()
+
+	// 快速路径：如果内存中的记录覆盖了查询窗口，直接从内存过滤，避免 Flush + 全量文件扫描。
+	if s.recordsCoverSince(requestSince) {
+		return s.filterMemoryRecordsSince(requestSince), nil
+	}
+
+	// 慢速路径：查询窗口超出内存范围，回退到文件扫描（含 Flush）。
 	scanSince := requestSince.Truncate(defaultQueryCacheTTL)
 	now := s.now().UTC()
 	key := recordsCacheKey{sinceUnixNano: scanSince.UnixNano()}
@@ -167,6 +174,31 @@ func (s *Store) recordsSince(since time.Time) ([]CallRecord, error) {
 	s.queryCacheMu.Unlock()
 
 	return filterRecordsSince(records, requestSince), nil
+}
+
+// recordsCoverSince 判断内存中的记录是否完全覆盖查询窗口。
+// 如果内存中最早的记录时间不晚于 since，则覆盖。
+func (s *Store) recordsCoverSince(since time.Time) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.records) == 0 {
+		return false
+	}
+	oldest := s.records[0].At
+	return !oldest.After(since)
+}
+
+// filterMemoryRecordsSince 从内存记录中过滤 since 之后的记录。
+func (s *Store) filterMemoryRecordsSince(since time.Time) []CallRecord {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return filterRecordsSince(s.records, since)
 }
 
 func filterRecordsSince(records []CallRecord, since time.Time) []CallRecord {

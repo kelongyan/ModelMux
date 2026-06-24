@@ -70,9 +70,14 @@ func (p *Pool) Next() (*Key, error) {
 }
 
 // Update 用新 key 列表更新 key 池；已存在 key 会保留状态和统计，新 key 从 active 开始。
+// 仅在 key 列表实际发生变化时重置 cursor，避免频繁热重载导致 round-robin 负载不均。
 func (p *Pool) Update(newValues []string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if keysEqual(p.keys, newValues) {
+		return
+	}
 
 	existing := make(map[string]*Key, len(p.keys))
 	for _, k := range p.keys {
@@ -89,6 +94,19 @@ func (p *Pool) Update(newValues []string) {
 	}
 	p.keys = newKeys
 	p.cursor.Store(0)
+}
+
+// keysEqual 比较当前 key 指针切片与新 key 值切片是否完全一致（顺序和值）。
+func keysEqual(current []*Key, newValues []string) bool {
+	if len(current) != len(newValues) {
+		return false
+	}
+	for i, k := range current {
+		if k.Value != newValues[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // ResetKeyByID 按 key 哈希标识恢复对应 key 为 active，便于管理台手动解除摘除状态。

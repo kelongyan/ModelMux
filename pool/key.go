@@ -87,6 +87,7 @@ func (k *Key) MarkConnectionCooling(duration time.Duration) {
 }
 
 // MarkInvalid 将 key 标记为失效状态，并记录最近一次 401 时间。
+// 仅供测试使用；生产代码应直接调用 MarkInvalidWithReason 以指定失效原因。
 func (k *Key) MarkInvalid() {
 	k.MarkInvalidWithReason(InvalidReasonUnauthorized)
 }

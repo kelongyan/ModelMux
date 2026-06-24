@@ -152,6 +152,12 @@ func main() {
 		defer reloadMu.Unlock()
 		newCfg, err := config.Read(path)
 		if err != nil {
+			// 某些编辑器（如 Vim）保存时先写临时文件再 rename 覆盖，可能短暂读到不完整 JSON。
+			// 等待 100ms 后重试一次，避免误报 reload 失败。
+			time.Sleep(100 * time.Millisecond)
+			newCfg, err = config.Read(path)
+		}
+		if err != nil {
 			eventBuffer.Add("error", logx.CategoryConfig, logx.EventConfigReloadFailed, "config reload failed", map[string]any{
 				"path":  path,
 				"error": err.Error(),
@@ -426,6 +432,7 @@ type stateSaver struct {
 	saveMu   sync.Mutex
 	timer    *time.Timer
 	closed   bool
+	wg       sync.WaitGroup // 跟踪异步保存操作，确保 Close 时等待完成
 }
 
 // newStateSaver 创建防抖状态保存器，避免每次成功请求都同步写磁盘。
@@ -439,13 +446,25 @@ func newStateSaver(store *state.Store, snapshot func() []state.ProviderRecord, d
 }
 
 // Trigger 根据 immediate 决定立即保存或合并窗口保存。
+// immediate=true 时异步执行保存，不阻塞调用方 goroutine；
 // 非 immediate 时落入当前合并窗口（已有 pending timer 就不再重置），
 // 避免高 QPS 下 timer 被反复 reset 导致永不落盘。
 func (s *stateSaver) Trigger(immediate bool) {
 	if immediate {
-		if err := s.SaveNow(); err != nil && s.onError != nil {
-			s.onError(err)
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return
 		}
+		s.wg.Add(1)
+		s.mu.Unlock()
+
+		go func() {
+			defer s.wg.Done()
+			if err := s.SaveNow(); err != nil && s.onError != nil {
+				s.onError(err)
+			}
+		}()
 		return
 	}
 
@@ -481,7 +500,7 @@ func (s *stateSaver) SaveNow() error {
 	return s.store.Save(s.snapshot())
 }
 
-// Close 停止防抖定时器并保存最后一次状态。
+// Close 停止防抖定时器，等待所有异步保存完成，并保存最后一次状态。
 func (s *stateSaver) Close() error {
 	s.mu.Lock()
 	s.closed = true
@@ -489,5 +508,6 @@ func (s *stateSaver) Close() error {
 		s.timer.Stop()
 	}
 	s.mu.Unlock()
+	s.wg.Wait()
 	return s.SaveNow()
 }

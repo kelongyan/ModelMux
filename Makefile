@@ -1,6 +1,7 @@
 BINARY  = modelmux.exe
 CONFIG  = config.json
-GOFLAGS = -trimpath -ldflags="-s -w"
+BUILDTIME = $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GOFLAGS = -trimpath -ldflags="-s -w -X github.com/kelongyan/ModelMux/admin.buildTime=$(BUILDTIME)"
 
 .PHONY: build run test clean
 

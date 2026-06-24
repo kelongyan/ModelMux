@@ -21,7 +21,6 @@ import type {
   AdminSettingsResponse,
   AdminStatsLogsResponse,
   AdminStatsModelsResponse,
-  AdminStatsRecentResponse,
   AdminStatsSummaryResponse,
   AdminStatsWindow,
 } from "../types/admin";
@@ -225,11 +224,6 @@ export function fetchStatsSummary(window: AdminStatsWindow): Promise<AdminStatsS
 // fetchStatsModels 拉取指定窗口内按模型聚合的调用统计。
 export function fetchStatsModels(window: AdminStatsWindow): Promise<AdminStatsModelsResponse> {
   return requestJSON<AdminStatsModelsResponse>(`/admin/api/v1/stats/models?window=${window}`);
-}
-
-// fetchStatsRecent 拉取最近调用明细。
-export function fetchStatsRecent(limit = 100): Promise<AdminStatsRecentResponse> {
-  return requestJSON<AdminStatsRecentResponse>(`/admin/api/v1/stats/recent?limit=${limit}`);
 }
 
 // fetchStatsLogs 查询调用日志（支持过滤和分页）。

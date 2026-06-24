@@ -51,6 +51,11 @@ func (p *ProviderPools) Update(specs []ProviderSpec, activeID string) error {
 		return fmt.Errorf("active provider id is required")
 	}
 
+	// 快速路径：如果 provider 集合和 active ID 都没变，跳过全量重建。
+	if p.activeID == activeID && specsEqual(p.order, p.providers, specs) {
+		return nil
+	}
+
 	normalized := make([]ProviderSpec, 0, len(specs))
 	seen := make(map[string]struct{}, len(specs))
 	activeFound := false
@@ -227,4 +232,39 @@ func buildProviderStatus(id string, active bool, keyPool *Pool) ProviderStatus {
 		}
 	}
 	return status
+}
+
+// specsEqual 判断当前 provider 池与新 specs 是否完全一致（顺序、ID、key 列表）。
+func specsEqual(order []string, providers map[string]*Pool, specs []ProviderSpec) bool {
+	if len(order) != len(specs) {
+		return false
+	}
+	for i, id := range order {
+		if specs[i].ID != id {
+			return false
+		}
+		pool, ok := providers[id]
+		if !ok {
+			return false
+		}
+		if !poolKeysEqual(pool, specs[i].Keys) {
+			return false
+		}
+	}
+	return true
+}
+
+// poolKeysEqual 比较 pool 中的 key 值与给定 key 列表是否一致。
+func poolKeysEqual(p *Pool, keys []string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.keys) != len(keys) {
+		return false
+	}
+	for i, k := range p.keys {
+		if k.Value != keys[i] {
+			return false
+		}
+	}
+	return true
 }

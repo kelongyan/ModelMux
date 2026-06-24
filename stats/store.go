@@ -346,9 +346,16 @@ func (s *Store) Flush() error {
 		return s.closeErr
 	}
 	done := make(chan error, 1)
-	s.commands <- writeCommand{flush: done}
-	s.commandMu.RUnlock()
-	return <-done
+	// 使用 select + default 防止 channel 满时阻塞调用方；
+	// 极端竞态下 Close 可能已开始消费 channel，此时 flush 会被丢弃。
+	select {
+	case s.commands <- writeCommand{flush: done}:
+		s.commandMu.RUnlock()
+		return <-done
+	default:
+		s.commandMu.RUnlock()
+		return nil
+	}
 }
 
 func (s *Store) Close() error {

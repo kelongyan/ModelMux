@@ -12,6 +12,19 @@ import (
 
 const keyProbeMaxTimeout = 15 * time.Second
 
+// probeClient 是 key 探测专用的共享 HTTP client，避免每次 ProbeKey 都创建新 transport 和连接池。
+// 超时由调用方通过 context 控制，client 本身不设置固定超时。
+var probeClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ForceAttemptHTTP2:   true,
+	},
+}
+
 type KeyTestResult struct {
 	OK                bool   `json:"ok"`
 	StatusCode        int    `json:"status_code"`
@@ -27,21 +40,18 @@ func ProbeKey(ctx context.Context, cfg *config.Config, provider config.ProviderC
 	start := time.Now()
 	result := KeyTestResult{}
 
-	rt, err := newRuntimeConfig(cfg, provider, nil)
+	target, err := parseTargetURL(provider.TargetURL)
 	if err != nil {
 		result.Error = err.Error()
 		result.LatencyMs = time.Since(start).Milliseconds()
 		return result
 	}
-	if rt.transport != nil {
-		defer rt.transport.CloseIdleConnections()
-	}
 
-	outURL := *rt.targetURL
-	outURL.Path = singleJoiningSlash(rt.targetURL.Path, "/models")
+	outURL := *target
+	outURL.Path = singleJoiningSlash(target.Path, "/models")
 	outURL.RawQuery = ""
 
-	timeout := rt.requestTimeout
+	timeout := time.Duration(effectiveInt(cfg.RequestTimeoutSeconds, config.DefaultRequestTimeoutSeconds)) * time.Second
 	if timeout <= 0 || timeout > keyProbeMaxTimeout {
 		timeout = keyProbeMaxTimeout
 	}
@@ -57,8 +67,9 @@ func ProbeKey(ctx context.Context, cfg *config.Config, provider config.ProviderC
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("X-Api-Key", key)
 	req.Header.Set("Accept", "application/json")
+	req.Host = target.Host
 
-	resp, err := rt.client.Do(req)
+	resp, err := probeClient.Do(req)
 	result.LatencyMs = time.Since(start).Milliseconds()
 	if err != nil {
 		scope := classifyTransportRetryScope(err)

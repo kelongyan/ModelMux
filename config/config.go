@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 )
@@ -132,11 +131,6 @@ var (
 
 // Load 读取 JSON 配置、校验必填项并补齐默认值。
 func Load(path string) (*Config, error) {
-	return load(path, true)
-}
-
-// Reload 重新读取配置文件，当前实现复用 Load 的校验和默认值逻辑。
-func Reload(path string) (*Config, error) {
 	return load(path, true)
 }
 
@@ -475,14 +469,6 @@ func (c *Config) Clone() *Config {
 		out.StatsEnabled = &enabled
 	}
 	return &out
-}
-
-// Equal 按归一化配置内容比较两份配置是否一致，便于判断是否真的发生了配置变更。
-func (c *Config) Equal(other *Config) bool {
-	if c == nil || other == nil {
-		return c == other
-	}
-	return reflect.DeepEqual(c, other)
 }
 
 // load 统一封装配置读取与规范化流程，并按需决定是否提交到当前快照。

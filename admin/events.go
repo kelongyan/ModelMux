@@ -16,11 +16,14 @@ type AdminEvent struct {
 }
 
 // EventBuffer 保存最近发生的管理事件，供 Dashboard 和事件页轮询读取。
+// 内部使用环形缓冲区，预分配固定容量切片，避免每次超容量时分配新内存。
 type EventBuffer struct {
 	mu       sync.RWMutex
 	capacity int
 	seq      atomic.Int64
-	events   []AdminEvent
+	ring     []AdminEvent // 预分配的环形缓冲区
+	head     int          // 下一个写入位置
+	count    int          // 当前已写入的事件数（<= capacity）
 }
 
 // NewEventBuffer 创建一个固定容量的事件缓冲区。
@@ -28,7 +31,10 @@ func NewEventBuffer(capacity int) *EventBuffer {
 	if capacity <= 0 {
 		capacity = 200
 	}
-	return &EventBuffer{capacity: capacity}
+	return &EventBuffer{
+		capacity: capacity,
+		ring:     make([]AdminEvent, capacity),
+	}
 }
 
 // Add 追加一条事件，并在超过容量时丢弃最旧的数据。
@@ -48,25 +54,23 @@ func (b *EventBuffer) AddEvent(event logx.Event) {
 		return
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	entry := AdminEvent{
 		Seq:   b.seq.Add(1),
 		At:    time.Now(),
 		Event: event,
 	}
 
-	b.events = append(b.events, entry)
-	if len(b.events) > b.capacity {
-		start := len(b.events) - b.capacity
-		next := make([]AdminEvent, b.capacity)
-		copy(next, b.events[start:])
-		b.events = next
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.ring[b.head] = entry
+	b.head = (b.head + 1) % b.capacity
+	if b.count < b.capacity {
+		b.count++
 	}
 }
 
-// List 返回最近 limit 条事件，limit<=0 时返回全部。
+// List 返回最近 limit 条事件（按时间升序），limit<=0 时返回全部。
 func (b *EventBuffer) List(limit int) []AdminEvent {
 	if b == nil {
 		return []AdminEvent{}
@@ -75,12 +79,32 @@ func (b *EventBuffer) List(limit int) []AdminEvent {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if len(b.events) == 0 {
+	if b.count == 0 {
 		return []AdminEvent{}
 	}
-	if limit <= 0 || limit >= len(b.events) {
-		return append([]AdminEvent(nil), b.events...)
+
+	// 环形缓冲区中事件的时间顺序：从 oldest 开始到最新。
+	// 当 buffer 未满时，oldest 在 index 0，最新在 index head-1。
+	// 当 buffer 已满时，oldest 在 index head（因为 head 刚覆盖了最旧的位置），最新在 head-1。
+	// 但由于 Seq 是递增的，我们按 Seq 排序输出更安全。
+	var startIdx int
+	if b.count < b.capacity {
+		// 未满：有效数据在 [0, count)
+		startIdx = 0
+	} else {
+		// 已满：head 指向最旧的位置
+		startIdx = b.head
 	}
-	start := len(b.events) - limit
-	return append([]AdminEvent(nil), b.events[start:]...)
+
+	// 收集有效事件到有序切片
+	ordered := make([]AdminEvent, b.count)
+	for i := 0; i < b.count; i++ {
+		ordered[i] = b.ring[(startIdx+i)%b.capacity]
+	}
+
+	if limit <= 0 || limit >= len(ordered) {
+		return ordered
+	}
+	// 返回最后 limit 条（最新的）
+	return ordered[len(ordered)-limit:]
 }

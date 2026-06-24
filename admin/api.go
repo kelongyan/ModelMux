@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -818,8 +819,13 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 
-	modelsURL := strings.TrimRight(providerCfg.TargetURL, "/") + "/models"
-	if err := validateUpstreamURL(modelsURL); err != nil {
+	modelsURL, err := url.JoinPath(strings.TrimRight(providerCfg.TargetURL, "/"), "/models")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("build models url: %v", err)})
+		return
+	}
+	allowedIPs, err := validateUpstreamURL(modelsURL)
+	if err != nil {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "upstream URL is not allowed for security reasons"})
 		return
 	}
@@ -834,7 +840,7 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id
 	reqHTTP.Header.Set("Authorization", "Bearer "+keyValue)
 	reqHTTP.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := safeUpstreamClient(allowedIPs, 15*time.Second)
 	resp, err := client.Do(reqHTTP)
 	if err != nil {
 		h.recordEvent("warn", logx.CategoryAdmin, "admin.models_fetch_failed", "fetch upstream models failed", map[string]any{
@@ -1142,7 +1148,7 @@ func (h *Handler) about(w http.ResponseWriter, r *http.Request) {
 		Version:        buildVersion(),
 		GoVersion:      runtime.Version(),
 		Platform:       runtime.GOOS + "/" + runtime.GOARCH,
-		BuildTime:      buildTime(),
+		BuildTime:      buildTimeValue(),
 		ConfigPath:     h.cfgManager.Path(),
 		Listen:         cfg.Listen,
 		AdminListen:    cfg.AdminListen,
@@ -1507,31 +1513,65 @@ func writeAdminError(w http.ResponseWriter, status int, err error, userMsg strin
 }
 
 // validateUpstreamURL 校验上游 URL 不指向私有/保留 IP 段，防止 SSRF。
-func validateUpstreamURL(rawURL string) error {
+// 返回已解析且通过安全检查的 IP 列表，供调用方构造固定 IP 的 Transport 防 DNS 重绑定。
+func validateUpstreamURL(rawURL string) ([]net.IP, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("invalid url: %w", err)
+		return nil, fmt.Errorf("invalid url: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("unsupported scheme %q", u.Scheme)
+		return nil, fmt.Errorf("unsupported scheme %q", u.Scheme)
 	}
 	host := u.Hostname()
 	if host == "" {
-		return fmt.Errorf("missing host")
+		return nil, fmt.Errorf("missing host")
 	}
 	if isBlockedHost(host) {
-		return fmt.Errorf("host %q is not allowed", host)
+		return nil, fmt.Errorf("host %q is not allowed", host)
 	}
 	ips, err := net.LookupIP(host)
 	if err != nil {
-		return nil
+		// DNS 解析失败时不阻塞请求：后续连接会再次解析并自行失败。
+		return nil, nil
 	}
 	for _, ip := range ips {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return fmt.Errorf("resolved IP %s is in a restricted range", ip)
+			return nil, fmt.Errorf("resolved IP %s is in a restricted range", ip)
 		}
 	}
-	return nil
+	return ips, nil
+}
+
+// safeUpstreamClient 构造一个绑定到已校验 IP 的 http.Client，避免 DNS 重绑定攻击。
+// allowedIPs 为空时退化为普通 client（DNS 解析失败的兜底场景）。
+func safeUpstreamClient(allowedIPs []net.IP, timeout time.Duration) *http.Client {
+	if len(allowedIPs) == 0 {
+		return &http.Client{Timeout: timeout}
+	}
+	allowed := make(map[string]bool, len(allowedIPs))
+	for _, ip := range allowedIPs {
+		allowed[ip.String()] = true
+	}
+	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			if allowed[host] {
+				return dialer.DialContext(ctx, network, addr)
+			}
+			return nil, fmt.Errorf("dial %s: IP not in allowlist", addr)
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          10,
+		MaxIdleConnsPerHost:   2,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+	}
+	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func isBlockedHost(host string) bool {
@@ -1562,20 +1602,19 @@ func downloadAttachment(w http.ResponseWriter, filename string, payload []byte) 
 	_, _ = w.Write(payload)
 }
 
-// buildVersion 返回构建版本；本地构建默认视为 dev。
+// buildVersion 返回构建版本，优先读取 Go build info 中的模块版本。
 func buildVersion() string {
-	if info, ok := debugBuildInfo(); ok {
-		return info
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return info.Main.Version
+		}
 	}
 	return "dev"
 }
 
-// buildTime 预留构建时间展示，当前本地构建场景下返回 dev。
-func buildTime() string {
-	return "dev"
-}
+// buildTime 可通过 -ldflags "-X github.com/kelongyan/ModelMux/admin.buildTime=..." 注入。
+var buildTime = "dev"
 
-// debugBuildInfo 读取 Go build info，避免关于页显示空版本。
-func debugBuildInfo() (string, bool) {
-	return "dev", true
+func buildTimeValue() string {
+	return buildTime
 }

@@ -249,7 +249,9 @@ export type AdminAboutResponse = {
   active_provider: string;
   provider_count: number;
   features: string[];
+  /** 预留：后端返回但当前 UI 未渲染 */
   api_endpoints: string[];
+  /** 预留：后端返回但当前 UI 未渲染 */
   backup_endpoints: string[];
 };
 
@@ -311,10 +313,6 @@ export type AdminStatsModelsResponse = {
   window: AdminStatsWindow;
   since: string;
   models: AdminModelStats[];
-};
-
-export type AdminStatsRecentResponse = {
-  records: AdminCallRecord[];
 };
 
 // AdminModelsPayload 对应 provider 模型 ID 替换动作。
