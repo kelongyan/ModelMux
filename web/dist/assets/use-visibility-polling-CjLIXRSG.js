@@ -1,0 +1,1 @@
+import{K as t}from"./vendor-CNhSUqw7.js";function c(i){const[n,s]=t.useState(()=>!document.hidden);return t.useEffect(()=>{const e=()=>s(!document.hidden);return document.addEventListener("visibilitychange",e),()=>document.removeEventListener("visibilitychange",e)},[]),n?i:!1}export{c as u};

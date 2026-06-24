@@ -2,7 +2,7 @@ import { Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import type { AdminCallRecord } from "../../types/admin";
-import { formatLocalDateTime, formatNumber, formatLatencySec, latencyClass } from "./stats-format";
+import { deriveTotalTokens, formatLocalDateTime, formatNumber, formatLatencySec, latencyClass } from "./stats-format";
 
 export function buildStatsLogColumns(): ColumnsType<AdminCallRecord> {
   return [
@@ -47,9 +47,25 @@ export function buildStatsLogColumns(): ColumnsType<AdminCallRecord> {
     },
     {
       title: "总 Token",
-      dataIndex: "total_tokens",
       key: "total_tokens",
       width: 95,
+      render: (_: unknown, record) => {
+        const total = deriveTotalTokens(record);
+        return total != null ? formatNumber(total) : "-";
+      },
+    },
+    {
+      title: "输入",
+      dataIndex: "prompt_tokens",
+      key: "prompt_tokens",
+      width: 88,
+      render: (value?: number) => value != null ? formatNumber(value) : "-",
+    },
+    {
+      title: "输出",
+      dataIndex: "completion_tokens",
+      key: "completion_tokens",
+      width: 88,
       render: (value?: number) => value != null ? formatNumber(value) : "-",
     },
     {

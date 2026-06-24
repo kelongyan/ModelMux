@@ -31,6 +31,13 @@ export type ModelModalState = {
   open: boolean;
 };
 
+export type ModelSyncModalState = {
+  open: boolean;
+  providerID: string | null;
+  currentModels: string[];
+  fetchedModels: string[];
+};
+
 export type ProviderFormValues = {
   id: string;
   target_url: string;

@@ -213,6 +213,96 @@ func TestBuildRequestKeepsToolFieldsByDefault(t *testing.T) {
 	}
 }
 
+func TestBuildRequestAddsStreamUsageOptionForStreamingRequests(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:             "https://example.com",
+		Keys:                  []string{"rotated-key"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+
+	h, pools := mustHandler(t, cfg)
+	p, err := pools.Get(cfg.ActiveProvider)
+	if err != nil {
+		t.Fatalf("Get(%q) error = %v", cfg.ActiveProvider, err)
+	}
+	key, err := p.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+
+	body := []byte(`{"model":"gpt-4.1-mini","stream":true,"messages":[]}`)
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
+	outReq, err := h.buildRequest(req, key, body)
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+	outBody, err := io.ReadAll(outReq.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	var payload struct {
+		Stream        bool `json:"stream"`
+		StreamOptions struct {
+			IncludeUsage bool `json:"include_usage"`
+		} `json:"stream_options"`
+	}
+	if err := json.Unmarshal(outBody, &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if !payload.Stream {
+		t.Fatal("stream = false, want true")
+	}
+	if !payload.StreamOptions.IncludeUsage {
+		t.Fatalf("stream_options.include_usage = false, want true; body=%s", string(outBody))
+	}
+}
+
+func TestBuildRequestKeepsExplicitStreamUsageOption(t *testing.T) {
+	cfg := &config.Config{
+		TargetURL:             "https://example.com",
+		Keys:                  []string{"rotated-key"},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+
+	h, pools := mustHandler(t, cfg)
+	p, err := pools.Get(cfg.ActiveProvider)
+	if err != nil {
+		t.Fatalf("Get(%q) error = %v", cfg.ActiveProvider, err)
+	}
+	key, err := p.Next()
+	if err != nil {
+		t.Fatalf("Next() error = %v", err)
+	}
+
+	body := []byte(`{"model":"gpt-4.1-mini","stream":true,"stream_options":{"include_usage":false},"messages":[]}`)
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
+	outReq, err := h.buildRequest(req, key, body)
+	if err != nil {
+		t.Fatalf("buildRequest() error = %v", err)
+	}
+	outBody, err := io.ReadAll(outReq.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	var payload struct {
+		StreamOptions struct {
+			IncludeUsage bool `json:"include_usage"`
+		} `json:"stream_options"`
+	}
+	if err := json.Unmarshal(outBody, &payload); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if payload.StreamOptions.IncludeUsage {
+		t.Fatalf("stream_options.include_usage = true, want explicit false preserved; body=%s", string(outBody))
+	}
+}
+
 func TestServeHTTPRetriesUnauthorizedWithOriginalBody(t *testing.T) {
 	var attempts atomic.Int32
 	var firstBody string
@@ -420,6 +510,59 @@ func TestServeHTTPRecordsStreamingUsageStats(t *testing.T) {
 	}
 	if record.TotalTokens == nil || *record.TotalTokens != 15 {
 		t.Fatalf("TotalTokens = %v, want 15", record.TotalTokens)
+	}
+}
+
+func TestServeHTTPRecordsStreamingUsageStatsAfterLargeStream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		chunk := strings.Repeat("x", 4096)
+		for i := 0; i < 80; i++ {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"" + chunk + "\"}}]}\n\n"))
+		}
+		_, _ = w.Write([]byte("data: {\"usage\":{\"prompt_tokens\":70,\"completion_tokens\":80,\"total_tokens\":150}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "primary",
+		Providers: []config.ProviderConfig{
+			{ID: "primary", TargetURL: upstream.URL, Keys: []string{"k1"}},
+		},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+	recorder := &recordingStatsSink{}
+	h.SetStatsRecorder(recorder)
+
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(`{"model":"large-stream-model","stream":true,"messages":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	records := recorder.Records()
+	if len(records) != 1 {
+		t.Fatalf("len(records) = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.UsageSource != stats.UsageSourceUpstream {
+		t.Fatalf("UsageSource = %q, want %q", record.UsageSource, stats.UsageSourceUpstream)
+	}
+	if record.PromptTokens == nil || *record.PromptTokens != 70 {
+		t.Fatalf("PromptTokens = %v, want 70", record.PromptTokens)
+	}
+	if record.CompletionTokens == nil || *record.CompletionTokens != 80 {
+		t.Fatalf("CompletionTokens = %v, want 80", record.CompletionTokens)
+	}
+	if record.TotalTokens == nil || *record.TotalTokens != 150 {
+		t.Fatalf("TotalTokens = %v, want 150", record.TotalTokens)
 	}
 }
 

@@ -13,6 +13,27 @@ type Usage struct {
 	Source           string
 }
 
+func deriveTotalTokens(prompt, completion, total *int64) *int64 {
+	if total != nil {
+		return total
+	}
+	if prompt == nil || completion == nil {
+		return nil
+	}
+	sum := *prompt + *completion
+	return &sum
+}
+
+func normalizeUsageFields(record *CallRecord) {
+	if record == nil {
+		return
+	}
+	record.TotalTokens = deriveTotalTokens(record.PromptTokens, record.CompletionTokens, record.TotalTokens)
+	if record.UsageSource == "" {
+		record.UsageSource = UsageSourceUnknown
+	}
+}
+
 // ExtractUsage 从 OpenAI 兼容响应体中提取上游返回的 token usage。
 func ExtractUsage(body []byte) Usage {
 	unknown := Usage{Source: UsageSourceUnknown}
@@ -46,11 +67,7 @@ func extractUsageFromJSON(body []byte) Usage {
 
 	prompt := firstTokenValue(usage, "prompt_tokens", "input_tokens", "input_token_count")
 	completion := firstTokenValue(usage, "completion_tokens", "output_tokens", "output_token_count")
-	total := firstTokenValue(usage, "total_tokens", "total_token_count")
-	if total == nil && prompt != nil && completion != nil {
-		sum := *prompt + *completion
-		total = &sum
-	}
+	total := deriveTotalTokens(prompt, completion, firstTokenValue(usage, "total_tokens", "total_token_count"))
 	if prompt == nil && completion == nil && total == nil {
 		return unknown
 	}

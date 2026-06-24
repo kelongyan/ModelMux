@@ -26,7 +26,7 @@
 
 .stats-kpi {
   min-height: 108px;
-  padding: 24px 28px;
+  padding: 20px 22px;
   border-radius: 14px;
   background: var(--mm-surface-solid);
   border: 1px solid var(--mm-border-muted);
@@ -61,6 +61,15 @@
   color: var(--mm-text-secondary);
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
+}
+
+.stats-kpi small {
+  display: block;
+  color: var(--mm-text-subtle);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 /* ── call log table ── */

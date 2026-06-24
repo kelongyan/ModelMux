@@ -184,6 +184,7 @@ func (s *Store) normalizeRecord(record CallRecord) CallRecord {
 	if record.UsageSource == "" {
 		record.UsageSource = UsageSourceUnknown
 	}
+	normalizeUsageFields(&record)
 	return record
 }
 
@@ -485,6 +486,7 @@ func loadRecordsFromFile(path string, add func(CallRecord)) error {
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			continue
 		}
+		normalizeUsageFields(&record)
 		add(record)
 	}
 	if err := scanner.Err(); err != nil {

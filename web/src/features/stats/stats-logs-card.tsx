@@ -58,7 +58,7 @@ export function StatsLogsCard({
         columns={buildStatsLogColumns()}
         dataSource={logs}
         size="middle"
-        scroll={{ x: 900 }}
+        scroll={{ x: 1080 }}
         loading={loading}
         pagination={{
           current: page,

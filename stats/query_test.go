@@ -1,6 +1,8 @@
 package stats
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -69,6 +71,73 @@ func TestStoreSummarySinceAggregatesRecentCalls(t *testing.T) {
 	}
 }
 
+func TestStoreSummarySinceDerivesTotalTokensWhenMissing(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	store, err := NewStore(Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 10,
+		Now:              func() time.Time { return base },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	mustAppendRecord(t, store, CallRecord{
+		At:               base.Add(-30 * time.Minute),
+		Model:            "model-a",
+		Status:           200,
+		Success:          true,
+		LatencyMs:        100,
+		PromptTokens:     int64Ptr(12),
+		CompletionTokens: int64Ptr(34),
+		UsageSource:      UsageSourceUpstream,
+	})
+
+	summary := store.SummarySince(base.Add(-1 * time.Hour))
+	if summary.UsageKnownCalls != 1 {
+		t.Fatalf("UsageKnownCalls = %d, want 1", summary.UsageKnownCalls)
+	}
+	if summary.PromptTokens != 12 || summary.CompletionTokens != 34 || summary.TotalTokens != 46 {
+		t.Fatalf("tokens = prompt %d completion %d total %d, want 12/34/46", summary.PromptTokens, summary.CompletionTokens, summary.TotalTokens)
+	}
+}
+
+func TestStoreSummarySinceDerivesTotalTokensFromExistingFile(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "calls-2026-06-01.jsonl")
+	line := `{"id":"legacy-1","at":"2026-06-01T11:30:00Z","model":"model-a","endpoint":"/v1/chat/completions","method":"POST","status":200,"success":true,"latency_ms":100,"attempts":1,"prompt_tokens":12,"completion_tokens":34,"usage_source":"upstream"}`
+	if err := os.WriteFile(file, []byte(line+"\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store, err := NewStore(Options{
+		Dir:              dir,
+		RetentionDays:    30,
+		MaxRecentRecords: 10,
+		Now:              func() time.Time { return base },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	summary := store.SummarySince(base.Add(-1 * time.Hour))
+	if summary.PromptTokens != 12 || summary.CompletionTokens != 34 || summary.TotalTokens != 46 {
+		t.Fatalf("tokens = prompt %d completion %d total %d, want 12/34/46", summary.PromptTokens, summary.CompletionTokens, summary.TotalTokens)
+	}
+}
+
 func TestStoreModelsSinceAggregatesByModel(t *testing.T) {
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	store, err := NewStore(Options{
@@ -125,6 +194,43 @@ func TestStoreModelsSinceAggregatesByModel(t *testing.T) {
 	}
 	if models[1].Model != "model-b" || models[1].Calls != 1 {
 		t.Fatalf("models[1] = %+v, want model-b calls=1", models[1])
+	}
+}
+
+func TestStoreModelsSinceDerivesTotalTokensWhenMissing(t *testing.T) {
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	store, err := NewStore(Options{
+		Dir:              t.TempDir(),
+		RetentionDays:    30,
+		MaxRecentRecords: 10,
+		Now:              func() time.Time { return base },
+	})
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+
+	mustAppendRecord(t, store, CallRecord{
+		At:               base.Add(-30 * time.Minute),
+		Model:            "model-a",
+		Status:           200,
+		Success:          true,
+		LatencyMs:        100,
+		PromptTokens:     int64Ptr(40),
+		CompletionTokens: int64Ptr(2),
+		UsageSource:      UsageSourceUpstream,
+	})
+
+	models := store.ModelsSince(base.Add(-1 * time.Hour))
+	if len(models) != 1 {
+		t.Fatalf("len(ModelsSince) = %d, want 1", len(models))
+	}
+	if models[0].PromptTokens != 40 || models[0].CompletionTokens != 2 || models[0].TotalTokens != 42 {
+		t.Fatalf("model tokens = %+v, want prompt=40 completion=2 total=42", models[0])
 	}
 }
 

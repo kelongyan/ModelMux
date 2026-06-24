@@ -44,7 +44,7 @@ export function createAppTheme(mode: AppThemeMode): ThemeConfig {
       marginSM: 14,
       marginXS: 10,
       fontFamily:
-        '"Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif',
+        '"Libre Baskerville", "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif',
       fontFamilyCode:
         '"Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
     },

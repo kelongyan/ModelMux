@@ -38,6 +38,7 @@ var (
 const (
 	quotaErrorInspectBytes        int64 = 64 * 1024
 	responseUsageInspectBytes     int64 = 256 * 1024
+	responseUsageInspectHeadBytes int64 = 64 * 1024
 	upstreamErrorExcerptBytes     int   = 2048
 	upstreamRetryDrainBytes       int64 = 64 * 1024
 	upstreamMaxIdleConns          int   = 256
@@ -941,7 +942,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 
 	key.RecordLatency(time.Since(upstreamStart))
 
-	capturedBody := newCaptureReader(responseBody, responseUsageInspectBytes)
+	capturedBody := newCaptureReader(responseBody, responseUsageInspectHeadBytes, responseUsageInspectBytes)
 	copyHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	streamOpts := streamOptions{contentType: resp.Header.Get("Content-Type")}
@@ -1052,35 +1053,81 @@ func extractRequestMeta(body []byte) requestMeta {
 }
 
 type captureReader struct {
-	reader   io.Reader
-	limit    int64
-	captured int64
-	buffer   bytes.Buffer
+	reader    io.Reader
+	headLimit int64
+	tailLimit int64
+	captured  int64
+	buffer    bytes.Buffer
+	tail      []byte
 }
 
-func newCaptureReader(reader io.Reader, limit int64) *captureReader {
+func newCaptureReader(reader io.Reader, headLimit, tailLimit int64) *captureReader {
+	if headLimit < 0 {
+		headLimit = 0
+	}
+	if tailLimit < 0 {
+		tailLimit = 0
+	}
+	if tailLimit < headLimit {
+		tailLimit = headLimit
+	}
 	return &captureReader{
-		reader: reader,
-		limit:  limit,
+		reader:    reader,
+		headLimit: headLimit,
+		tailLimit: tailLimit,
 	}
 }
 
 func (r *captureReader) Read(p []byte) (int, error) {
 	n, err := r.reader.Read(p)
-	if n > 0 && r.limit > r.captured {
-		remaining := r.limit - r.captured
-		captureN := n
-		if int64(captureN) > remaining {
-			captureN = int(remaining)
-		}
-		_, _ = r.buffer.Write(p[:captureN])
-		r.captured += int64(captureN)
+	if n > 0 {
+		r.capture(p[:n])
 	}
 	return n, err
 }
 
+func (r *captureReader) capture(chunk []byte) {
+	if len(chunk) == 0 {
+		return
+	}
+	if r.headLimit > r.captured {
+		remaining := r.headLimit - r.captured
+		captureN := len(chunk)
+		if int64(captureN) > remaining {
+			captureN = int(remaining)
+		}
+		_, _ = r.buffer.Write(chunk[:captureN])
+		r.captured += int64(captureN)
+		chunk = chunk[captureN:]
+	}
+	if len(chunk) == 0 {
+		return
+	}
+
+	tailCapacity := int(r.tailLimit - r.headLimit)
+	if tailCapacity <= 0 {
+		return
+	}
+	if len(chunk) >= tailCapacity {
+		r.tail = append(r.tail[:0], chunk[len(chunk)-tailCapacity:]...)
+		return
+	}
+	overflow := len(r.tail) + len(chunk) - tailCapacity
+	if overflow > 0 {
+		copy(r.tail, r.tail[overflow:])
+		r.tail = r.tail[:len(r.tail)-overflow]
+	}
+	r.tail = append(r.tail, chunk...)
+}
+
 func (r *captureReader) Bytes() []byte {
-	return r.buffer.Bytes()
+	if len(r.tail) == 0 {
+		return r.buffer.Bytes()
+	}
+	out := make([]byte, 0, r.buffer.Len()+len(r.tail))
+	out = append(out, r.buffer.Bytes()...)
+	out = append(out, r.tail...)
+	return out
 }
 
 type requestDiagnosticInput struct {
@@ -1376,10 +1423,7 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	outURL.Path = singleJoiningSlash(rt.targetURL.Path, r.URL.Path)
 	outURL.RawQuery = r.URL.RawQuery
 
-	outBody := body
-	if rt.stripTools {
-		outBody = stripToolFields(body)
-	}
+	outBody := rewriteRequestBody(body, rt.stripTools)
 
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(outBody))
 	if err != nil {
@@ -1396,8 +1440,7 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	return outReq, nil
 }
 
-// stripToolFields removes OpenAI tool-calling fields for providers that reject them.
-func stripToolFields(body []byte) []byte {
+func rewriteRequestBody(body []byte, stripTools bool) []byte {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return body
 	}
@@ -1408,11 +1451,16 @@ func stripToolFields(body []byte) []byte {
 	}
 
 	changed := false
-	for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"} {
-		if _, ok := payload[field]; ok {
-			delete(payload, field)
-			changed = true
+	if stripTools {
+		for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"} {
+			if _, ok := payload[field]; ok {
+				delete(payload, field)
+				changed = true
+			}
 		}
+	}
+	if ensureStreamIncludeUsage(payload) {
+		changed = true
 	}
 	if !changed {
 		return body
@@ -1423,6 +1471,44 @@ func stripToolFields(body []byte) []byte {
 		return body
 	}
 	return out
+}
+
+// stripToolFields removes OpenAI tool-calling fields for providers that reject them.
+func stripToolFields(body []byte) []byte {
+	return rewriteRequestBody(body, true)
+}
+
+func ensureStreamIncludeUsage(payload map[string]json.RawMessage) bool {
+	rawStream, ok := payload["stream"]
+	if !ok {
+		return false
+	}
+	var stream bool
+	if err := json.Unmarshal(rawStream, &stream); err != nil || !stream {
+		return false
+	}
+
+	options := make(map[string]json.RawMessage)
+	if rawOptions, ok := payload["stream_options"]; ok && len(bytes.TrimSpace(rawOptions)) > 0 && string(bytes.TrimSpace(rawOptions)) != "null" {
+		if err := json.Unmarshal(rawOptions, &options); err != nil {
+			return false
+		}
+	}
+
+	if rawIncludeUsage, ok := options["include_usage"]; ok {
+		var includeUsage bool
+		if err := json.Unmarshal(rawIncludeUsage, &includeUsage); err == nil {
+			return false
+		}
+	}
+
+	options["include_usage"] = json.RawMessage("true")
+	rawOptions, err := json.Marshal(options)
+	if err != nil {
+		return false
+	}
+	payload["stream_options"] = rawOptions
+	return true
 }
 
 // readRequestBody 在支持重试的前提下读取请求体，并限制最大内存占用。

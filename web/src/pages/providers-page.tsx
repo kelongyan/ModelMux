@@ -28,9 +28,11 @@ import {
   KeyMetadataModal,
   KeyPreviewModal,
   ModelEditorModal,
+  ModelSyncModal,
   ProviderEditorModal,
 } from "../features/providers/provider-modals";
 import { ProviderTable } from "../features/providers/provider-table";
+import { buildModelSaveList, type ModelSaveMode } from "../features/providers/model-sync";
 import type {
   KeyFormMode,
   KeyFormValues,
@@ -40,6 +42,7 @@ import type {
   KeyPreviewModalState,
   ModelFormValues,
   ModelModalState,
+  ModelSyncModalState,
   ProviderFormValues,
   ProviderModalState,
 } from "../features/providers/provider-types";
@@ -64,6 +67,14 @@ export function ProvidersPage(): JSX.Element {
     keys: [],
   });
   const [modelModal, setModelModal] = useState<ModelModalState>({ open: false });
+  const [modelSyncModal, setModelSyncModal] = useState<ModelSyncModalState>({
+    open: false,
+    providerID: null,
+    currentModels: [],
+    fetchedModels: [],
+  });
+  const [selectedSyncModelIDs, setSelectedSyncModelIDs] = useState<string[]>([]);
+  const [modelSyncSearch, setModelSyncSearch] = useState("");
   const [testingKeyID, setTestingKeyID] = useState<string | null>(null);
 
   const [providerForm] = Form.useForm<ProviderFormValues>();
@@ -109,6 +120,14 @@ export function ProvidersPage(): JSX.Element {
       preview: null,
       keys: [],
     });
+    setModelSyncModal({
+      open: false,
+      providerID: null,
+      currentModels: [],
+      fetchedModels: [],
+    });
+    setSelectedSyncModelIDs([]);
+    setModelSyncSearch("");
   }, [selectedProviderID]);
 
   const invalidateAdminQueries = async (providerID?: string) => {
@@ -279,6 +298,7 @@ export function ProvidersPage(): JSX.Element {
     onSuccess: async (_, variables) => {
       messageApi.success(`已更新模型记录（${variables.models.length} 个）`);
       setModelModal({ open: false });
+      closeModelSyncModal();
       modelForm.resetFields();
       await invalidateAdminQueries(variables.providerID);
     },
@@ -288,9 +308,23 @@ export function ProvidersPage(): JSX.Element {
   const fetchModelsMutation = useMutation({
     mutationFn: async (providerID: string) => fetchProviderModels(providerID),
     onSuccess: async (data, providerID) => {
-      messageApi.success(`从上游拉取到 ${data.count} 个模型`);
-      modelForm.setFieldsValue({ models_text: data.models.join("\n") });
-      setModelModal({ open: true });
+      if (selectedProviderID !== providerID) {
+        return;
+      }
+      const currentModels = providerDetailQuery.data?.id === providerID ? providerDetailQuery.data.models : [];
+      if (data.count === 0) {
+        messageApi.warning("上游未返回模型");
+      } else {
+        messageApi.success(`从上游拉取到 ${data.count} 个模型`);
+      }
+      setSelectedSyncModelIDs(data.models);
+      setModelSyncSearch("");
+      setModelSyncModal({
+        open: true,
+        providerID,
+        currentModels,
+        fetchedModels: data.models,
+      });
       await invalidateAdminQueries(providerID);
     },
     onError: (error: Error) => messageApi.error(`拉取模型失败：${error.message}`),
@@ -398,6 +432,17 @@ export function ProvidersPage(): JSX.Element {
         confirmLoading={replaceModelsMutation.isPending}
         onCancel={closeModelModal}
         onSubmit={(values) => void submitModelForm(values)}
+      />
+      <ModelSyncModal
+        state={modelSyncModal}
+        selectedModelIDs={selectedSyncModelIDs}
+        searchValue={modelSyncSearch}
+        confirmLoading={replaceModelsMutation.isPending}
+        onCancel={closeModelSyncModal}
+        onSearchChange={setModelSyncSearch}
+        onSelectedModelIDsChange={setSelectedSyncModelIDs}
+        onSave={(mode) => void submitModelSync(mode)}
+        onOpenManualEdit={openManualModelEditorFromSync}
       />
 
       <Drawer
@@ -550,12 +595,47 @@ export function ProvidersPage(): JSX.Element {
     modelForm.resetFields();
   }
 
+  function closeModelSyncModal() {
+    setModelSyncModal({
+      open: false,
+      providerID: null,
+      currentModels: [],
+      fetchedModels: [],
+    });
+    setSelectedSyncModelIDs([]);
+    setModelSyncSearch("");
+  }
+
+  function openManualModelEditorFromSync() {
+    const models = selectedSyncModelIDs.length > 0 ? selectedSyncModelIDs : modelSyncModal.fetchedModels;
+    modelForm.setFieldsValue({ models_text: models.join("\n") });
+    setModelModal({ open: true });
+    setModelSyncModal((current) => ({ ...current, open: false }));
+  }
+
   async function submitModelForm(values: ModelFormValues) {
     if (!selectedProviderID) {
       messageApi.error("请先选择 provider");
       return;
     }
     await replaceModelsMutation.mutateAsync({ providerID: selectedProviderID, models: splitLinesText(values.models_text) });
+  }
+
+  async function submitModelSync(mode: ModelSaveMode) {
+    if (!modelSyncModal.providerID) {
+      messageApi.error("缺少 provider id");
+      return;
+    }
+    const models = buildModelSaveList({
+      mode,
+      currentModels: modelSyncModal.currentModels,
+      selectedModels: selectedSyncModelIDs,
+    });
+    if (models.length === 0) {
+      messageApi.warning("请至少选择一个模型");
+      return;
+    }
+    await replaceModelsMutation.mutateAsync({ providerID: modelSyncModal.providerID, models });
   }
 
   async function submitProviderForm(values: ProviderFormValues) {

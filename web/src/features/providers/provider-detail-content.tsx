@@ -191,15 +191,25 @@ export function ProviderDetailContent({
           </div>
           <Space wrap>
             <Button size="small" onClick={onOpenEditModels}>
-              编辑
+              手动编辑
             </Button>
-            <Button size="small" loading={fetchingModels} onClick={onFetchModels}>
-              从上游拉取
+            <Button size="small" type="primary" loading={fetchingModels} onClick={onFetchModels}>
+              同步模型
             </Button>
           </Space>
         </div>
+        <div className="model-record-strip">
+          <div className="model-record-stat">
+            <span>记录数</span>
+            <strong>{models.length}</strong>
+          </div>
+          <div className="model-record-stat">
+            <span>保存方式</span>
+            <strong>审阅后保存</strong>
+          </div>
+        </div>
         {models.length === 0 ? (
-          <Empty description="暂无模型记录，点击「编辑」手动添加或「从上游拉取」自动获取" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty description="暂无模型记录，可手动编辑或同步上游模型" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
           <div className="model-tags">
             {models.map((model) => (

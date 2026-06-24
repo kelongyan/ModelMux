@@ -52,9 +52,11 @@ export function StatsSummaryCard({
       </div>
 
       <Row gutter={[20, 20]}>
-        <KPI label="调用数" value={formatNumber(summary.total_calls)} tone="blue" />
-        <KPI label="总 Token" value={formatNumber(summary.total_tokens)} tone="purple" />
-        <KPI label="成功率" value={formatPercent(summary.success_calls, summary.total_calls)} tone="green" />
+        <KPI label="调用数" value={formatNumber(summary.total_calls)} detail={`已识别 ${formatNumber(summary.usage_known_calls)} 次`} tone="blue" />
+        <KPI label="总 Token" value={formatNumber(summary.total_tokens)} detail={`输入 ${formatNumber(summary.prompt_tokens)} · 输出 ${formatNumber(summary.completion_tokens)}`} tone="purple" />
+        <KPI label="输入 Token" value={formatNumber(summary.prompt_tokens)} tone="blue" />
+        <KPI label="输出 Token" value={formatNumber(summary.completion_tokens)} tone="purple" />
+        <KPI label="成功率" value={formatPercent(summary.success_calls, summary.total_calls)} detail={`${formatNumber(summary.success_calls)} 成功 / ${formatNumber(summary.failed_calls)} 失败`} tone="green" />
         <KPI label="平均延迟" value={formatLatencySec(summary.avg_latency_ms)} tone="red" />
       </Row>
       </Spin>
@@ -62,12 +64,13 @@ export function StatsSummaryCard({
   );
 }
 
-function KPI({ label, value, tone }: { label: string; value: string; tone: Tone }): JSX.Element {
+function KPI({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone: Tone }): JSX.Element {
   return (
-    <Col xs={24} sm={12} md={6}>
+    <Col xs={24} sm={12} lg={8} xl={4}>
       <div className="stats-kpi" style={{ "--kpi-accent": toneAccent[tone] } as React.CSSProperties}>
         <span>{label}</span>
         <strong>{value}</strong>
+        {detail ? <small>{detail}</small> : null}
       </div>
     </Col>
   );
