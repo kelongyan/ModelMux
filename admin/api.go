@@ -268,7 +268,13 @@ func (h *Handler) registerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/v1/stats/recent", auth(h.statsRecent))
 	mux.HandleFunc("/admin/api/v1/stats/logs", auth(h.statsLogs))
 	mux.HandleFunc("/admin/api/v1/config/backup", auth(h.backupConfig))
+	mux.HandleFunc("/admin/api/v1/config/restore", auth(h.restoreConfig))
 	mux.HandleFunc("/admin/api/v1/state/backup", auth(h.backupState))
+	mux.HandleFunc("/admin/api/v1/state/restore", auth(h.restoreState))
+	mux.HandleFunc("/admin/api/v1/state/save", auth(h.stateSave))
+	mux.HandleFunc("/admin/api/v1/stats", auth(h.statsClear))
+	mux.HandleFunc("/admin/api/v1/diagnostics", auth(h.diagnostics))
+	mux.HandleFunc("/admin/api/v1/shutdown", auth(h.shutdown))
 }
 
 // dashboard 输出面向前端首页的聚合视图。
@@ -353,6 +359,8 @@ func (h *Handler) providersDetail(w http.ResponseWriter, r *http.Request) {
 		h.previewProviderKeys(w, r, id)
 	case "keys:reset-all":
 		h.resetAllProviderKeys(w, r, id)
+	case "keys:test-all":
+		h.testAllProviderKeys(w, r, id)
 	case "key:reset":
 		h.resetProviderKey(w, r, id, keyID)
 	case "key:metadata":
@@ -1253,6 +1261,204 @@ func (h *Handler) backupState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	downloadAttachment(w, "modelmux-state-backup.json", payload)
+}
+
+// restoreConfig 从上传的 JSON 恢复配置，校验后写入磁盘并触发 reload。
+func (h *Handler) restoreConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if h.cfgManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+		return
+	}
+
+	var cfg config.Config
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("invalid JSON: %v", err)})
+		return
+	}
+
+	// 校验配置
+	if err := cfg.Validate(); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("config validation failed: %v", err)})
+		return
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.ValidateAfterDefaults(); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("config validation failed: %v", err)})
+		return
+	}
+
+	// 写入磁盘
+	if err := config.WriteFileAtomic(h.cfgManager.Path(), &cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("write config failed: %v", err)})
+		return
+	}
+
+	// 触发 reload
+	if err := h.reloadFn(h.cfgManager.Path()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("reload failed: %v", err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "config restored and reloaded"})
+}
+
+// restoreState 从上传的 JSON 恢复状态，校验后写入磁盘。
+func (h *Handler) restoreState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if h.cfgManager == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "config manager is not ready"})
+		return
+	}
+
+	cfg, err := h.cfgManager.Snapshot()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+		return
+	}
+
+	var file state.File
+	if err := json.NewDecoder(r.Body).Decode(&file); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("invalid JSON: %v", err)})
+		return
+	}
+
+	// 校验版本
+	if file.Version != state.CurrentVersion && file.Version != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("unsupported state version %d", file.Version)})
+		return
+	}
+
+	// 写入磁盘
+	stateFile := cfg.StateFile
+	if stateFile == "" {
+		stateFile = config.DefaultStateFile
+	}
+	store := state.NewStore(stateFile)
+	if err := store.Save(file.Providers); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("write state failed: %v", err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "state restored"})
+}
+
+// stateSave 强制立即将当前 key 池状态持久化到磁盘。
+func (h *Handler) stateSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if h.stateSaver == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "state saver is not available"})
+		return
+	}
+
+	if err := h.stateSaver.SaveNow(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("state save failed: %v", err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "state saved"})
+}
+
+// statsClear 清除所有统计数据文件和内存缓存。
+func (h *Handler) statsClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if h.statsClearer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "stats clearer is not available"})
+		return
+	}
+
+	if err := h.statsClearer.Clear(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("stats clear failed: %v", err)})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "stats cleared"})
+}
+
+// diagnostics 返回运行时诊断信息，便于排查问题。
+func (h *Handler) diagnostics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	// 获取连接池状态
+	var transportStats map[string]any
+	if h.healthReader != nil {
+		circuitSnap := h.healthReader.ProviderCircuitSnapshot()
+		transportStats = map[string]any{
+			"circuit_state":          circuitSnap.State,
+			"circuit_failures":       circuitSnap.ConsecutiveFailures,
+			"circuit_open_until":     circuitSnap.OpenUntil,
+			"circuit_half_open":      circuitSnap.HalfOpenInFlight,
+			"circuit_cooling_seconds": circuitSnap.CurrentCoolingSeconds,
+		}
+	}
+
+	// 获取统计队列状态
+	var statsHealth map[string]any
+	if h.statsStore != nil {
+		if healthReader, ok := h.statsStore.(statsHealthReader); ok {
+			statsHealth = map[string]any{
+				"dropped_records": healthReader.DroppedRecords(),
+				"queue_depth":     healthReader.QueueDepth(),
+				"queue_capacity":  healthReader.QueueCapacity(),
+			}
+		}
+	}
+
+	diagnostics := map[string]any{
+		"goroutines": runtime.NumGoroutine(),
+		"memory": map[string]any{
+			"alloc_mb":       float64(memStats.Alloc) / 1024 / 1024,
+			"total_alloc_mb": float64(memStats.TotalAlloc) / 1024 / 1024,
+			"sys_mb":         float64(memStats.Sys) / 1024 / 1024,
+			"gc_count":       memStats.NumGC,
+			"gc_pause_ms":    float64(memStats.PauseTotalNs) / 1e6,
+		},
+		"provider_circuit": transportStats,
+		"stats_queue":      statsHealth,
+		"go_version":       runtime.Version(),
+		"platform":         fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+	}
+
+	writeJSON(w, http.StatusOK, diagnostics)
+}
+
+// shutdown 触发优雅关闭，等待 in-flight 请求完成后退出。
+func (h *Handler) shutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if h.shutdownFn == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "shutdown function is not available"})
+		return
+	}
+
+	h.recordEvent("info", logx.CategoryLifecycle, "admin.shutdown_triggered", "graceful shutdown triggered via API", nil)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "shutdown initiated"})
+
+	// 延迟执行关闭，让响应先发送完成
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		h.shutdownFn()
+	}()
 }
 
 // buildProviderSummaries 把 provider pools 与配置文件合并成前端可读的汇总列表。

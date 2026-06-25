@@ -215,6 +215,10 @@ func main() {
 	adminHandler.SetProviderHealthReader(proxyHandler)
 	if statsStore != nil {
 		adminHandler.SetStatsStore(statsStore)
+		adminHandler.SetStatsClearer(statsStore)
+	}
+	if saver != nil {
+		adminHandler.SetStateSaver(saver)
 	}
 	adminHandler.Register(adminMux)
 
@@ -288,6 +292,9 @@ func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+	adminHandler.SetShutdownFunc(func() {
+		quit <- syscall.SIGTERM
+	})
 	<-quit
 
 	slog.Info("shutting down", logx.Fields(logx.CategoryLifecycle, logx.EventShutdownStart)...)

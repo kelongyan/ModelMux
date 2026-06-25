@@ -48,6 +48,11 @@ type persistedConfig struct {
 	AdminAPIKey                     string           `json:"admin_api_key,omitempty"`
 }
 
+// WriteFileAtomic 把配置以首选 schema 原子写回磁盘，避免保存半截 JSON。
+func WriteFileAtomic(path string, cfg *Config) error {
+	return writeFileAtomic(path, cfg)
+}
+
 // writeFileAtomic 把配置以首选 schema 原子写回磁盘，避免保存半截 JSON。
 func writeFileAtomic(path string, cfg *Config) error {
 	if cfg == nil {

@@ -156,6 +156,11 @@ func SetCurrent(cfg *Config) {
 	mu.Unlock()
 }
 
+// Validate 校验启动必须依赖的配置项。
+func (c *Config) Validate() error {
+	return c.validate()
+}
+
 // validate 校验启动必须依赖的配置项。
 func (c *Config) validate() error {
 	providers := c.Providers
@@ -232,6 +237,11 @@ func validateTargetURL(rawURL string) error {
 		return fmt.Errorf("scheme must be http or https, got %q", target.Scheme)
 	}
 	return nil
+}
+
+// ValidateAfterDefaults 校验依赖默认值补齐后的配置项。
+func (c *Config) ValidateAfterDefaults() error {
+	return c.validateAfterDefaults()
 }
 
 // validateAfterDefaults 校验依赖默认值补齐后的配置项。
@@ -384,6 +394,11 @@ func (p ProviderConfig) copy() ProviderConfig {
 	p.KeyMetadata = copyKeyMetadata(p.KeyMetadata)
 	p.Models = append([]string(nil), p.Models...)
 	return p
+}
+
+// ApplyDefaults 为个人使用场景填充安全、稳定的默认值。
+func (c *Config) ApplyDefaults() {
+	c.applyDefaults()
 }
 
 // applyDefaults 为个人使用场景填充安全、稳定的默认值。

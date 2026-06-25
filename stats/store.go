@@ -380,6 +380,40 @@ func (s *Store) Close() error {
 	return s.closeErr
 }
 
+// Clear 删除所有统计文件并清空内存缓存。
+func (s *Store) Clear() error {
+	if s == nil {
+		return nil
+	}
+
+	// 先 flush 确保所有待写入的数据落盘
+	if err := s.Flush(); err != nil {
+		return fmt.Errorf("flush before clear: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 删除所有统计文件
+	files, err := filepath.Glob(filepath.Join(s.dir, callFilePrefix+"*"+callFileSuffix))
+	if err != nil {
+		return fmt.Errorf("scan stats files: %w", err)
+	}
+	for _, file := range files {
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove stats file: %w", err)
+		}
+	}
+
+	// 清空内存缓存
+	s.records = s.records[:0]
+	s.queryCacheMu.Lock()
+	s.recordsCache = nil
+	s.queryCacheMu.Unlock()
+
+	return nil
+}
+
 func (s *Store) runWriter() {
 	ticker := time.NewTicker(defaultFlushInterval)
 	defer ticker.Stop()

@@ -20,7 +20,14 @@ type Handler struct {
 	eventBuffer  *EventBuffer
 	stateChanged func(bool)
 	statsStore   statsReader
+	statsClearer statsClearer
 	healthReader providerHealthReader
+	stateSaver   stateSaveSyncer
+	shutdownFn   func()
+}
+
+type stateSaveSyncer interface {
+	SaveNow() error
 }
 
 type statsReader interface {
@@ -30,6 +37,10 @@ type statsReader interface {
 	TimelineSince(time.Time, stats.TimelineGranularity) []stats.TimelinePoint
 	Recent(limit int) []stats.CallRecord
 	QueryLogs(since time.Time, filter stats.CallLogFilter) stats.CallLogResult
+}
+
+type statsClearer interface {
+	Clear() error
 }
 
 type statsHealthReader interface {
@@ -61,9 +72,24 @@ func (h *Handler) SetStatsStore(store statsReader) {
 	h.statsStore = store
 }
 
+// SetStatsClearer 挂载统计清除器，供统计数据清除 API 使用。
+func (h *Handler) SetStatsClearer(clearer statsClearer) {
+	h.statsClearer = clearer
+}
+
 // SetProviderHealthReader 挂载代理运行健康读取器，供 dashboard 展示熔断状态。
 func (h *Handler) SetProviderHealthReader(reader providerHealthReader) {
 	h.healthReader = reader
+}
+
+// SetStateSaver 挂载状态保存器，供状态强制刷盘 API 使用。
+func (h *Handler) SetStateSaver(saver stateSaveSyncer) {
+	h.stateSaver = saver
+}
+
+// SetShutdownFunc 挂载关闭回调，供优雅关闭 API 使用。
+func (h *Handler) SetShutdownFunc(fn func()) {
+	h.shutdownFn = fn
 }
 
 // Register 注册管理端 HTTP 路由。

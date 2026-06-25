@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/kelongyan/ModelMux/config"
 	"github.com/kelongyan/ModelMux/logx"
@@ -302,4 +303,106 @@ func findProviderKeyValue(providerCfg config.ProviderConfig, keyID string) (stri
 
 func keyMetadataEmptyAdmin(metadata config.KeyMetadata) bool {
 	return metadata.Label == "" && metadata.Note == "" && !metadata.Disabled
+}
+
+type apiKeyTestResult struct {
+	KeyID     string `json:"key_id"`
+	MaskedKey string `json:"masked_key"`
+	OK        bool   `json:"ok"`
+	Status    int    `json:"status_code,omitempty"`
+	LatencyMs int64  `json:"latency_ms,omitempty"`
+	Scope     string `json:"scope,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+type apiKeysTestAllResponse struct {
+	OK      bool               `json:"ok"`
+	Results []apiKeyTestResult `json:"results"`
+}
+
+// testAllProviderKeys 并发测试指定 provider 下所有启用的 key。
+func (h *Handler) testAllProviderKeys(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if !h.requireConfigManager(w) {
+		return
+	}
+
+	cfg, err := h.cfgManager.Snapshot()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+		return
+	}
+	providerCfg, ok := findProviderConfig(cfg.ProviderConfigs(), id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "provider not found"})
+		return
+	}
+
+	// 收集需要测试的 key
+	type keyEntry struct {
+		keyID     string
+		keyValue  string
+		maskedKey string
+		disabled  bool
+	}
+	var entries []keyEntry
+	for _, keyValue := range providerCfg.Keys {
+		keyID := poolKeyID(keyValue)
+		metadata, _ := providerCfg.KeyMetadataForID(keyID)
+		entries = append(entries, keyEntry{
+			keyID:     keyID,
+			keyValue:  keyValue,
+			maskedKey: logx.MaskSecret(keyValue),
+			disabled:  metadata.Disabled,
+		})
+	}
+
+	// 并发测试
+	results := make([]apiKeyTestResult, len(entries))
+	var wg sync.WaitGroup
+	for i, entry := range entries {
+		if entry.disabled {
+			results[i] = apiKeyTestResult{
+				KeyID:     entry.keyID,
+				MaskedKey: entry.maskedKey,
+				OK:        false,
+				Error:     "key is disabled",
+			}
+			continue
+		}
+		wg.Add(1)
+		go func(idx int, e keyEntry) {
+			defer wg.Done()
+			result := proxy.ProbeKey(r.Context(), cfg, providerCfg, e.keyValue)
+			results[idx] = apiKeyTestResult{
+				KeyID:     e.keyID,
+				MaskedKey: e.maskedKey,
+				OK:        result.OK,
+				Status:    result.StatusCode,
+				LatencyMs: result.LatencyMs,
+				Scope:     result.Scope,
+				Error:     result.Error,
+			}
+		}(i, entry)
+	}
+	wg.Wait()
+
+	// 统计结果
+	allOK := true
+	for _, r := range results {
+		if !r.OK {
+			allOK = false
+			break
+		}
+	}
+
+	h.recordEvent("info", logx.CategoryAdmin, "admin.keys_test_all", "all provider keys tested", map[string]any{
+		"provider_id": id,
+		"total":       len(results),
+		"ok":          allOK,
+	})
+	writeJSON(w, http.StatusOK, apiKeysTestAllResponse{OK: allOK, Results: results})
 }
