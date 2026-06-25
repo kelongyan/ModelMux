@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, Drawer, Empty, Input, Result, Select, Skeleton, Space, Switch, Table, Typography } from "antd";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchRecentEvents } from "../api/admin";
+import { createEventStream } from "../api/events-stream";
 import { queryKeys } from "../api/query-keys";
 import { formatDateTime } from "../components/format-time";
 import { EventDetail } from "../features/events/event-detail";
@@ -12,6 +13,7 @@ import { buildEventSelectOptions, dedupeEvents, filterEvents, summarizeEvents } 
 import type { AdminEvent } from "../types/admin";
 
 const eventsLimit = 200;
+const maxSSEEvents = 500;
 
 export function EventsPage(): JSX.Element {
   const [keyword, setKeyword] = useState("");
@@ -20,14 +22,61 @@ export function EventsPage(): JSX.Element {
   const [provider, setProvider] = useState("all");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<AdminEvent | null>(null);
+  const [sseEvents, setSSEEvents] = useState<AdminEvent[]>([]);
+  const sseCleanupRef = useRef<(() => void) | null>(null);
 
   const eventsQuery = useQuery({
     queryKey: queryKeys.events(eventsLimit),
     queryFn: () => fetchRecentEvents(eventsLimit),
-    refetchInterval: autoRefresh ? 8000 : false,
+    refetchInterval: false, // 使用 SSE 替代轮询
   });
 
-  const events = useMemo(() => dedupeEvents(eventsQuery.data?.events ?? []), [eventsQuery.data]);
+  // SSE 连接管理
+  useEffect(() => {
+    if (!autoRefresh) {
+      // 关闭 SSE 连接
+      if (sseCleanupRef.current) {
+        sseCleanupRef.current();
+        sseCleanupRef.current = null;
+      }
+      return;
+    }
+
+    const cleanup = createEventStream({
+      onConnected: () => {
+        // 连接成功，刷新初始数据
+        void eventsQuery.refetch();
+      },
+      onEvent: (event) => {
+        setSSEEvents((prev) => {
+          const next = [event, ...prev];
+          // 限制 SSE 事件数量
+          if (next.length > maxSSEEvents) {
+            return next.slice(0, maxSSEEvents);
+          }
+          return next;
+        });
+      },
+      onError: () => {
+        // SSE 连接错误，回退到轮询
+        setAutoRefresh(false);
+      },
+    });
+
+    sseCleanupRef.current = cleanup;
+
+    return () => {
+      cleanup();
+      sseCleanupRef.current = null;
+    };
+  }, [autoRefresh, eventsQuery]);
+
+  // 合并初始数据和 SSE 事件
+  const events = useMemo(() => {
+    const initialEvents = eventsQuery.data?.events ?? [];
+    const merged = [...sseEvents, ...initialEvents];
+    return dedupeEvents(merged);
+  }, [eventsQuery.data, sseEvents]);
 
   const filteredEvents = useMemo(
     () => filterEvents(events, keyword, level, category, provider),

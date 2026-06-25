@@ -191,8 +191,15 @@ export function fetchProviderModels(providerID: string): Promise<AdminFetchModel
 }
 
 // fetchRecentEvents 拉取最近事件，供 dashboard 摘要与后续事件页复用。
-export function fetchRecentEvents(limit = 10): Promise<AdminEventsResponse> {
-  return requestJSON<AdminEventsResponse>(`/admin/api/v1/events?limit=${limit}`);
+export function fetchRecentEvents(
+  limit = 10,
+  filters?: { level?: string; category?: string; since?: string },
+): Promise<AdminEventsResponse> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (filters?.level) qs.set("level", filters.level);
+  if (filters?.category) qs.set("category", filters.category);
+  if (filters?.since) qs.set("since", filters.since);
+  return requestJSON<AdminEventsResponse>(`/admin/api/v1/events?${qs.toString()}`);
 }
 
 // triggerReload 手动触发一次后端 reload，适合作为 dashboard 快捷操作。

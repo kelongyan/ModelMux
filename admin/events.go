@@ -108,3 +108,94 @@ func (b *EventBuffer) List(limit int) []AdminEvent {
 	// 返回最后 limit 条（最新的）
 	return ordered[len(ordered)-limit:]
 }
+
+// EventFilter 事件过滤条件。
+type EventFilter struct {
+	Level    string
+	Category string
+	Since    *time.Time
+	Limit    int
+}
+
+// Since 返回指定 seq 之后的所有事件，用于 SSE 增量推送。
+func (b *EventBuffer) Since(lastSeq int64) []AdminEvent {
+	if b == nil {
+		return nil
+	}
+
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.count == 0 {
+		return nil
+	}
+
+	// 确定起始索引
+	var startIdx int
+	if b.count < b.capacity {
+		startIdx = 0
+	} else {
+		startIdx = b.head
+	}
+
+	// 收集 seq > lastSeq 的事件
+	result := make([]AdminEvent, 0)
+	for i := 0; i < b.count; i++ {
+		event := b.ring[(startIdx+i)%b.capacity]
+		if event.Seq > lastSeq {
+			result = append(result, event)
+		}
+	}
+
+	return result
+}
+
+// Filtered 返回满足过滤条件的事件列表。
+func (b *EventBuffer) Filtered(filter EventFilter) []AdminEvent {
+	if b == nil {
+		return []AdminEvent{}
+	}
+
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.count == 0 {
+		return []AdminEvent{}
+	}
+
+	// 确定起始索引
+	var startIdx int
+	if b.count < b.capacity {
+		startIdx = 0
+	} else {
+		startIdx = b.head
+	}
+
+	// 收集并过滤事件
+	result := make([]AdminEvent, 0, b.count)
+	for i := 0; i < b.count; i++ {
+		event := b.ring[(startIdx+i)%b.capacity]
+
+		// 级别过滤
+		if filter.Level != "" && event.Level != filter.Level {
+			continue
+		}
+		// 类别过滤
+		if filter.Category != "" && event.Category != filter.Category {
+			continue
+		}
+		// 时间过滤
+		if filter.Since != nil && event.At.Before(*filter.Since) {
+			continue
+		}
+
+		result = append(result, event)
+	}
+
+	// 应用 limit（返回最新的 N 条）
+	if filter.Limit > 0 && filter.Limit < len(result) {
+		result = result[len(result)-filter.Limit:]
+	}
+
+	return result
+}

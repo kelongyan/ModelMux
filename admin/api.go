@@ -259,6 +259,7 @@ func (h *Handler) registerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/v1/providers/", auth(h.providersDetail))
 	mux.HandleFunc("/admin/api/v1/settings", auth(h.settings))
 	mux.HandleFunc("/admin/api/v1/events", auth(h.eventsIndex))
+	mux.HandleFunc("/admin/api/v1/events/stream", auth(h.eventsStream))
 	mux.HandleFunc("/admin/api/v1/about", auth(h.about))
 	mux.HandleFunc("/admin/api/v1/reload", auth(h.apiReload))
 	mux.HandleFunc("/admin/api/v1/stats/summary", auth(h.statsSummary))
@@ -1099,22 +1100,101 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// eventsIndex 返回最近发生的管理事件。
+// eventsIndex 返回最近发生的管理事件，支持按级别、类别和时间过滤。
 func (h *Handler) eventsIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 		return
 	}
 
-	limit := 100
+	filter := EventFilter{
+		Limit: 100,
+	}
+
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			limit = parsed
+			filter.Limit = parsed
 		}
 	}
+	if level := r.URL.Query().Get("level"); level != "" {
+		filter.Level = level
+	}
+	if category := r.URL.Query().Get("category"); category != "" {
+		filter.Category = category
+	}
+	if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
+		if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+			filter.Since = &t
+		} else if t, err := time.Parse(time.DateOnly, sinceStr); err == nil {
+			filter.Since = &t
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"events": h.listEvents(limit),
+		"events": h.listEventsFiltered(filter),
 	})
+}
+
+// eventsStream 使用 SSE 实时推送新事件。
+func (h *Handler) eventsStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "streaming not supported"})
+		return
+	}
+
+	// 设置 SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// 获取当前最新 seq 作为起点
+	lastSeq := int64(0)
+	if h.eventBuffer != nil {
+		recent := h.eventBuffer.List(1)
+		if len(recent) > 0 {
+			lastSeq = recent[0].Seq
+		}
+	}
+
+	// 发送初始连接确认
+	fmt.Fprintf(w, "data: {\"type\":\"connected\",\"last_seq\":%d}\n\n", lastSeq)
+	flusher.Flush()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if h.eventBuffer == nil {
+				continue
+			}
+
+			// 获取新事件
+			events := h.eventBuffer.Since(lastSeq)
+			for _, event := range events {
+				data, err := json.Marshal(event)
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				lastSeq = event.Seq
+			}
+
+			if len(events) > 0 {
+				flusher.Flush()
+			}
+		}
+	}
 }
 
 // apiReload 复用主流程的热重载逻辑，供前端按钮和命令行均能触发。
@@ -1654,6 +1734,13 @@ func (h *Handler) listEvents(limit int) []AdminEvent {
 		return nil
 	}
 	return h.eventBuffer.List(limit)
+}
+
+func (h *Handler) listEventsFiltered(filter EventFilter) []AdminEvent {
+	if h.eventBuffer == nil {
+		return nil
+	}
+	return h.eventBuffer.Filtered(filter)
 }
 
 func (h *Handler) providerCircuitSnapshot() *proxy.ProviderCircuitSnapshot {
