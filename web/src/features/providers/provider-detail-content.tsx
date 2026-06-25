@@ -1,7 +1,7 @@
-import { CopyOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, Popconfirm, Space, Table, Tag, Typography, message } from "antd";
-import type { TableColumnsType } from "antd";
-import { useState } from "react";
+import { CopyOutlined, DownOutlined, EllipsisOutlined, UpOutlined } from "@ant-design/icons";
+import { Button, Card, Dropdown, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import type { MenuProps, TableColumnsType } from "antd";
+import { useMemo, useState } from "react";
 
 import { CooldownText } from "../../components/cooldown-text";
 import { formatDateTime } from "../../components/format-time";
@@ -68,106 +68,138 @@ export function ProviderDetailContent({
       .catch(() => messageApi.error("复制失败"));
   }
 
-  const keyColumns: TableColumnsType<AdminKeyStatus> = [
-    {
-      title: "Key 标识",
-      dataIndex: "masked_key",
-      key: "masked_key",
-      width: 280,
-      render: (maskedKey: string, record) => (
-        <div className={isQuotaExhaustedKey(record) ? "provider-key-cell provider-key-cell--quota" : "provider-key-cell"}>
-          <strong>
-            {isQuotaExhaustedKey(record) ? <span className="provider-key-quota-dot" title="余额不足" aria-label="余额不足" /> : null}
-            {maskedKey}
-          </strong>
-          <div className="table-subtext provider-key-id">{record.key_id}</div>
-        </div>
-      ),
-    },
-    {
-      title: "标签",
-      dataIndex: "label",
-      key: "label",
-      width: 120,
-      render: (label: string | undefined) => label || "-",
-    },
-    {
-      title: "备注",
-      dataIndex: "note",
-      key: "note",
-      width: 180,
-      ellipsis: true,
-      render: (note: string | undefined) => note || "-",
-    },
-    {
-      title: "状态",
-      dataIndex: "state",
-      key: "state",
-      width: 92,
-      render: (state: AdminKeyStatus["state"]) => renderKeyState(state),
-    },
-    {
-      title: "失效原因",
-      dataIndex: "invalid_reason",
-      key: "invalid_reason",
-      width: 116,
-      render: (reason: string | undefined, record) => renderInvalidReason(reason, record.state),
-    },
-    {
-      title: "冷却",
-      dataIndex: "cool_until",
-      key: "cool_until",
-      width: 96,
-      render: (coolUntil: string | undefined, record) =>
-        record.state === "cooling" ? <CooldownText until={coolUntil} /> : "-",
-    },
-    {
-      title: "最近 401",
-      dataIndex: "last_401_at",
-      key: "last_401_at",
-      width: 150,
-      render: (value: string | undefined) => renderDateTime(value),
-    },
-    { title: "请求数", dataIndex: "req_count", key: "req_count", width: 86 },
-    { title: "错误数", dataIndex: "err_count", key: "err_count", width: 86 },
-    {
-      title: "平均延迟",
-      dataIndex: "avg_latency_ms",
-      key: "avg_latency_ms",
-      width: 102,
-      render: (value: number) => (value > 0 ? formatLatencySec(value) : "-"),
-    },
-    {
-      title: "操作",
-      key: "actions",
-      width: 260,
-      render: (_: unknown, record) => (
-        <Space size={6} wrap>
-          <Button size="small" onClick={() => onEditKeyMetadata(record)}>
-            编辑
-          </Button>
-          <Button
-            size="small"
-            loading={updatingKeyMetadata}
-            onClick={() => onToggleKeyDisabled(record, !(record.disabled ?? record.state === "disabled"))}
-          >
-            {record.disabled || record.state === "disabled" ? "启用" : "停用"}
-          </Button>
-          <Button size="small" loading={testingKeyID === record.key_id} onClick={() => onTestKey(record.key_id)}>
-            测试
-          </Button>
-          <Button
-            size="small"
-            disabled={record.disabled || record.state === "disabled"}
-            loading={resettingKey}
-            onClick={() => onResetKey(record.key_id)}
-          >
-            重置
-          </Button>
-        </Space>
-      ),
-    },
-  ];
+  function buildKeyActionMenu(record: AdminKeyStatus): MenuProps["items"] {
+    const isDisabled = record.disabled || record.state === "disabled";
+    return [
+      {
+        key: "edit",
+        label: "编辑",
+        onClick: () => onEditKeyMetadata(record),
+      },
+      {
+        key: "toggle",
+        label: isDisabled ? "启用" : "停用",
+        disabled: updatingKeyMetadata,
+        onClick: () => onToggleKeyDisabled(record, !isDisabled),
+      },
+      {
+        key: "test",
+        label: testingKeyID === record.key_id ? "测试中…" : "测试",
+        disabled: testingKeyID === record.key_id,
+        onClick: () => onTestKey(record.key_id),
+      },
+      {
+        key: "reset",
+        label: "重置状态",
+        disabled: isDisabled || resettingKey,
+        onClick: () => onResetKey(record.key_id),
+      },
+    ];
+  }
+
+  const keyColumns: TableColumnsType<AdminKeyStatus> = useMemo(
+    () => [
+      {
+        title: "Key 标识",
+        dataIndex: "masked_key",
+        key: "masked_key",
+        width: 260,
+        render: (maskedKey: string, record) => (
+          <div className={isQuotaExhaustedKey(record) ? "provider-key-cell provider-key-cell--quota" : "provider-key-cell"}>
+            <strong>
+              {isQuotaExhaustedKey(record) ? <span className="provider-key-quota-dot" title="余额不足" aria-label="余额不足" /> : null}
+              {maskedKey}
+            </strong>
+            <div className="table-subtext provider-key-id">{record.key_id}</div>
+          </div>
+        ),
+      },
+      {
+        title: "标签",
+        dataIndex: "label",
+        key: "label",
+        width: 100,
+        render: (label: string | undefined, record) => {
+          const note = record.note;
+          const content = label || "-";
+          if (!note) {
+            return content;
+          }
+          return (
+            <Tooltip title={`备注：${note}`} placement="topLeft">
+              <span className="key-label-with-note">{content}</span>
+            </Tooltip>
+          );
+        },
+      },
+      {
+        title: "状态",
+        dataIndex: "state",
+        key: "state",
+        width: 80,
+        render: (state: AdminKeyStatus["state"], record) => {
+          const stateEl = renderKeyState(state);
+          // Tooltip 显示低频信息：失效原因、冷却、最近 401
+          const tooltipLines: string[] = [];
+          if (state === "invalid" && record.invalid_reason) {
+            const reasonMap: Record<string, string> = {
+              quota_exhausted: "余额不足",
+              unauthorized: "认证失败",
+            };
+            tooltipLines.push(`原因：${reasonMap[record.invalid_reason] ?? record.invalid_reason}`);
+          }
+          if (state === "cooling" && record.cool_until) {
+            tooltipLines.push(`冷却至：${formatDateTime(record.cool_until)}`);
+          }
+          if (record.last_401_at) {
+            tooltipLines.push(`最近 401：${formatDateTime(record.last_401_at)}`);
+          }
+          if (tooltipLines.length === 0) {
+            return stateEl;
+          }
+          return (
+            <Tooltip title={tooltipLines.join("\n")} placement="topLeft">
+              {stateEl}
+            </Tooltip>
+          );
+        },
+      },
+      {
+        title: "统计",
+        key: "stats",
+        width: 130,
+        render: (_: unknown, record) => {
+          const latency = record.avg_latency_ms > 0 ? formatLatencySec(record.avg_latency_ms) : "-";
+          return (
+            <Tooltip
+              title={
+                <div>
+                  <div>请求数：{record.req_count}</div>
+                  <div>错误数：{record.err_count}</div>
+                  <div>平均延迟：{latency}</div>
+                </div>
+              }
+            >
+              <span className="key-stats-compact">
+                {record.req_count}/{record.err_count}/{latency}
+              </span>
+            </Tooltip>
+          );
+        },
+      },
+      {
+        title: "操作",
+        key: "actions",
+        width: 60,
+        render: (_: unknown, record) => (
+          <Dropdown menu={{ items: buildKeyActionMenu(record) }} trigger={["click"]}>
+            <Button type="text" size="small" icon={<EllipsisOutlined />} className="key-action-trigger" />
+          </Dropdown>
+        ),
+      },
+    ],
+    [updatingKeyMetadata, testingKeyID, resettingKey, onEditKeyMetadata, onToggleKeyDisabled, onTestKey, onResetKey],
+  );
 
   return (
     <Space direction="vertical" size={14} className="provider-detail-body">
@@ -230,7 +262,6 @@ export function ProviderDetailContent({
           <Empty description="暂无模型记录，可手动编辑或同步上游模型" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
           <div className="model-dropdown">
-            {/* 默认展示：前 N 个标签 */}
             <div className="model-tags">
               {previewModels.map((model) => (
                 <Tag key={model} className="model-tag">
@@ -238,12 +269,9 @@ export function ProviderDetailContent({
                 </Tag>
               ))}
               {hasMore && !modelsExpanded && (
-                <Tag className="model-tag model-tag--more">
-                  +{models.length - PREVIEW_COUNT} 个
-                </Tag>
+                <Tag className="model-tag model-tag--more">+{models.length - PREVIEW_COUNT} 个</Tag>
               )}
             </div>
-            {/* 展开/收起按钮 */}
             {hasMore && (
               <Button
                 type="text"
@@ -255,7 +283,6 @@ export function ProviderDetailContent({
                 {modelsExpanded ? "收起" : `查看全部 ${models.length} 个模型`}
               </Button>
             )}
-            {/* 展开后的完整列表 */}
             {modelsExpanded && (
               <div className="model-dropdown-full">
                 <div className="model-tags">
@@ -313,7 +340,7 @@ export function ProviderDetailContent({
           </Space>
         </div>
         <Table
-          className="provider-table"
+          className="provider-table provider-table--compact"
           columns={keyColumns}
           dataSource={detail.keys}
           pagination={false}
@@ -322,36 +349,9 @@ export function ProviderDetailContent({
             selectedRowKeys: selectedKeyIDs,
             onChange: (rowKeys) => onSelectedKeyIDsChange(rowKeys.map(String)),
           }}
-          scroll={{ x: 1390 }}
+          scroll={{ x: 630 }}
         />
       </Card>
     </Space>
   );
-}
-
-function renderInvalidReason(reason: string | undefined, state: AdminKeyStatus["state"]): JSX.Element | string {
-  if (state === "disabled") {
-    return <Tag color="default">手动停用</Tag>;
-  }
-  if (state === "cooling") {
-    return <Tag color="gold">临时冷却</Tag>;
-  }
-  if (state !== "invalid") {
-    return "-";
-  }
-  switch (reason) {
-    case "quota_exhausted":
-      return <Tag color="red">余额不足</Tag>;
-    case "unauthorized":
-      return <Tag color="volcano">认证失败</Tag>;
-    default:
-      return reason ? <Tag color="default">{reason}</Tag> : <Tag color="default">未知</Tag>;
-  }
-}
-
-function renderDateTime(value: string | undefined): JSX.Element | string {
-  if (!value) {
-    return "-";
-  }
-  return <Typography.Text className="table-subtext">{formatDateTime(value)}</Typography.Text>;
 }

@@ -63,6 +63,43 @@
   letter-spacing: 0.01em;
 }
 
+/* ── Compact key table ── */
+
+.provider-table--compact .ant-table-cell {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+.provider-table--compact .provider-key-cell strong {
+  font-size: 0.88rem;
+}
+
+.provider-table--compact .provider-key-id {
+  font-size: 0.7rem;
+}
+
+.key-stats-compact {
+  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--mm-text-secondary);
+  cursor: default;
+  white-space: nowrap;
+}
+
+.key-label-with-note {
+  border-bottom: 1px dashed var(--mm-border);
+  cursor: help;
+}
+
+.key-action-trigger {
+  color: var(--mm-text-muted);
+}
+
+.key-action-trigger:hover {
+  color: var(--mm-primary-text) !important;
+  background: var(--mm-primary-softer) !important;
+}
+
 /* ── Detail modal ── */
 
 .provider-detail-modal .ant-modal-body {
