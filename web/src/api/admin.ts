@@ -21,7 +21,9 @@ import type {
   AdminSettingsResponse,
   AdminStatsLogsResponse,
   AdminStatsModelsResponse,
+  AdminStatsProvidersResponse,
   AdminStatsSummaryResponse,
+  AdminStatsTimelineResponse,
   AdminStatsWindow,
 } from "../types/admin";
 import { requestDownload, requestJSON, saveDownloadBlob } from "./http";
@@ -224,6 +226,19 @@ export function fetchStatsSummary(window: AdminStatsWindow): Promise<AdminStatsS
 // fetchStatsModels 拉取指定窗口内按模型聚合的调用统计。
 export function fetchStatsModels(window: AdminStatsWindow): Promise<AdminStatsModelsResponse> {
   return requestJSON<AdminStatsModelsResponse>(`/admin/api/v1/stats/models?window=${window}`);
+}
+
+// fetchStatsProviders 拉取指定窗口内按 Provider 聚合的调用统计。
+export function fetchStatsProviders(window: AdminStatsWindow): Promise<AdminStatsProvidersResponse> {
+  return requestJSON<AdminStatsProvidersResponse>(`/admin/api/v1/stats/providers?window=${window}`);
+}
+
+// fetchStatsTimeline 拉取指定窗口内按时序聚合的调用统计。
+export function fetchStatsTimeline(
+  window: AdminStatsWindow,
+  granularity: "1h" | "1d" = "1h",
+): Promise<AdminStatsTimelineResponse> {
+  return requestJSON<AdminStatsTimelineResponse>(`/admin/api/v1/stats/timeline?window=${window}&granularity=${granularity}`);
 }
 
 // fetchStatsLogs 查询调用日志（支持过滤和分页）。

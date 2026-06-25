@@ -1,7 +1,9 @@
-import { Card, Select, Space, Table, Typography } from "antd";
+import { Button, Card, Select, Space, Table, Typography } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
 
 import type { AdminCallRecord } from "../../types/admin";
 import { buildStatsLogColumns } from "./stats-columns";
+import { exportStatsToCSV } from "./stats-export";
 import { statsStatusOptions } from "./stats-options";
 
 type StatsLogsCardProps = {
@@ -50,6 +52,13 @@ export function StatsLogsCard({
             onChange={onStatusChange}
             style={{ minWidth: 120 }}
           />
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={() => exportStatsToCSV(logs)}
+            disabled={logs.length === 0}
+          >
+            导出 CSV
+          </Button>
         </Space>
       </div>
 

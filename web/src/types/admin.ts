@@ -266,6 +266,31 @@ export type AdminStatsSummary = {
   completion_tokens: number;
   total_tokens: number;
   avg_latency_ms: number;
+  p50_latency_ms: number;
+  p95_latency_ms: number;
+  p99_latency_ms: number;
+  error_by_status?: Record<number, number>;
+};
+
+export type AdminProviderStats = {
+  provider_id: string;
+  calls: number;
+  success_calls: number;
+  failed_calls: number;
+  usage_known_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+};
+
+export type AdminTimelinePoint = {
+  time: string;
+  total_calls: number;
+  success_calls: number;
+  failed_calls: number;
+  avg_latency_ms: number;
+  total_tokens: number;
 };
 
 export type AdminModelStats = {
@@ -334,4 +359,19 @@ export type AdminStatsLogsResponse = {
   total: number;
   page: number;
   page_size: number;
+};
+
+// AdminStatsProvidersResponse 对应按 Provider 维度统计的响应。
+export type AdminStatsProvidersResponse = {
+  window: AdminStatsWindow | "custom";
+  since: string;
+  providers: AdminProviderStats[];
+};
+
+// AdminStatsTimelineResponse 对应时序数据的响应。
+export type AdminStatsTimelineResponse = {
+  window: AdminStatsWindow | "custom";
+  since: string;
+  granularity: "1h" | "1d";
+  timeline: AdminTimelinePoint[];
 };

@@ -58,6 +58,9 @@ export function StatsSummaryCard({
         <KPI label="输出 Token" value={formatNumber(summary.completion_tokens)} tone="purple" />
         <KPI label="成功率" value={formatPercent(summary.success_calls, summary.total_calls)} detail={`${formatNumber(summary.success_calls)} 成功 / ${formatNumber(summary.failed_calls)} 失败`} tone="green" />
         <KPI label="平均延迟" value={formatLatencySec(summary.avg_latency_ms)} tone="red" />
+        <KPI label="P50 延迟" value={formatLatencySec(summary.p50_latency_ms)} detail="中位数" tone="red" />
+        <KPI label="P95 延迟" value={formatLatencySec(summary.p95_latency_ms)} detail="尾部延迟" tone="red" />
+        <KPI label="P99 延迟" value={formatLatencySec(summary.p99_latency_ms)} detail="极端延迟" tone="red" />
       </Row>
       </Spin>
     </Card>

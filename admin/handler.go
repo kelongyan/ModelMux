@@ -26,6 +26,8 @@ type Handler struct {
 type statsReader interface {
 	SummarySince(time.Time) stats.Summary
 	ModelsSince(time.Time) []stats.ModelSummary
+	SummaryByProvider(time.Time) []stats.ProviderSummary
+	TimelineSince(time.Time, stats.TimelineGranularity) []stats.TimelinePoint
 	Recent(limit int) []stats.CallRecord
 	QueryLogs(since time.Time, filter stats.CallLogFilter) stats.CallLogResult
 }

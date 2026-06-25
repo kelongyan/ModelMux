@@ -15,5 +15,7 @@ export const queryKeys = {
     pageSize: number;
   }) => ["stats-logs", params.window, params.model, params.status, params.page, params.pageSize] as const,
   statsModels: (window: AdminStatsWindow) => ["stats-models", window] as const,
+  statsProviders: (window: AdminStatsWindow) => ["stats-providers", window] as const,
+  statsTimeline: (window: AdminStatsWindow, granularity: string) => ["stats-timeline", window, granularity] as const,
   statsSummary: (window: AdminStatsWindow) => ["stats-summary", window] as const,
 };

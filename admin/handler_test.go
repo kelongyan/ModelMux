@@ -1196,6 +1196,14 @@ func (f fakeStatsReader) ModelsSince(time.Time) []stats.ModelSummary {
 	return nil
 }
 
+func (f fakeStatsReader) SummaryByProvider(time.Time) []stats.ProviderSummary {
+	return nil
+}
+
+func (f fakeStatsReader) TimelineSince(time.Time, stats.TimelineGranularity) []stats.TimelinePoint {
+	return nil
+}
+
 func (f fakeStatsReader) Recent(int) []stats.CallRecord {
 	return nil
 }
