@@ -82,12 +82,11 @@
 }
 
 .console-nav-link.is-active {
-  border-color: var(--mm-primary-border-strong);
+  border-color: var(--mm-primary-border);
   background: var(--mm-primary-soft);
   color: var(--mm-primary-strong);
-  box-shadow:
-    inset 3px 0 0 var(--mm-primary),
-    var(--mm-shadow-soft);
+  font-weight: 700;
+  box-shadow: none;
 }
 
 .console-main {
