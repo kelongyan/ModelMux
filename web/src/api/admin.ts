@@ -256,8 +256,12 @@ export function fetchStatsProviders(window: AdminStatsWindow): Promise<AdminStat
 export function fetchStatsTimeline(
   window: AdminStatsWindow,
   granularity: "1h" | "1d" = "1h",
+  customRange?: { from?: string; to?: string },
 ): Promise<AdminStatsTimelineResponse> {
-  return requestJSON<AdminStatsTimelineResponse>(`/admin/api/v1/stats/timeline?window=${window}&granularity=${granularity}`);
+  const qs = new URLSearchParams({ window, granularity });
+  if (customRange?.from) qs.set("from", customRange.from);
+  if (customRange?.to) qs.set("to", customRange.to);
+  return requestJSON<AdminStatsTimelineResponse>(`/admin/api/v1/stats/timeline?${qs.toString()}`);
 }
 
 // fetchStatsLogs 查询调用日志（支持过滤和分页）。

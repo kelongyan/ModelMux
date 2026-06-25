@@ -58,9 +58,6 @@ export function StatsSummaryCard({
         <KPI label="输出 Token" value={formatNumber(summary.completion_tokens)} tone="purple" />
         <KPI label="成功率" value={formatPercent(summary.success_calls, summary.total_calls)} detail={`${formatNumber(summary.success_calls)} 成功 / ${formatNumber(summary.failed_calls)} 失败`} tone="green" />
         <KPI label="平均延迟" value={formatLatencySec(summary.avg_latency_ms)} tone="red" />
-        <KPI label="P50 延迟" value={formatLatencySec(summary.p50_latency_ms)} detail="中位数" tone="red" />
-        <KPI label="P95 延迟" value={formatLatencySec(summary.p95_latency_ms)} detail="尾部延迟" tone="red" />
-        <KPI label="P99 延迟" value={formatLatencySec(summary.p99_latency_ms)} detail="极端延迟" tone="red" />
       </Row>
       </Spin>
     </Card>
@@ -73,7 +70,7 @@ function KPI({ label, value, detail, tone }: { label: string; value: string; det
       <div className="stats-kpi" style={{ "--kpi-accent": toneAccent[tone] } as React.CSSProperties}>
         <span>{label}</span>
         <strong>{value}</strong>
-        {detail ? <small>{detail}</small> : null}
+        <small>{detail ?? "\u00A0"}</small>
       </div>
     </Col>
   );

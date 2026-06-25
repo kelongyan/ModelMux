@@ -8,6 +8,7 @@ import { queryKeys } from "../api/query-keys";
 import { useVisibilityRefetchInterval } from "../components/use-visibility-polling";
 import { StatsLogsCard } from "../features/stats/stats-logs-card";
 import { StatsSummaryCard } from "../features/stats/stats-summary-card";
+import { StatsTimelineCard } from "../features/stats/stats-timeline-card";
 import type { AdminStatsSummary, AdminStatsWindow } from "../types/admin";
 
 const { RangePicker } = DatePicker;
@@ -107,6 +108,8 @@ export function StatsPage(): JSX.Element {
             }}
             onRefresh={() => void refetchAll()}
           />
+
+          <StatsTimelineCard window={window} dateRange={dateRange} />
 
           <Space wrap size={12}>
             <RangePicker
