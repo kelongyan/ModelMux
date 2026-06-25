@@ -1,4 +1,5 @@
-import { Button, Card, Empty, Popconfirm, Space, Table, Tag, Typography } from "antd";
+import { ArrowLeftOutlined, CopyOutlined } from "@ant-design/icons";
+import { Button, Card, Empty, Popconfirm, Space, Table, Tag, Typography, message } from "antd";
 import type { TableColumnsType } from "antd";
 
 import { CooldownText } from "../../components/cooldown-text";
@@ -10,6 +11,7 @@ import { renderKeyState } from "./provider-utils";
 
 type ProviderDetailContentProps = {
   detail: AdminProviderDetailResponse;
+  onBack: () => void;
   selectedKeyIDs: string[];
   onSelectedKeyIDsChange: (keyIDs: string[]) => void;
   onResetKey: (keyID: string) => void;
@@ -32,6 +34,7 @@ type ProviderDetailContentProps = {
 
 export function ProviderDetailContent({
   detail,
+  onBack,
   selectedKeyIDs,
   onSelectedKeyIDsChange,
   onResetKey,
@@ -51,8 +54,17 @@ export function ProviderDetailContent({
   onFetchModels,
   fetchingModels,
 }: ProviderDetailContentProps): JSX.Element {
+  const [messageApi, contextHolder] = message.useMessage();
   const models = detail.models ?? [];
   const configuredKeys = detail.total_keys + detail.disabled_keys;
+
+  function copyTargetUrl(): void {
+    navigator.clipboard
+      .writeText(detail.target_url)
+      .then(() => messageApi.success("已复制 Target URL"))
+      .catch(() => messageApi.error("复制失败"));
+  }
+
   const keyColumns: TableColumnsType<AdminKeyStatus> = [
     {
       title: "Key 标识",
@@ -155,7 +167,20 @@ export function ProviderDetailContent({
   ];
 
   return (
-    <Space direction="vertical" size={14} className="console-stack">
+    <Space direction="vertical" size={16} className="console-stack">
+      {contextHolder}
+
+      {/* 顶部导航栏 */}
+      <div className="provider-detail-header">
+        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} className="provider-detail-back">
+          返回列表
+        </Button>
+        <Typography.Title level={4} className="provider-detail-title" style={{ margin: 0 }}>
+          Provider 详情：{detail.id}
+        </Typography.Title>
+      </div>
+
+      {/* Key 统计 + Target URL */}
       <Card className="surface-card reveal-card reveal-delay-0" bordered={false}>
         <div className="detail-stats-row">
           <div className="detail-stat">
@@ -185,10 +210,14 @@ export function ProviderDetailContent({
         </div>
         <div className="detail-target-url">
           <span className="detail-target-label">Target URL</span>
-          <a href={detail.target_url} target="_blank" rel="noreferrer" className="detail-target-link">{detail.target_url}</a>
+          <a href={detail.target_url} target="_blank" rel="noreferrer" className="detail-target-link">
+            {detail.target_url}
+          </a>
+          <Button type="text" size="small" icon={<CopyOutlined />} onClick={copyTargetUrl} />
         </div>
       </Card>
 
+      {/* 模型记录 */}
       <Card className="surface-card reveal-card reveal-delay-1" bordered={false}>
         <div className="section-heading">
           <div>
@@ -229,6 +258,7 @@ export function ProviderDetailContent({
         )}
       </Card>
 
+      {/* Key 管理 */}
       <Card className="surface-card reveal-card reveal-delay-2" bordered={false}>
         <div className="section-heading">
           <div>
@@ -238,7 +268,9 @@ export function ProviderDetailContent({
             </Typography.Title>
           </div>
           <Space wrap>
-            <Button size="small" onClick={onOpenAppendKeys}>追加 Keys</Button>
+            <Button size="small" onClick={onOpenAppendKeys}>
+              追加 Keys
+            </Button>
             <Button size="small" danger onClick={onOpenReplaceKeys}>
               替换全部
             </Button>

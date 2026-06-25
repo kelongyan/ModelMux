@@ -63,7 +63,35 @@
   letter-spacing: 0.01em;
 }
 
-/* ── Detail drawer ── */
+/* ── Detail page header ── */
+
+.provider-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.provider-detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--mm-text-muted);
+  transition: color 150ms ease;
+}
+
+.provider-detail-back:hover {
+  color: var(--mm-primary-text) !important;
+}
+
+.provider-detail-title {
+  color: var(--mm-text);
+  font-weight: 700;
+}
+
+/* ── Detail stats ── */
 
 .detail-stats-row {
   display: flex;

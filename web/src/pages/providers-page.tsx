@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Drawer, Empty, Form, Result, Skeleton, Space, Typography, message } from "antd";
+import { Button, Card, Empty, Form, Result, Skeleton, Space, Typography, message } from "antd";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -319,7 +319,6 @@ export function ProvidersPage(): JSX.Element {
     onError: (error: Error) => messageApi.error(`拉取模型失败：${error.message}`),
   });
 
-  const selectedProvider = providersQuery.data?.providers.find((provider) => provider.id === selectedProviderID);
   const providerDetail = providerDetailQuery.data;
   const detailLoading = providerDetailQuery.isLoading && selectedProviderID !== null;
 
@@ -342,9 +341,96 @@ export function ProvidersPage(): JSX.Element {
     );
   }
 
+  // 详情视图
+  if (selectedProviderID) {
+    if (detailLoading) {
+      return (
+        <>
+          {contextHolder}
+          {renderModals()}
+          <div className="console-loading">
+            <Skeleton active paragraph={{ rows: 6 }} />
+          </div>
+        </>
+      );
+    }
+    if (providerDetailQuery.isError) {
+      return (
+        <>
+          {contextHolder}
+          {renderModals()}
+          <Result
+            status="error"
+            title="Provider 详情加载失败"
+            subTitle={providerDetailQuery.error instanceof Error ? providerDetailQuery.error.message : "未知错误"}
+            extra={<Button onClick={() => void providerDetailQuery.refetch()}>重试</Button>}
+          />
+        </>
+      );
+    }
+    if (providerDetail) {
+      return (
+        <>
+          {contextHolder}
+          {renderModals()}
+          <ProviderDetailContent
+            detail={providerDetail}
+            onBack={() => setSelectedProvider(null)}
+            selectedKeyIDs={selectedKeyIDs}
+            onSelectedKeyIDsChange={setSelectedKeyIDs}
+            onResetKey={(keyID) => {
+              resetKeyMutation.mutate({ providerID: selectedProviderID, keyID });
+            }}
+            resettingKey={resetKeyMutation.isPending}
+            onResetAllKeys={() => {
+              resetAllKeysMutation.mutate(selectedProviderID);
+            }}
+            resettingAllKeys={resetAllKeysMutation.isPending}
+            onEditKeyMetadata={openKeyMetadataModal}
+            onToggleKeyDisabled={(key, disabled) => {
+              updateKeyMetadataMutation.mutate({
+                providerID: selectedProviderID,
+                keyID: key.key_id,
+                metadata: { disabled },
+              });
+            }}
+            updatingKeyMetadata={updateKeyMetadataMutation.isPending}
+            onTestKey={(keyID) => {
+              testKeyMutation.mutate({ providerID: selectedProviderID, keyID });
+            }}
+            testingKeyID={testingKeyID}
+            onOpenAppendKeys={() => openKeyModal("append")}
+            onOpenReplaceKeys={() => openKeyModal("replace")}
+            onDeleteSelectedKeys={() => {
+              if (selectedKeyIDs.length === 0) {
+                return;
+              }
+              deleteKeysMutation.mutate({ providerID: selectedProviderID, keyIDs: selectedKeyIDs });
+            }}
+            deletingKeys={deleteKeysMutation.isPending}
+            onOpenEditModels={() => openModelModal(providerDetail.models)}
+            onFetchModels={() => {
+              fetchModelsMutation.mutate(selectedProviderID);
+            }}
+            fetchingModels={fetchModelsMutation.isPending}
+          />
+        </>
+      );
+    }
+    return (
+      <>
+        {contextHolder}
+        {renderModals()}
+        <Empty description="未找到 provider 详情" />
+      </>
+    );
+  }
+
+  // 列表视图
   return (
     <>
       {contextHolder}
+      {renderModals()}
       <Space direction="vertical" size={16} className="console-stack">
         <Card className="surface-card reveal-card reveal-delay-0" bordered={false}>
           <div className="section-heading">
@@ -372,129 +458,6 @@ export function ProvidersPage(): JSX.Element {
           />
         </Card>
       </Space>
-
-      <ProviderEditorModal
-        state={providerModal}
-        form={providerForm}
-        confirmLoading={createProviderMutation.isPending || updateProviderMutation.isPending}
-        onCancel={closeProviderModal}
-        onSubmit={(values) => void submitProviderForm(values)}
-      />
-      <KeyEditorModal
-        state={keyModal}
-        form={keyForm}
-        confirmLoading={previewKeysMutation.isPending}
-        onCancel={closeKeyModal}
-        onSubmit={(values) => void submitKeyForm(values)}
-      />
-      <KeyMetadataModal
-        state={keyMetadataModal}
-        form={keyMetadataForm}
-        confirmLoading={updateKeyMetadataMutation.isPending}
-        onCancel={closeKeyMetadataModal}
-        onSubmit={(values) => void submitKeyMetadataForm(values)}
-      />
-      <KeyPreviewModal
-        state={keyPreviewModal}
-        confirmLoading={appendKeysMutation.isPending || replaceKeysMutation.isPending}
-        onCancel={closeKeyPreviewModal}
-        onConfirm={() => void confirmKeyPreview()}
-      />
-      <ModelEditorModal
-        state={modelModal}
-        selectedProviderID={selectedProviderID}
-        form={modelForm}
-        confirmLoading={replaceModelsMutation.isPending}
-        onCancel={closeModelModal}
-        onSubmit={(values) => void submitModelForm(values)}
-      />
-      <ModelSyncModal
-        state={modelSyncModal}
-        selectedModelIDs={selectedSyncModelIDs}
-        searchValue={modelSyncSearch}
-        confirmLoading={replaceModelsMutation.isPending}
-        onCancel={closeModelSyncModal}
-        onSearchChange={setModelSyncSearch}
-        onSelectedModelIDsChange={setSelectedSyncModelIDs}
-        onSave={(mode) => void submitModelSync(mode)}
-        onOpenManualEdit={openManualModelEditorFromSync}
-      />
-
-      <Drawer
-        open={selectedProviderID !== null}
-        width={Math.min(860, typeof window !== "undefined" ? window.innerWidth * 0.92 : 860)}
-        title={selectedProvider ? `Provider 详情：${selectedProvider.id}` : "Provider 详情"}
-        onClose={() => setSelectedProvider(null)}
-      >
-        {detailLoading ? (
-          <div className="console-loading">
-            <Skeleton active paragraph={{ rows: 6 }} />
-          </div>
-        ) : providerDetailQuery.isError ? (
-          <Result
-            status="error"
-            title="Provider 详情加载失败"
-            subTitle={providerDetailQuery.error instanceof Error ? providerDetailQuery.error.message : "未知错误"}
-          />
-        ) : providerDetail ? (
-          <ProviderDetailContent
-            detail={providerDetail}
-            selectedKeyIDs={selectedKeyIDs}
-            onSelectedKeyIDsChange={setSelectedKeyIDs}
-            onResetKey={(keyID) => {
-              if (selectedProviderID) {
-                resetKeyMutation.mutate({ providerID: selectedProviderID, keyID });
-              }
-            }}
-            resettingKey={resetKeyMutation.isPending}
-            onResetAllKeys={() => {
-              if (selectedProviderID) {
-                resetAllKeysMutation.mutate(selectedProviderID);
-              }
-            }}
-            resettingAllKeys={resetAllKeysMutation.isPending}
-            onEditKeyMetadata={openKeyMetadataModal}
-            onToggleKeyDisabled={(key, disabled) => {
-              if (!selectedProviderID) {
-                return;
-              }
-              updateKeyMetadataMutation.mutate({
-                providerID: selectedProviderID,
-                keyID: key.key_id,
-                metadata: {
-                  disabled,
-                },
-              });
-            }}
-            updatingKeyMetadata={updateKeyMetadataMutation.isPending}
-            onTestKey={(keyID) => {
-              if (!selectedProviderID) {
-                return;
-              }
-              testKeyMutation.mutate({ providerID: selectedProviderID, keyID });
-            }}
-            testingKeyID={testingKeyID}
-            onOpenAppendKeys={() => openKeyModal("append")}
-            onOpenReplaceKeys={() => openKeyModal("replace")}
-            onDeleteSelectedKeys={() => {
-              if (!selectedProviderID || selectedKeyIDs.length === 0) {
-                return;
-              }
-              deleteKeysMutation.mutate({ providerID: selectedProviderID, keyIDs: selectedKeyIDs });
-            }}
-            deletingKeys={deleteKeysMutation.isPending}
-            onOpenEditModels={() => openModelModal(providerDetail.models)}
-            onFetchModels={() => {
-              if (selectedProviderID) {
-                fetchModelsMutation.mutate(selectedProviderID);
-              }
-            }}
-            fetchingModels={fetchModelsMutation.isPending}
-          />
-        ) : (
-          <Empty description="未找到 provider 详情" />
-        )}
-      </Drawer>
     </>
   );
 
@@ -673,5 +636,58 @@ export function ProvidersPage(): JSX.Element {
         disabled: values.disabled ?? false,
       },
     });
+  }
+
+  function renderModals() {
+    return (
+      <>
+        <ProviderEditorModal
+          state={providerModal}
+          form={providerForm}
+          confirmLoading={createProviderMutation.isPending || updateProviderMutation.isPending}
+          onCancel={closeProviderModal}
+          onSubmit={(values) => void submitProviderForm(values)}
+        />
+        <KeyEditorModal
+          state={keyModal}
+          form={keyForm}
+          confirmLoading={previewKeysMutation.isPending}
+          onCancel={closeKeyModal}
+          onSubmit={(values) => void submitKeyForm(values)}
+        />
+        <KeyMetadataModal
+          state={keyMetadataModal}
+          form={keyMetadataForm}
+          confirmLoading={updateKeyMetadataMutation.isPending}
+          onCancel={closeKeyMetadataModal}
+          onSubmit={(values) => void submitKeyMetadataForm(values)}
+        />
+        <KeyPreviewModal
+          state={keyPreviewModal}
+          confirmLoading={appendKeysMutation.isPending || replaceKeysMutation.isPending}
+          onCancel={closeKeyPreviewModal}
+          onConfirm={() => void confirmKeyPreview()}
+        />
+        <ModelEditorModal
+          state={modelModal}
+          selectedProviderID={selectedProviderID}
+          form={modelForm}
+          confirmLoading={replaceModelsMutation.isPending}
+          onCancel={closeModelModal}
+          onSubmit={(values) => void submitModelForm(values)}
+        />
+        <ModelSyncModal
+          state={modelSyncModal}
+          selectedModelIDs={selectedSyncModelIDs}
+          searchValue={modelSyncSearch}
+          confirmLoading={replaceModelsMutation.isPending}
+          onCancel={closeModelSyncModal}
+          onSearchChange={setModelSyncSearch}
+          onSelectedModelIDsChange={setSelectedSyncModelIDs}
+          onSave={(mode) => void submitModelSync(mode)}
+          onOpenManualEdit={openManualModelEditorFromSync}
+        />
+      </>
+    );
   }
 }
