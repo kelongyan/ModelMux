@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Spin, Typography, message } from "antd";
-import { lazy, Suspense, useCallback, useMemo } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchDashboard, triggerReload } from "./api/admin";
@@ -8,11 +8,13 @@ import { queryKeys } from "./api/query-keys";
 import { ConsoleShell } from "./app/console-shell";
 import { ErrorBoundary } from "./components/error-boundary";
 import { PageTransition } from "./components/page-transition";
+import { ShortcutsHelp } from "./components/shortcuts-help";
 import { useGlobalShortcuts } from "./components/use-global-shortcuts";
 
 const AboutPage = lazy(() => import("./pages/about-page").then((module) => ({ default: module.AboutPage })));
 const DashboardPage = lazy(() => import("./pages/dashboard-page").then((module) => ({ default: module.DashboardPage })));
 const EventsPage = lazy(() => import("./pages/events-page").then((module) => ({ default: module.EventsPage })));
+const NotFoundPage = lazy(() => import("./pages/not-found-page").then((module) => ({ default: module.NotFoundPage })));
 const ProvidersPage = lazy(() => import("./pages/providers-page").then((module) => ({ default: module.ProvidersPage })));
 const SettingsPage = lazy(() => import("./pages/settings-page").then((module) => ({ default: module.SettingsPage })));
 const StatsPage = lazy(() => import("./pages/stats-page").then((module) => ({ default: module.StatsPage })));
@@ -22,6 +24,7 @@ export function App(): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const routeKey = useMemo(() => location.pathname, [location.pathname]);
 
   const dashboardQuery = useQuery({
@@ -46,6 +49,7 @@ export function App(): JSX.Element {
   useGlobalShortcuts({
     onReload: handleReload,
     onGoto: (path) => navigate(path),
+    onHelp: () => setShortcutsOpen(true),
   });
 
   return (
@@ -61,10 +65,11 @@ export function App(): JSX.Element {
             <Route path="/settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
             <Route path="/events" element={<ErrorBoundary><EventsPage /></ErrorBoundary>} />
             <Route path="/about" element={<ErrorBoundary><AboutPage /></ErrorBoundary>} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<ErrorBoundary><NotFoundPage /></ErrorBoundary>} />
           </Routes>
         </PageTransition>
       </Suspense>
+      <ShortcutsHelp open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </ConsoleShell>
   );
 }

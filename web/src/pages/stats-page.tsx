@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Button, Result, Space, Spin } from "antd";
+import { Button, DatePicker, Result, Space, Spin } from "antd";
+import type { Dayjs } from "dayjs";
 import { useMemo, useState } from "react";
 
 import { fetchStatsLogs, fetchStatsModels, fetchStatsSummary } from "../api/admin";
@@ -9,8 +10,11 @@ import { StatsLogsCard } from "../features/stats/stats-logs-card";
 import { StatsSummaryCard } from "../features/stats/stats-summary-card";
 import type { AdminStatsSummary, AdminStatsWindow } from "../types/admin";
 
+const { RangePicker } = DatePicker;
+
 export function StatsPage(): JSX.Element {
   const [window, setWindow] = useState<AdminStatsWindow>("24h");
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null]>([null, null]);
   const [model, setModel] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -18,22 +22,46 @@ export function StatsPage(): JSX.Element {
 
   const pollInterval = useVisibilityRefetchInterval(10_000);
 
+  // 计算自定义时间范围参数
+  const customRangeParams = useMemo(() => {
+    if (dateRange[0] && dateRange[1]) {
+      return {
+        from: dateRange[0].toISOString(),
+        to: dateRange[1].toISOString(),
+      };
+    }
+    return undefined;
+  }, [dateRange]);
+
   const summaryQuery = useQuery({
-    queryKey: queryKeys.statsSummary(window),
-    queryFn: () => fetchStatsSummary(window),
+    queryKey: customRangeParams
+      ? queryKeys.statsSummary("custom" as AdminStatsWindow)
+      : queryKeys.statsSummary(window),
+    queryFn: () => fetchStatsSummary(window, customRangeParams),
     refetchInterval: pollInterval,
   });
 
   const modelsQuery = useQuery({
-    queryKey: queryKeys.statsModels(window),
-    queryFn: () => fetchStatsModels(window),
+    queryKey: customRangeParams
+      ? queryKeys.statsModels("custom" as AdminStatsWindow)
+      : queryKeys.statsModels(window),
+    queryFn: () => fetchStatsModels(window, customRangeParams),
     refetchInterval: pollInterval,
   });
 
   const logsQuery = useQuery({
-    queryKey: queryKeys.statsLogs({ window, model, status, page, pageSize }),
+    queryKey: customRangeParams
+      ? queryKeys.statsLogs({ window: "custom" as AdminStatsWindow, model, status, page, pageSize })
+      : queryKeys.statsLogs({ window, model, status, page, pageSize }),
     queryFn: () =>
-      fetchStatsLogs({ window, model: model || undefined, status: status || undefined, page, page_size: pageSize }),
+      fetchStatsLogs({
+        window,
+        model: model || undefined,
+        status: status || undefined,
+        page,
+        page_size: pageSize,
+        ...customRangeParams,
+      }),
     refetchInterval: pollInterval,
   });
 
@@ -64,19 +92,38 @@ export function StatsPage(): JSX.Element {
           extra={<Button onClick={() => void summaryQuery.refetch()}>重试</Button>}
         />
       ) : (
-        <StatsSummaryCard
-          summary={summary}
-          droppedRecords={droppedRecords}
-          queueDepth={queueDepth}
-          queueCapacity={queueCapacity}
-          window={window}
-          loading={summaryQuery.isLoading}
-          onWindowChange={(nextWindow) => {
-            setWindow(nextWindow);
-            setPage(1);
-          }}
-          onRefresh={() => void refetchAll()}
-        />
+        <>
+          <StatsSummaryCard
+            summary={summary}
+            droppedRecords={droppedRecords}
+            queueDepth={queueDepth}
+            queueCapacity={queueCapacity}
+            window={window}
+            loading={summaryQuery.isLoading}
+            onWindowChange={(nextWindow) => {
+              setWindow(nextWindow);
+              setDateRange([null, null]);
+              setPage(1);
+            }}
+            onRefresh={() => void refetchAll()}
+          />
+
+          <Space wrap size={12}>
+            <RangePicker
+              showTime
+              value={dateRange}
+              onChange={(dates) => {
+                setDateRange(dates as [Dayjs | null, Dayjs | null]);
+                setPage(1);
+              }}
+              placeholder={["开始时间", "结束时间"]}
+              style={{ width: 380 }}
+            />
+            {dateRange[0] && dateRange[1] && (
+              <Button onClick={() => setDateRange([null, null])}>清除自定义范围</Button>
+            )}
+          </Space>
+        </>
       )}
 
       {logsQuery.isError ? (
@@ -128,5 +175,8 @@ function emptySummary(): AdminStatsSummary {
     completion_tokens: 0,
     total_tokens: 0,
     avg_latency_ms: 0,
+    p50_latency_ms: 0,
+    p95_latency_ms: 0,
+    p99_latency_ms: 0,
   };
 }

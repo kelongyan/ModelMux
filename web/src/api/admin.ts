@@ -219,13 +219,25 @@ export function updateSettings(payload: AdminSettingsPayload): Promise<AdminChan
 }
 
 // fetchStatsSummary 拉取指定窗口内的调用统计 KPI。
-export function fetchStatsSummary(window: AdminStatsWindow): Promise<AdminStatsSummaryResponse> {
-  return requestJSON<AdminStatsSummaryResponse>(`/admin/api/v1/stats/summary?window=${window}`);
+export function fetchStatsSummary(
+  window: AdminStatsWindow,
+  customRange?: { from?: string; to?: string },
+): Promise<AdminStatsSummaryResponse> {
+  const qs = new URLSearchParams({ window });
+  if (customRange?.from) qs.set("from", customRange.from);
+  if (customRange?.to) qs.set("to", customRange.to);
+  return requestJSON<AdminStatsSummaryResponse>(`/admin/api/v1/stats/summary?${qs.toString()}`);
 }
 
 // fetchStatsModels 拉取指定窗口内按模型聚合的调用统计。
-export function fetchStatsModels(window: AdminStatsWindow): Promise<AdminStatsModelsResponse> {
-  return requestJSON<AdminStatsModelsResponse>(`/admin/api/v1/stats/models?window=${window}`);
+export function fetchStatsModels(
+  window: AdminStatsWindow,
+  customRange?: { from?: string; to?: string },
+): Promise<AdminStatsModelsResponse> {
+  const qs = new URLSearchParams({ window });
+  if (customRange?.from) qs.set("from", customRange.from);
+  if (customRange?.to) qs.set("to", customRange.to);
+  return requestJSON<AdminStatsModelsResponse>(`/admin/api/v1/stats/models?${qs.toString()}`);
 }
 
 // fetchStatsProviders 拉取指定窗口内按 Provider 聚合的调用统计。
@@ -248,12 +260,16 @@ export function fetchStatsLogs(params: {
   status?: string;
   page?: number;
   page_size?: number;
+  from?: string;
+  to?: string;
 }): Promise<AdminStatsLogsResponse> {
   const qs = new URLSearchParams({ window: params.window });
   if (params.model) qs.set("model", params.model);
   if (params.status) qs.set("status", params.status);
   if (params.page) qs.set("page", String(params.page));
   if (params.page_size) qs.set("page_size", String(params.page_size));
+  if (params.from) qs.set("from", params.from);
+  if (params.to) qs.set("to", params.to);
   return requestJSON<AdminStatsLogsResponse>(`/admin/api/v1/stats/logs?${qs.toString()}`);
 }
 

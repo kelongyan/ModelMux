@@ -3,17 +3,20 @@ import { useEffect, useRef } from "react";
 type ShortcutHandlers = {
   onReload?: () => void;
   onGoto?: (path: string) => void;
+  onHelp?: () => void;
 };
 
 // useGlobalShortcuts 监听 Ctrl/Cmd+R 重载与 vim 风格的 g <letter> 切页和弦。
-export function useGlobalShortcuts({ onReload, onGoto }: ShortcutHandlers): void {
+export function useGlobalShortcuts({ onReload, onGoto, onHelp }: ShortcutHandlers): void {
   const reloadRef = useRef(onReload);
   const gotoRef = useRef(onGoto);
+  const helpRef = useRef(onHelp);
 
   useEffect(() => {
     reloadRef.current = onReload;
     gotoRef.current = onGoto;
-  }, [onReload, onGoto]);
+    helpRef.current = onHelp;
+  }, [onReload, onGoto, onHelp]);
 
   useEffect(() => {
     let chordTimer: number | null = null;
@@ -43,6 +46,15 @@ export function useGlobalShortcuts({ onReload, onGoto }: ShortcutHandlers): void
       }
 
       if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+
+      if (event.key === "?") {
+        const help = helpRef.current;
+        if (help) {
+          event.preventDefault();
+          help();
+        }
         return;
       }
 
