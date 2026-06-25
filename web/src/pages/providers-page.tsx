@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Drawer, Empty, Form, Input, Result, Skeleton, Space, Typography, message } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { Button, Card, Drawer, Empty, Form, Result, Skeleton, Space, Typography, message } from "antd";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import {
@@ -54,7 +54,6 @@ export function ProvidersPage(): JSX.Element {
   const [messageApi, contextHolder] = message.useMessage();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedProviderID, setSelectedProviderID] = useState<string | null>(() => searchParams.get("provider"));
-  const [providerSearch, setProviderSearch] = useState("");
   const [selectedKeyIDs, setSelectedKeyIDs] = useState<string[]>([]);
   const [providerModal, setProviderModal] = useState<ProviderModalState>({ open: false, mode: "create" });
   const [keyModal, setKeyModal] = useState<KeyModalState>({ open: false, mode: "append" });
@@ -324,13 +323,6 @@ export function ProvidersPage(): JSX.Element {
   const providerDetail = providerDetailQuery.data;
   const detailLoading = providerDetailQuery.isLoading && selectedProviderID !== null;
 
-  const filteredProviders = useMemo(() => {
-    const all = providersQuery.data?.providers ?? [];
-    if (!providerSearch.trim()) return all;
-    const q = providerSearch.toLowerCase();
-    return all.filter((p) => p.id.toLowerCase().includes(q) || p.target_url.toLowerCase().includes(q));
-  }, [providersQuery.data, providerSearch]);
-
   if (providersQuery.isLoading) {
     return (
       <div className="console-loading">
@@ -369,15 +361,8 @@ export function ProvidersPage(): JSX.Element {
               </Button>
             </Space>
           </div>
-          <Input.Search
-            placeholder="按 ID 或 URL 搜索 Provider"
-            allowClear
-            style={{ marginBottom: 12, maxWidth: 360 }}
-            onSearch={setProviderSearch}
-            onChange={(e) => { if (!e.target.value) setProviderSearch(""); }}
-          />
           <ProviderTable
-            providers={filteredProviders}
+            providers={providersQuery.data?.providers ?? []}
             activating={activateProviderMutation.isPending}
             deleting={deleteProviderMutation.isPending}
             onOpenDetail={setSelectedProvider}
