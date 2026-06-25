@@ -663,6 +663,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errClientCanceled) {
 			callRecord.Status = 0
+			circuitOutcomeRecorded = true // 客户端取消与服务端健康无关，不影响熔断器
 			slog.Info("request canceled", logx.Fields(logx.CategoryProxy, logx.EventClientCanceled,
 				"path", r.URL.Path,
 				"attempt", attempt+1,
@@ -675,6 +676,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			side, streamErr := streamFailureDetails(err)
 			if side == streamFailureSideClientCanceled {
 				callRecord.Status = 0
+				circuitOutcomeRecorded = true // 客户端取消与服务端健康无关，不影响熔断器
 				h.emitEvent(r.Context(), requestDiagnosticEvent(diagCtx.buildStreamFailure(
 					"info", logx.EventClientCanceled, "request canceled",
 					key, status, time.Since(start).Milliseconds(), attempt+1, retryScopeNone, side, streamErr,
@@ -1391,11 +1393,6 @@ func isQuotaExhaustedErrorCode(body []byte) bool {
 	}
 }
 
-// buildRequest 基于原请求构造上游请求，并覆盖认证头为当前选中的 key。
-func (h *Handler) buildRequest(r *http.Request, key *pool.Key, body []byte) (*http.Request, error) {
-	return buildRequest(h.snapshot(), r, key, body, requestMeta{})
-}
-
 // buildRequest 基于指定运行时快照构造上游请求，并覆盖认证头为当前选中的 key。
 func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte, meta requestMeta) (*http.Request, error) {
 	if rt == nil || rt.targetURL == nil {
@@ -1728,7 +1725,9 @@ func streamBody(w http.ResponseWriter, body io.Reader, closer func(), options ..
 }
 
 func streamBodySimple(w http.ResponseWriter, body io.Reader, canFlush bool, flusher http.Flusher) error {
-	buf := make([]byte, 4096)
+	bufPtr := streamBufPool.Get().(*[]byte)
+	defer streamBufPool.Put(bufPtr)
+	buf := *bufPtr
 	for {
 		n, err := body.Read(buf)
 		if n > 0 {

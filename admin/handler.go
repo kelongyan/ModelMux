@@ -91,6 +91,14 @@ func (h *Handler) checkAuth(w http.ResponseWriter, r *http.Request) bool {
 	}
 	key := extractAPIKey(r)
 	if key == "" || key != cfg.AdminAPIKey {
+		slog.Warn("admin auth failed", logx.Fields(logx.CategoryAdmin, logx.EventAdminAuthFailed,
+			"remote_addr", r.RemoteAddr,
+			"path", r.URL.Path,
+		)...)
+		h.eventBuffer.Add("warn", logx.CategoryAdmin, logx.EventAdminAuthFailed, "admin authentication failed", map[string]any{
+			"remote_addr": r.RemoteAddr,
+			"path":        r.URL.Path,
+		})
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return false
 	}

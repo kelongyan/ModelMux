@@ -70,7 +70,7 @@ func TestBuildRequestRewritesUpstreamAuthHeaders(t *testing.T) {
 		t.Fatalf("Next() error = %v", err)
 	}
 
-	outReq, err := h.buildRequest(req, key, []byte(`{"x":1}`))
+	outReq, err := buildRequest(h.snapshot(), req, key, []byte(`{"x":1}`), requestMeta{})
 	if err != nil {
 		t.Fatalf("buildRequest() error = %v", err)
 	}
@@ -109,7 +109,7 @@ func TestBuildRequestDoesNotDuplicateTargetPathPrefix(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/messages?foo=bar", strings.NewReader(`{"x":1}`))
-	outReq, err := h.buildRequest(req, key, []byte(`{"x":1}`))
+	outReq, err := buildRequest(h.snapshot(), req, key, []byte(`{"x":1}`), requestMeta{})
 	if err != nil {
 		t.Fatalf("buildRequest() error = %v", err)
 	}
@@ -146,7 +146,7 @@ func TestBuildRequestStripsToolFieldsWhenProviderRequiresIt(t *testing.T) {
 
 	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"ping"}],"stream":true,"tools":[{"type":"function"}],"tool_choice":"auto","parallel_tool_calls":true}`)
 	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
-	outReq, err := h.buildRequest(req, key, body)
+	outReq, err := buildRequest(h.snapshot(), req, key, body, requestMeta{})
 	if err != nil {
 		t.Fatalf("buildRequest() error = %v", err)
 	}
@@ -199,7 +199,7 @@ func TestBuildRequestKeepsToolFieldsByDefault(t *testing.T) {
 
 	body := []byte(`{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"ping"}],"tools":[{"type":"function"}],"tool_choice":"auto","parallel_tool_calls":true}`)
 	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
-	outReq, err := h.buildRequest(req, key, body)
+	outReq, err := buildRequest(h.snapshot(), req, key, body, requestMeta{})
 	if err != nil {
 		t.Fatalf("buildRequest() error = %v", err)
 	}
@@ -234,7 +234,7 @@ func TestBuildRequestAddsStreamUsageOptionForStreamingRequests(t *testing.T) {
 
 	body := []byte(`{"model":"gpt-4.1-mini","stream":true,"messages":[]}`)
 	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
-	outReq, err := h.buildRequest(req, key, body)
+	outReq, err := buildRequest(h.snapshot(), req, key, body, requestMeta{})
 	if err != nil {
 		t.Fatalf("buildRequest() error = %v", err)
 	}
@@ -281,7 +281,7 @@ func TestBuildRequestKeepsExplicitStreamUsageOption(t *testing.T) {
 
 	body := []byte(`{"model":"gpt-4.1-mini","stream":true,"stream_options":{"include_usage":false},"messages":[]}`)
 	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/chat/completions", strings.NewReader(string(body)))
-	outReq, err := h.buildRequest(req, key, body)
+	outReq, err := buildRequest(h.snapshot(), req, key, body, requestMeta{})
 	if err != nil {
 		t.Fatalf("buildRequest() error = %v", err)
 	}

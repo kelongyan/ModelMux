@@ -61,6 +61,7 @@ export function App(): JSX.Element {
             <Route path="/settings" element={<ErrorBoundary><SettingsPage /></ErrorBoundary>} />
             <Route path="/events" element={<ErrorBoundary><EventsPage /></ErrorBoundary>} />
             <Route path="/about" element={<ErrorBoundary><AboutPage /></ErrorBoundary>} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </PageTransition>
       </Suspense>

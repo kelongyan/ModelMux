@@ -55,6 +55,7 @@ const (
 	EventStatsInitialized        = "stats.initialized"
 	EventStatsCloseFailed        = "stats.close_failed"
 	EventAdminNoAuth             = "admin.no_auth"
+	EventAdminAuthFailed         = "admin.auth_failed"
 	EventShutdownComplete        = "lifecycle.shutdown_complete"
 	EventShutdownStart           = "lifecycle.shutdown_start"
 	EventStreamFailed            = "stream.failed"

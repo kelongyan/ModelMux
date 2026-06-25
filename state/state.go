@@ -51,6 +51,10 @@ func NewStore(path string) *Store {
 
 // Load 读取状态文件；文件不存在时返回空状态。
 func (s *Store) Load() (*File, error) {
+	// 清理可能残留的临时文件（上次写入未完成）
+	tmpPath := s.path + ".tmp"
+	_ = os.Remove(tmpPath)
+
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return &File{Version: CurrentVersion}, nil
@@ -66,7 +70,34 @@ func (s *Store) Load() (*File, error) {
 	if file.Version != CurrentVersion && file.Version != 1 {
 		return nil, fmt.Errorf("unsupported state version %d", file.Version)
 	}
+	if err := validateFile(&file); err != nil {
+		return nil, err
+	}
 	return &file, nil
+}
+
+// validateFile 校验加载的状态文件中 key 状态枚举值是否合法。
+func validateFile(f *File) error {
+	validateKeys := func(keys []KeyRecord, prefix string) error {
+		for i, k := range keys {
+			switch k.State {
+			case "active", "cooling", "invalid":
+				// 合法状态
+			default:
+				return fmt.Errorf("%s[%d].state: invalid value %q, must be active, cooling, or invalid", prefix, i, k.State)
+			}
+		}
+		return nil
+	}
+	if err := validateKeys(f.Keys, "keys"); err != nil {
+		return err
+	}
+	for i, p := range f.Providers {
+		if err := validateKeys(p.Keys, fmt.Sprintf("providers[%d].keys", i)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // VersionedProviderRecords 返回向后兼容后的 provider 分组状态。

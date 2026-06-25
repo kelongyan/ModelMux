@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Collapse, Form, Result, Skeleton, Space, Typography, message } from "antd";
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { fetchSettings, updateSettings } from "../api/admin";
 import { queryKeys } from "../api/query-keys";
@@ -18,6 +18,7 @@ export function SettingsPage(): JSX.Element {
   const logOutput = Form.useWatch("log_output", form);
   const persistState = Form.useWatch("persist_state", form);
   const statsEnabled = Form.useWatch("stats_enabled", form);
+  const isDirtyRef = useRef(false);
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings,
@@ -29,13 +30,31 @@ export function SettingsPage(): JSX.Element {
       return;
     }
     form.setFieldsValue(settingsQuery.data.settings);
+    isDirtyRef.current = false;
   }, [form, settingsQuery.data]);
+
+  // 表单值变化时标记为 dirty
+  const handleValuesChange = useCallback(() => {
+    isDirtyRef.current = true;
+  }, []);
+
+  // 页面离开前警告未保存的更改
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirtyRef.current) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   const updateSettingsMutation = useMutation({
     mutationFn: updateSettings,
     onSuccess: async (result) => {
       const summary = toSaveSummary(result);
       setSaveSummary(summary);
+      isDirtyRef.current = false;
       messageApi.success(summary.changedFields.length === 0 ? "没有检测到配置变化" : "设置已保存");
       startTransition(() => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
@@ -122,7 +141,7 @@ export function SettingsPage(): JSX.Element {
             </Space>
           </div>
 
-          <Form<AdminSettingsPayload> form={form} layout="vertical" onFinish={(values) => updateSettingsMutation.mutate(values)}>
+          <Form<AdminSettingsPayload> form={form} layout="vertical" onFinish={(values) => updateSettingsMutation.mutate(values)} onValuesChange={handleValuesChange}>
             <SettingsGroup title="核心运行参数" desc="重试、超时、请求体限制 — 最常调整的运行项。" fields={groups.coreFields} />
             <SettingsGroup title="高级重试与超时" desc="临时故障、响应头超时和 cooling 等边界行为。" fields={groups.advancedFields} />
 
@@ -153,5 +172,6 @@ export function SettingsPage(): JSX.Element {
   function resetForm() {
     form.setFieldsValue(settingsQuery.data!.settings);
     setSaveSummary(null);
+    isDirtyRef.current = false;
   }
 }

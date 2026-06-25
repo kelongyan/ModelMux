@@ -71,7 +71,11 @@ async function copyText(value: string): Promise<void> {
   if (!value || !navigator.clipboard) {
     return;
   }
-  await navigator.clipboard.writeText(value);
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    // clipboard API 可能被浏览器拒绝（如非 HTTPS 或无焦点），静默处理
+  }
 }
 
 type DetailGroupProps = {

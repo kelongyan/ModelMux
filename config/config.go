@@ -204,6 +204,11 @@ func (c *Config) validate() error {
 		if len(provider.Keys) == 0 {
 			return fmt.Errorf("providers[%d].keys must contain at least one key", i)
 		}
+		for j, key := range provider.Keys {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("providers[%d].keys[%d] is empty", i, j)
+			}
+		}
 	}
 	if activeProvider == "" {
 		return fmt.Errorf("active_provider is required")
@@ -214,14 +219,17 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// validateTargetURL 校验 provider 上游地址必须是绝对 URL。
+// validateTargetURL 校验 provider 上游地址必须是 http/https 绝对 URL。
 func validateTargetURL(rawURL string) error {
 	if rawURL == "" {
 		return fmt.Errorf("is required")
 	}
 	target, err := url.Parse(rawURL)
-	if err != nil || target.Scheme == "" || target.Host == "" {
+	if err != nil || target.Host == "" {
 		return fmt.Errorf("must be an absolute URL with scheme and host")
+	}
+	if target.Scheme != "http" && target.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https, got %q", target.Scheme)
 	}
 	return nil
 }
@@ -235,6 +243,58 @@ func (c *Config) validateAfterDefaults() error {
 	}
 	if (c.LogOutput == "file" || c.LogOutput == "both") && c.LogFile == "" {
 		return fmt.Errorf("log_file is required when log_output is file or both")
+	}
+	switch c.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("log_level must be one of: debug, info, warn, error")
+	}
+	switch c.LogFormat {
+	case "text", "json":
+	default:
+		return fmt.Errorf("log_format must be one of: text, json")
+	}
+	if c.MaxRetries < 1 || c.MaxRetries > 100 {
+		return fmt.Errorf("max_retries must be between 1 and 100")
+	}
+	if c.MaxTransientRetries < 0 || c.MaxTransientRetries > 100 {
+		return fmt.Errorf("max_transient_retries must be between 0 and 100")
+	}
+	if c.CoolingSeconds < 1 || c.CoolingSeconds > 86400 {
+		return fmt.Errorf("cooling_seconds must be between 1 and 86400")
+	}
+	if c.RequestTimeoutSeconds < 1 || c.RequestTimeoutSeconds > 86400 {
+		return fmt.Errorf("request_timeout_seconds must be between 1 and 86400")
+	}
+	if c.ConnectTimeoutSeconds < 1 || c.ConnectTimeoutSeconds > 3600 {
+		return fmt.Errorf("connect_timeout_seconds must be between 1 and 3600")
+	}
+	if c.ResponseHeaderTimeoutSeconds < 1 || c.ResponseHeaderTimeoutSeconds > 3600 {
+		return fmt.Errorf("response_header_timeout_seconds must be between 1 and 3600")
+	}
+	if c.MaxBodyBytes < 1 || c.MaxBodyBytes > 1024*1024*1024 {
+		return fmt.Errorf("max_body_bytes must be between 1 and 1073741824 (1GB)")
+	}
+	if c.InvalidTTLHours < 1 || c.InvalidTTLHours > 8760 {
+		return fmt.Errorf("invalid_ttl_hours must be between 1 and 8760")
+	}
+	if c.StatsRetentionDays < 1 || c.StatsRetentionDays > 365 {
+		return fmt.Errorf("stats_retention_days must be between 1 and 365")
+	}
+	if c.AdminAPIKey != "" && len(c.AdminAPIKey) < 8 {
+		return fmt.Errorf("admin_api_key must be at least 8 characters when set")
+	}
+	if c.ConnectTimeoutSeconds > c.RequestTimeoutSeconds {
+		return fmt.Errorf("connect_timeout_seconds (%d) must not exceed request_timeout_seconds (%d)", c.ConnectTimeoutSeconds, c.RequestTimeoutSeconds)
+	}
+	if c.ResponseHeaderTimeoutSeconds > c.RequestTimeoutSeconds {
+		return fmt.Errorf("response_header_timeout_seconds (%d) must not exceed request_timeout_seconds (%d)", c.ResponseHeaderTimeoutSeconds, c.RequestTimeoutSeconds)
+	}
+	if c.StreamIdleTimeoutSeconds > c.StreamMaxDurationSeconds {
+		return fmt.Errorf("stream_idle_timeout_seconds (%d) must not exceed stream_max_duration_seconds (%d)", c.StreamIdleTimeoutSeconds, c.StreamMaxDurationSeconds)
+	}
+	if c.StreamKeepAliveSeconds > c.StreamIdleTimeoutSeconds {
+		return fmt.Errorf("stream_keepalive_seconds (%d) must not exceed stream_idle_timeout_seconds (%d)", c.StreamKeepAliveSeconds, c.StreamIdleTimeoutSeconds)
 	}
 	return nil
 }

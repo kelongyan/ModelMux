@@ -1182,6 +1182,7 @@ func (h *Handler) about(w http.ResponseWriter, r *http.Request) {
 }
 
 // backupConfig 导出当前生效配置，供下载备份或交叉迁移使用。
+// 安全说明：admin_api_key 脱敏为占位符，避免备份文件泄露管理密钥。
 func (h *Handler) backupConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
@@ -1196,6 +1197,11 @@ func (h *Handler) backupConfig(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
 		return
+	}
+
+	// 脱敏 admin_api_key，避免备份文件泄露管理密钥
+	if cfg.AdminAPIKey != "" {
+		cfg.AdminAPIKey = "<REDACTED>"
 	}
 
 	payload, err := json.MarshalIndent(cfg, "", "  ")
