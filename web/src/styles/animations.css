@@ -100,9 +100,9 @@
 .skeleton-shimmer {
   background: linear-gradient(
     110deg,
-    #efe9de 30%,
-    #f5efe6 50%,
-    #efe9de 70%
+    #eeecea 30%,
+    #f4f2ef 50%,
+    #eeecea 70%
   );
   background-size: 200% 100%;
   animation: anim-shimmer 1.6s ease-in-out infinite;

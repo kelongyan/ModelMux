@@ -9,18 +9,18 @@ export function createAppTheme(mode: AppThemeMode): ThemeConfig {
     algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: {
       /* === Anthropic Warm Color Palette === */
-      colorPrimary: "#cc785c",
-      colorInfo: "#cc785c",
-      colorSuccess: "#5db872",
+      colorPrimary: "#c86f55",
+      colorInfo: "#c86f55",
+      colorSuccess: "#5aab6a",
       colorWarning: "#d4a017",
-      colorError: "#c64545",
+      colorError: "#c44848",
       colorText: dark ? "#f0ece6" : "#141413",
-      colorTextSecondary: dark ? "#d4cfc7" : "#3d3d3a",
-      colorBorder: dark ? "#2d2b28" : "#e6dfd8",
-      colorBorderSecondary: dark ? "#2d2b28" : "#e6dfd8",
-      colorBgBase: dark ? "#181715" : "#faf9f5",
-      colorBgLayout: dark ? "#181715" : "#faf9f5",
-      colorBgContainer: dark ? "#252320" : "#faf9f5",
+      colorTextSecondary: dark ? "#d4cfc7" : "#363533",
+      colorBorder: dark ? "#2a2926" : "#e4e0da",
+      colorBorderSecondary: dark ? "#2a2926" : "#e4e0da",
+      colorBgBase: dark ? "#161614" : "#fafaf8",
+      colorBgLayout: dark ? "#161614" : "#fafaf8",
+      colorBgContainer: dark ? "#222120" : "#ffffff",
 
       /* === Anthropic Rounded Corners === */
       borderRadius: 12,
@@ -52,7 +52,7 @@ export function createAppTheme(mode: AppThemeMode): ThemeConfig {
       Button: {
         primaryShadow: dark
           ? "none"
-          : "0 4px 16px rgba(204, 120, 92, 0.25)",
+          : "0 4px 16px rgba(200, 111, 85, 0.25)",
         paddingInline: 18,
       },
       Tag: {
