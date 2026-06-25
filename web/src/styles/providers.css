@@ -477,6 +477,44 @@
   padding: 4px 0;
 }
 
+/* ── Model dropdown ── */
+
+.model-dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-dropdown .model-tags {
+  padding: 0;
+}
+
+.model-tag--more {
+  background: var(--mm-primary-softer) !important;
+  border-color: var(--mm-primary-border) !important;
+  color: var(--mm-primary-text) !important;
+  font-weight: 600;
+}
+
+.model-dropdown-toggle {
+  align-self: flex-start;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--mm-primary-text);
+  padding: 2px 8px;
+  height: auto;
+}
+
+.model-dropdown-toggle:hover {
+  color: var(--mm-primary-strong) !important;
+  background: var(--mm-primary-softer) !important;
+}
+
+.model-dropdown-full {
+  padding-top: 2px;
+  border-top: 1px dashed var(--mm-border-muted);
+}
+
 .model-tag {
   font-family: "Cascadia Code", "Fira Code", "SF Mono", monospace;
   font-size: 0.78rem;

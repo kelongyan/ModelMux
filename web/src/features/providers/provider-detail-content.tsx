@@ -1,6 +1,7 @@
-import { CopyOutlined } from "@ant-design/icons";
+import { CopyOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, Popconfirm, Space, Table, Tag, Typography, message } from "antd";
 import type { TableColumnsType } from "antd";
+import { useState } from "react";
 
 import { CooldownText } from "../../components/cooldown-text";
 import { formatDateTime } from "../../components/format-time";
@@ -53,8 +54,12 @@ export function ProviderDetailContent({
   fetchingModels,
 }: ProviderDetailContentProps): JSX.Element {
   const [messageApi, contextHolder] = message.useMessage();
+  const [modelsExpanded, setModelsExpanded] = useState(false);
   const models = detail.models ?? [];
   const configuredKeys = detail.total_keys + detail.disabled_keys;
+  const PREVIEW_COUNT = 6;
+  const previewModels = models.slice(0, PREVIEW_COUNT);
+  const hasMore = models.length > PREVIEW_COUNT;
 
   function copyTargetUrl(): void {
     navigator.clipboard
@@ -221,25 +226,47 @@ export function ProviderDetailContent({
             </Button>
           </Space>
         </div>
-        <div className="model-record-strip">
-          <div className="model-record-stat">
-            <span>记录数</span>
-            <strong>{models.length}</strong>
-          </div>
-          <div className="model-record-stat">
-            <span>保存方式</span>
-            <strong>审阅后保存</strong>
-          </div>
-        </div>
         {models.length === 0 ? (
           <Empty description="暂无模型记录，可手动编辑或同步上游模型" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
-          <div className="model-tags">
-            {models.map((model) => (
-              <Tag key={model} className="model-tag">
-                {model}
-              </Tag>
-            ))}
+          <div className="model-dropdown">
+            {/* 默认展示：前 N 个标签 */}
+            <div className="model-tags">
+              {previewModels.map((model) => (
+                <Tag key={model} className="model-tag">
+                  {model}
+                </Tag>
+              ))}
+              {hasMore && !modelsExpanded && (
+                <Tag className="model-tag model-tag--more">
+                  +{models.length - PREVIEW_COUNT} 个
+                </Tag>
+              )}
+            </div>
+            {/* 展开/收起按钮 */}
+            {hasMore && (
+              <Button
+                type="text"
+                size="small"
+                className="model-dropdown-toggle"
+                icon={modelsExpanded ? <UpOutlined /> : <DownOutlined />}
+                onClick={() => setModelsExpanded(!modelsExpanded)}
+              >
+                {modelsExpanded ? "收起" : `查看全部 ${models.length} 个模型`}
+              </Button>
+            )}
+            {/* 展开后的完整列表 */}
+            {modelsExpanded && (
+              <div className="model-dropdown-full">
+                <div className="model-tags">
+                  {models.slice(PREVIEW_COUNT).map((model) => (
+                    <Tag key={model} className="model-tag">
+                      {model}
+                    </Tag>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Card>
