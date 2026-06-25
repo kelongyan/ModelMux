@@ -1,17 +1,18 @@
 /* ================================================================
    Animations — Anthropic warm, restrained motion.
    Zero JS dependency, pure CSS.
+   Uses Apple HIG-style easing for refined, premium feel.
    ================================================================ */
 
 /* ── Entry and reveal animations ── */
 
 @keyframes anim-fade-slide-up {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes anim-fade-slide-down {
-  from { opacity: 0; transform: translateY(-8px); }
+  from { opacity: 0; transform: translateY(-10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -21,25 +22,25 @@
 }
 
 @keyframes anim-scale-in {
-  from { opacity: 0; transform: scale(0.96); }
+  from { opacity: 0; transform: scale(0.95); }
   to   { opacity: 1; transform: scale(1); }
 }
 
 @keyframes anim-reveal {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(10px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ── Micro-interactions ── */
 
 @keyframes anim-press {
   from { transform: scale(1); }
-  to   { transform: scale(0.97); }
+  to   { transform: scale(0.96) translateY(1px); }
 }
 
 @keyframes anim-glow-pulse {
   0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mm-success) 38%, transparent); }
-  50%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--mm-success) 0%, transparent); }
+  50%  { box-shadow: 0 0 0 8px color-mix(in srgb, var(--mm-success) 0%, transparent); }
   100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mm-success) 0%, transparent); }
 }
 
@@ -49,11 +50,18 @@
 }
 
 @keyframes anim-slide-in-right {
-  from { opacity: 0; transform: translateX(12px); }
+  from { opacity: 0; transform: translateX(16px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 
 /* ── Status transitions ── */
+
+@keyframes anim-value-update {
+  0%   { transform: scale(1); filter: brightness(1); }
+  30%  { transform: scale(1.05); filter: brightness(1.3); }
+  60%  { transform: scale(0.98); filter: brightness(1.1); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
 
 @keyframes anim-value-flash {
   0%   { filter: brightness(1); }
@@ -64,14 +72,15 @@
 /* ── Staggered reveal utility classes ── */
 
 .reveal-card {
-  animation: anim-reveal 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: anim-reveal var(--duration-enter, 400ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)) both;
   will-change: opacity, transform;
 }
 
 .reveal-delay-0 { animation-delay: 0ms; }
-.reveal-delay-1 { animation-delay: 55ms; }
-.reveal-delay-2 { animation-delay: 110ms; }
-.reveal-delay-3 { animation-delay: 165ms; }
+.reveal-delay-1 { animation-delay: 60ms; }
+.reveal-delay-2 { animation-delay: 120ms; }
+.reveal-delay-3 { animation-delay: 180ms; }
+.reveal-delay-4 { animation-delay: 240ms; }
 
 @media (prefers-reduced-motion: reduce) {
   .reveal-card {
@@ -84,25 +93,25 @@
 
 .card-lift {
   transition:
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    transform var(--duration-slow, 300ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
+    box-shadow var(--duration-slow, 300ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94));
 }
 
 .card-lift:hover {
-  transform: translateY(-2px);
+  transform: translateY(-4px) scale(1.005);
   box-shadow:
     var(--mm-shadow-hover),
-    0 2px 0 color-mix(in srgb, var(--mm-surface-strong) 86%, transparent) inset !important;
+    inset 0 1px 0 var(--mm-glass-highlight) !important;
 }
 
-/* ── Skeleton shimmer — warm tones ── */
+/* ── Skeleton shimmer — theme-aware ── */
 
 .skeleton-shimmer {
   background: linear-gradient(
     110deg,
-    #eeecea 30%,
-    #f4f2ef 50%,
-    #eeecea 70%
+    var(--mm-surface-muted) 30%,
+    var(--mm-surface) 50%,
+    var(--mm-surface-muted) 70%
   );
   background-size: 200% 100%;
   animation: anim-shimmer 1.6s ease-in-out infinite;
@@ -111,17 +120,42 @@
 /* ── Provider activate glow ── */
 
 .provider-glow {
-  animation: anim-glow-pulse 700ms ease-out 1;
+  animation: anim-glow-pulse 800ms var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)) 1;
 }
 
 /* ── KPI value flash ── */
 
 .kpi-flash {
-  animation: anim-value-flash 500ms ease-out 1;
+  animation: anim-value-update 500ms var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) 1;
 }
 
 /* ── Click press ── */
 
+.pressable {
+  transition: transform var(--duration-fast, 100ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+}
+
 .pressable:active {
-  animation: anim-press 100ms ease-out 1;
+  animation: anim-press var(--duration-fast, 100ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)) 1;
+}
+
+/* ── Focus ring ── */
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--mm-primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--mm-primary-soft);
+  transition:
+    outline var(--duration-fast, 100ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    box-shadow var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94));
+}
+
+/* ── Smooth state transitions ── */
+
+.state-fade-enter {
+  animation: anim-fade-in var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)) both;
+}
+
+.state-fade-exit {
+  animation: anim-fade-in var(--duration-exit, 250ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)) reverse both;
 }

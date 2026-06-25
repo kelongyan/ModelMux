@@ -1,0 +1,1 @@
+function o(e){return e?new Date(e).toLocaleTimeString("zh-CN",{hour12:!1}):"--:--:--"}function a(e){if(!e)return"-";const t=new Date(e);if(Number.isNaN(t.getTime()))return e;const r=n=>String(n).padStart(2,"0");return`${t.getFullYear()}-${r(t.getMonth()+1)}-${r(t.getDate())} ${r(t.getHours())}:${r(t.getMinutes())}:${r(t.getSeconds())}`}export{a,o as f};

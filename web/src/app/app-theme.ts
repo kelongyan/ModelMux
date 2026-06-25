@@ -9,18 +9,18 @@ export function createAppTheme(mode: AppThemeMode): ThemeConfig {
     algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: {
       /* === Anthropic Warm Color Palette === */
-      colorPrimary: "#c86f55",
-      colorInfo: "#c86f55",
+      colorPrimary: dark ? "#c4654a" : "#b85f45",
+      colorInfo: dark ? "#c4654a" : "#b85f45",
       colorSuccess: "#5aab6a",
       colorWarning: "#d4a017",
       colorError: "#c44848",
-      colorText: dark ? "#f0ece6" : "#141413",
-      colorTextSecondary: dark ? "#d4cfc7" : "#363533",
-      colorBorder: dark ? "#2a2926" : "#e4e0da",
-      colorBorderSecondary: dark ? "#2a2926" : "#e4e0da",
-      colorBgBase: dark ? "#161614" : "#fafaf8",
-      colorBgLayout: dark ? "#161614" : "#fafaf8",
-      colorBgContainer: dark ? "#222120" : "#ffffff",
+      colorText: dark ? "#f5f1e8" : "#111010",
+      colorTextSecondary: dark ? "#d8d3c8" : "#2d2a26",
+      colorBorder: dark ? "#2a2926" : "#c8c2b8",
+      colorBorderSecondary: dark ? "#2a2926" : "#c8c2b8",
+      colorBgBase: dark ? "#131312" : "#eae6de",
+      colorBgLayout: dark ? "#131312" : "#eae6de",
+      colorBgContainer: dark ? "#33312d" : "#f5f2ea",
 
       /* === Anthropic Rounded Corners === */
       borderRadius: 12,

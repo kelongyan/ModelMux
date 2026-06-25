@@ -12,7 +12,7 @@
   flex: 0 0 250px;
   padding: 24px 16px;
   border-right: 1px solid var(--mm-border-soft);
-  background: var(--mm-surface-solid);
+  background: var(--mm-surface-strong);
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -69,16 +69,18 @@
   color: var(--mm-text-secondary);
   font-weight: 600;
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
+    background var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    border-color var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    color var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    box-shadow var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    transform var(--duration-fast, 100ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
 }
 
 .console-nav-link:hover {
   border-color: var(--mm-border);
   background: var(--mm-surface-active);
   color: var(--mm-primary-text);
+  transform: translateX(2px);
 }
 
 .console-nav-link.is-active {
@@ -87,6 +89,7 @@
   color: var(--mm-primary-strong);
   font-weight: 700;
   box-shadow: none;
+  transform: translateX(4px);
 }
 
 .console-main {
@@ -108,7 +111,7 @@
 .console-header {
   padding: 10px 24px;
   border-bottom: 1px solid var(--mm-border-soft);
-  background: var(--mm-surface-solid);
+  background: var(--mm-surface-strong);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -191,11 +194,11 @@
   cursor: pointer;
   box-shadow: var(--mm-shadow-inset);
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    transform 160ms ease,
-    box-shadow 160ms ease;
+    background var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    border-color var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    color var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    transform var(--duration-fast, 100ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
+    box-shadow var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94));
 }
 
 .theme-toggle:hover,
@@ -204,10 +207,11 @@
   background: var(--mm-glass-bg);
   color: var(--mm-primary-strong);
   box-shadow: var(--mm-shadow-soft);
+  transform: scale(1.05);
 }
 
 .theme-toggle:active {
-  transform: scale(0.94);
+  transform: scale(0.92) rotate(15deg);
 }
 
 .theme-toggle:focus-visible {

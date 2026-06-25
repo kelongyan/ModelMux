@@ -21,8 +21,9 @@
   border-radius: 50%;
   background: var(--mm-divider);
   transition:
-    background 220ms ease,
-    box-shadow 220ms ease;
+    background var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    box-shadow var(--duration-normal, 200ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    transform var(--duration-fast, 100ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
 }
 
 .key-pool-dots--small .key-pool-dot {
@@ -38,6 +39,12 @@
 .key-pool-dot--cooling {
   background: var(--mm-warning);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mm-warning) 24%, transparent);
+  animation: cooling-pulse 1.5s var(--ease-smooth, cubic-bezier(0.4, 0, 0.2, 1)) infinite;
+}
+
+@keyframes cooling-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
 }
 
 .key-pool-dot--invalid {
@@ -65,8 +72,9 @@
   margin-right: 6px;
   vertical-align: middle;
   transition:
-    background 300ms ease,
-    box-shadow 300ms ease;
+    background var(--duration-slow, 300ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    box-shadow var(--duration-slow, 300ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)),
+    transform var(--duration-fast, 100ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
 }
 
 .health-dot--active {
@@ -89,16 +97,18 @@
 }
 
 .health-dot--pulse {
-  animation: hdpulse 2s ease-in-out infinite;
+  animation: hdpulse 2s var(--ease-smooth, cubic-bezier(0.4, 0, 0.2, 1)) infinite;
 }
 
 @keyframes hdpulse {
   0%,
   100% {
     opacity: 1;
+    transform: scale(1);
   }
   50% {
     opacity: 0.45;
+    transform: scale(0.9);
   }
 }
 

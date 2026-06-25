@@ -11,41 +11,41 @@
   /* === Anthropic Warm Color System === */
 
   /* Canvas & Background */
-  --mm-bg: #fafaf8;
-  --mm-body-bg: #fafaf8;
+  --mm-bg: #eae6de;
+  --mm-body-bg: #eae6de;
 
-  /* Surfaces (replacing glassmorphism with solid warm tones) */
-  --mm-glass-bg: #eeecea;
-  --mm-glass-bg-strong: #f4f2ef;
-  --mm-glass-bg-subtle: rgba(240, 236, 230, 0.55);
-  --mm-glass-border: rgba(216, 212, 206, 0.5);
-  --mm-glass-border-strong: rgba(200, 196, 190, 0.7);
+  /* Surfaces — progressive elevation */
+  --mm-glass-bg: #ddd8ce;
+  --mm-glass-bg-strong: #e3ded4;
+  --mm-glass-bg-subtle: rgba(221, 216, 206, 0.55);
+  --mm-glass-border: rgba(180, 175, 168, 0.5);
+  --mm-glass-border-strong: rgba(165, 160, 153, 0.7);
   --mm-glass-highlight: rgba(255, 255, 252, 0.4);
 
-  --mm-surface: #f2f0ed;
-  --mm-surface-strong: #f4f2ef;
-  --mm-surface-solid: #ffffff;
-  --mm-surface-soft: #f6f5f2;
-  --mm-surface-muted: #eeecea;
-  --mm-surface-active: #F5E6D3;
+  --mm-surface-muted: #ddd8ce;     /* L1: 最暗 — 内嵌区域 */
+  --mm-surface-soft: #e3ded4;      /* L2 */
+  --mm-surface: #ebe6dc;           /* L3: 标准卡片 */
+  --mm-surface-strong: #f0ebe2;    /* L4 */
+  --mm-surface-solid: #f5f2ea;     /* L5: 最亮 — 卡片背景 */
+  --mm-surface-active: #F0DDC5;
 
   /* Text */
-  --mm-text: #141413;
-  --mm-text-secondary: #363533;
-  --mm-text-muted: #8a8680;
-  --mm-text-subtle: #a8a29e;
-  --mm-text-inverted: #fafaf8;
+  --mm-text: #111010;
+  --mm-text-secondary: #2d2a26;
+  --mm-text-muted: #6a665f;
+  --mm-text-subtle: #8e8a83;
+  --mm-text-inverted: #f5f2ea;
 
   /* Borders */
-  --mm-border: rgba(216, 212, 206, 0.7);
-  --mm-border-soft: rgba(216, 212, 206, 0.45);
-  --mm-border-muted: #e4e0da;
-  --mm-divider: #e4e0da;
+  --mm-border: rgba(180, 175, 168, 0.8);
+  --mm-border-soft: rgba(180, 175, 168, 0.6);
+  --mm-border-muted: #c8c2b8;
+  --mm-divider: #c8c2b8;
 
   /* Primary — Warm Terracotta */
-  --mm-primary: #c86f55;
-  --mm-primary-text: #b5624a;
-  --mm-primary-strong: #8B4513;
+  --mm-primary: #b85f45;
+  --mm-primary-text: #a5523a;
+  --mm-primary-strong: #7a3a0f;
   --mm-primary-soft: #F5E6D3;
   --mm-primary-softer: #faf5ef;
   --mm-primary-border: #e8cdb5;
@@ -76,48 +76,72 @@
   --font-display: "Times New Roman", Georgia, "Noto Serif SC", serif;
   --font-body: "Libre Baskerville", "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+
+  /* === Animation System === */
+
+  /* Easing Curves */
+  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-in-out: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Duration Scale */
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-enter: 400ms;
+  --duration-exit: 250ms;
+  --duration-complex: 500ms;
 }
 
-/* === Dark Theme — Warm Brown-Black === */
+/* === Dark Theme — 5-layer surface system === */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --mm-bg: #161614;
-  --mm-body-bg: #161614;
+  /* Canvas — deepest background */
+  --mm-bg: #131312;
+  --mm-body-bg: #131312;
 
-  --mm-glass-bg: #222120;
-  --mm-glass-bg-strong: #2a2926;
-  --mm-glass-bg-subtle: rgba(34, 33, 32, 0.5);
-  --mm-glass-border: rgba(100, 98, 94, 0.2);
-  --mm-glass-border-strong: rgba(100, 98, 94, 0.3);
-  --mm-glass-highlight: rgba(255, 255, 250, 0.04);
+  /* Glass surfaces */
+  --mm-glass-bg: #1f1e1c;
+  --mm-glass-bg-strong: #262522;
+  --mm-glass-bg-subtle: rgba(26, 25, 22, 0.55);
+  --mm-glass-border: rgba(140, 138, 132, 0.18);
+  --mm-glass-border-strong: rgba(140, 138, 132, 0.25);
+  --mm-glass-highlight: rgba(255, 255, 250, 0.03);
 
-  --mm-surface: #222120;
-  --mm-surface-strong: #2a2926;
-  --mm-surface-solid: #161614;
-  --mm-surface-soft: #1c1b19;
-  --mm-surface-muted: #222120;
-  --mm-surface-active: rgba(200, 111, 85, 0.12);
+  /* Surfaces — progressive elevation */
+  --mm-surface-muted: #1a1917;     /* L1: 内嵌区域 */
+  --mm-surface-soft: #1f1e1c;      /* L2: 软背景 */
+  --mm-surface: #262522;           /* L3: 标准卡片 */
+  --mm-surface-strong: #2d2c28;    /* L4: 强调表面 */
+  --mm-surface-solid: #33312d;     /* L5: 最亮表面/头部 */
+  --mm-surface-active: rgba(196, 101, 74, 0.13);
 
-  --mm-text: #f0ece6;
-  --mm-text-secondary: #d4cfc7;
-  --mm-text-muted: #9a9590;
-  --mm-text-subtle: #686562;
-  --mm-text-inverted: #161614;
+  /* Text — 4-level hierarchy */
+  --mm-text: #f5f1e8;
+  --mm-text-secondary: #d8d3c8;
+  --mm-text-muted: #aba6a0;
+  --mm-text-subtle: #8a8680;
+  --mm-text-inverted: #131312;
 
-  --mm-border: rgba(100, 98, 94, 0.3);
-  --mm-border-soft: rgba(100, 98, 94, 0.2);
+  /* Borders & Dividers — visible but subtle */
+  --mm-border: rgba(140, 138, 132, 0.35);
+  --mm-border-soft: rgba(140, 138, 132, 0.25);
   --mm-border-muted: #2a2926;
-  --mm-divider: #3a3836;
+  --mm-divider: #2a2926;
 
-  --mm-primary: #d4755a;
-  --mm-primary-text: #e89578;
-  --mm-primary-strong: #f0b098;
-  --mm-primary-soft: rgba(200, 111, 85, 0.15);
-  --mm-primary-softer: rgba(165, 88, 62, 0.08);
-  --mm-primary-border: rgba(212, 117, 90, 0.3);
-  --mm-primary-border-strong: rgba(212, 117, 90, 0.45);
+  /* Primary — Warm Terracotta */
+  --mm-primary: #c4654a;
+  --mm-primary-text: #d88568;
+  --mm-primary-strong: #e0a088;
+  --mm-primary-soft: rgba(196, 101, 74, 0.14);
+  --mm-primary-softer: rgba(180, 91, 65, 0.07);
+  --mm-primary-border: rgba(196, 101, 74, 0.25);
+  --mm-primary-border-strong: rgba(196, 101, 74, 0.40);
 
+  /* Semantic */
   --mm-success: #5aab6a;
   --mm-success-text: #7ed18e;
   --mm-success-soft: rgba(90, 171, 106, 0.12);
@@ -128,13 +152,23 @@
   --mm-error-text: #d97070;
   --mm-error-soft: rgba(196, 72, 72, 0.12);
 
-  --mm-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
-  --mm-shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.3);
-  --mm-shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.15);
-  --mm-shadow-panel: 4px 0 20px rgba(0, 0, 0, 0.25);
+  /* Shadows — pure dark */
+  --mm-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  --mm-shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.35);
+  --mm-shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.18);
+  --mm-shadow-panel: 4px 0 20px rgba(0, 0, 0, 0.30);
   --mm-shadow-inset: inset 0 1px 0 rgba(255, 255, 250, 0.03);
 
-  --mm-selection: rgba(212, 117, 90, 0.25);
+  /* Selection */
+  --mm-selection: rgba(212, 117, 90, 0.28);
+
+  /* Extended tokens (previously orphaned) */
+  --mm-text-primary: #e89578;
+  --mm-surface-dark: #141412;
+  --mm-border-dark: #242321;
+  --mm-shadow-float: 0 4px 16px rgba(0, 0, 0, 0.35);
+
+  /* === Animation System (inherits from light) === */
 }
 
 * {
