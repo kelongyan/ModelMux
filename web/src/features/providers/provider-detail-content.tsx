@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, CopyOutlined } from "@ant-design/icons";
+import { CopyOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, Popconfirm, Space, Table, Tag, Typography, message } from "antd";
 import type { TableColumnsType } from "antd";
 
@@ -11,7 +11,6 @@ import { renderKeyState } from "./provider-utils";
 
 type ProviderDetailContentProps = {
   detail: AdminProviderDetailResponse;
-  onBack: () => void;
   selectedKeyIDs: string[];
   onSelectedKeyIDsChange: (keyIDs: string[]) => void;
   onResetKey: (keyID: string) => void;
@@ -34,7 +33,6 @@ type ProviderDetailContentProps = {
 
 export function ProviderDetailContent({
   detail,
-  onBack,
   selectedKeyIDs,
   onSelectedKeyIDsChange,
   onResetKey,
@@ -167,62 +165,50 @@ export function ProviderDetailContent({
   ];
 
   return (
-    <Space direction="vertical" size={16} className="console-stack">
+    <Space direction="vertical" size={14} className="provider-detail-body">
       {contextHolder}
 
-      {/* 顶部导航栏 */}
-      <div className="provider-detail-header">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={onBack} className="provider-detail-back">
-          返回列表
-        </Button>
-        <Typography.Title level={4} className="provider-detail-title" style={{ margin: 0 }}>
-          Provider 详情：{detail.id}
-        </Typography.Title>
+      {/* Key 统计 + Target URL */}
+      <div className="detail-stats-row">
+        <div className="detail-stat">
+          <span>总 Key</span>
+          <strong>{configuredKeys}</strong>
+        </div>
+        <div className="detail-stat">
+          <span>可用</span>
+          <strong>{detail.active_keys}</strong>
+        </div>
+        <div className="detail-stat">
+          <span>冷却</span>
+          <strong>{detail.cooling_keys}</strong>
+        </div>
+        <div className="detail-stat">
+          <span>失效</span>
+          <strong>{detail.invalid_keys}</strong>
+        </div>
+        <div className="detail-stat">
+          <span>停用</span>
+          <strong>{detail.disabled_keys}</strong>
+        </div>
+        <div className="detail-stat detail-stat--quota">
+          <span>余额不足</span>
+          <strong>{detail.quota_exhausted_keys}</strong>
+        </div>
+      </div>
+      <div className="detail-target-url">
+        <span className="detail-target-label">Target URL</span>
+        <a href={detail.target_url} target="_blank" rel="noreferrer" className="detail-target-link">
+          {detail.target_url}
+        </a>
+        <Button type="text" size="small" icon={<CopyOutlined />} onClick={copyTargetUrl} />
       </div>
 
-      {/* Key 统计 + Target URL */}
-      <Card className="surface-card reveal-card reveal-delay-0" bordered={false}>
-        <div className="detail-stats-row">
-          <div className="detail-stat">
-            <span>总 Key</span>
-            <strong>{configuredKeys}</strong>
-          </div>
-          <div className="detail-stat">
-            <span>可用</span>
-            <strong>{detail.active_keys}</strong>
-          </div>
-          <div className="detail-stat">
-            <span>冷却</span>
-            <strong>{detail.cooling_keys}</strong>
-          </div>
-          <div className="detail-stat">
-            <span>失效</span>
-            <strong>{detail.invalid_keys}</strong>
-          </div>
-          <div className="detail-stat">
-            <span>停用</span>
-            <strong>{detail.disabled_keys}</strong>
-          </div>
-          <div className="detail-stat detail-stat--quota">
-            <span>余额不足</span>
-            <strong>{detail.quota_exhausted_keys}</strong>
-          </div>
-        </div>
-        <div className="detail-target-url">
-          <span className="detail-target-label">Target URL</span>
-          <a href={detail.target_url} target="_blank" rel="noreferrer" className="detail-target-link">
-            {detail.target_url}
-          </a>
-          <Button type="text" size="small" icon={<CopyOutlined />} onClick={copyTargetUrl} />
-        </div>
-      </Card>
-
       {/* 模型记录 */}
-      <Card className="surface-card reveal-card reveal-delay-1" bordered={false}>
+      <Card className="surface-card" bordered={false} size="small">
         <div className="section-heading">
           <div>
             <Typography.Text className="placeholder-kicker">模型记录</Typography.Text>
-            <Typography.Title level={4} className="section-title">
+            <Typography.Title level={5} className="section-title">
               已记录模型 {models.length > 0 ? `(${models.length})` : ""}
             </Typography.Title>
           </div>
@@ -259,11 +245,11 @@ export function ProviderDetailContent({
       </Card>
 
       {/* Key 管理 */}
-      <Card className="surface-card reveal-card reveal-delay-2" bordered={false}>
+      <Card className="surface-card" bordered={false} size="small">
         <div className="section-heading">
           <div>
             <Typography.Text className="placeholder-kicker">Key 管理</Typography.Text>
-            <Typography.Title level={4} className="section-title">
+            <Typography.Title level={5} className="section-title">
               当前 Keys
             </Typography.Title>
           </div>

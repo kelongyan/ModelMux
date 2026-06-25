@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Empty, Form, Result, Skeleton, Space, Typography, message } from "antd";
+import { Button, Card, Empty, Form, Modal, Result, Skeleton, Space, Typography, message } from "antd";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -158,7 +158,7 @@ export function ProvidersPage(): JSX.Element {
     onSuccess: async (_, providerID) => {
       messageApi.success("已删除 provider");
       if (selectedProviderID === providerID) {
-        setSelectedProvider(null);
+        closeDetailModal();
       }
       await invalidateAdminQueries();
     },
@@ -319,6 +319,7 @@ export function ProvidersPage(): JSX.Element {
     onError: (error: Error) => messageApi.error(`拉取模型失败：${error.message}`),
   });
 
+  const selectedProvider = providersQuery.data?.providers.find((provider) => provider.id === selectedProviderID);
   const providerDetail = providerDetailQuery.data;
   const detailLoading = providerDetailQuery.isLoading && selectedProviderID !== null;
 
@@ -341,96 +342,9 @@ export function ProvidersPage(): JSX.Element {
     );
   }
 
-  // 详情视图
-  if (selectedProviderID) {
-    if (detailLoading) {
-      return (
-        <>
-          {contextHolder}
-          {renderModals()}
-          <div className="console-loading">
-            <Skeleton active paragraph={{ rows: 6 }} />
-          </div>
-        </>
-      );
-    }
-    if (providerDetailQuery.isError) {
-      return (
-        <>
-          {contextHolder}
-          {renderModals()}
-          <Result
-            status="error"
-            title="Provider 详情加载失败"
-            subTitle={providerDetailQuery.error instanceof Error ? providerDetailQuery.error.message : "未知错误"}
-            extra={<Button onClick={() => void providerDetailQuery.refetch()}>重试</Button>}
-          />
-        </>
-      );
-    }
-    if (providerDetail) {
-      return (
-        <>
-          {contextHolder}
-          {renderModals()}
-          <ProviderDetailContent
-            detail={providerDetail}
-            onBack={() => setSelectedProvider(null)}
-            selectedKeyIDs={selectedKeyIDs}
-            onSelectedKeyIDsChange={setSelectedKeyIDs}
-            onResetKey={(keyID) => {
-              resetKeyMutation.mutate({ providerID: selectedProviderID, keyID });
-            }}
-            resettingKey={resetKeyMutation.isPending}
-            onResetAllKeys={() => {
-              resetAllKeysMutation.mutate(selectedProviderID);
-            }}
-            resettingAllKeys={resetAllKeysMutation.isPending}
-            onEditKeyMetadata={openKeyMetadataModal}
-            onToggleKeyDisabled={(key, disabled) => {
-              updateKeyMetadataMutation.mutate({
-                providerID: selectedProviderID,
-                keyID: key.key_id,
-                metadata: { disabled },
-              });
-            }}
-            updatingKeyMetadata={updateKeyMetadataMutation.isPending}
-            onTestKey={(keyID) => {
-              testKeyMutation.mutate({ providerID: selectedProviderID, keyID });
-            }}
-            testingKeyID={testingKeyID}
-            onOpenAppendKeys={() => openKeyModal("append")}
-            onOpenReplaceKeys={() => openKeyModal("replace")}
-            onDeleteSelectedKeys={() => {
-              if (selectedKeyIDs.length === 0) {
-                return;
-              }
-              deleteKeysMutation.mutate({ providerID: selectedProviderID, keyIDs: selectedKeyIDs });
-            }}
-            deletingKeys={deleteKeysMutation.isPending}
-            onOpenEditModels={() => openModelModal(providerDetail.models)}
-            onFetchModels={() => {
-              fetchModelsMutation.mutate(selectedProviderID);
-            }}
-            fetchingModels={fetchModelsMutation.isPending}
-          />
-        </>
-      );
-    }
-    return (
-      <>
-        {contextHolder}
-        {renderModals()}
-        <Empty description="未找到 provider 详情" />
-      </>
-    );
-  }
-
-  // 列表视图
   return (
     <>
       {contextHolder}
-      {renderModals()}
       <Space direction="vertical" size={16} className="console-stack">
         <Card className="surface-card reveal-card reveal-delay-0" bordered={false}>
           <div className="section-heading">
@@ -451,24 +365,108 @@ export function ProvidersPage(): JSX.Element {
             providers={providersQuery.data?.providers ?? []}
             activating={activateProviderMutation.isPending}
             deleting={deleteProviderMutation.isPending}
-            onOpenDetail={setSelectedProvider}
+            onOpenDetail={openDetailModal}
             onActivate={(providerID) => activateProviderMutation.mutate(providerID)}
             onEdit={openProviderEdit}
             onDelete={(providerID) => deleteProviderMutation.mutate(providerID)}
           />
         </Card>
       </Space>
+
+      {/* Provider 详情弹出层 */}
+      <Modal
+        open={selectedProviderID !== null}
+        title={selectedProvider ? `Provider 详情：${selectedProvider.id}` : "Provider 详情"}
+        onCancel={closeDetailModal}
+        footer={null}
+        width="min(1100px, 92vw)"
+        destroyOnHidden
+        className="provider-detail-modal"
+      >
+        {detailLoading ? (
+          <div className="console-loading">
+            <Skeleton active paragraph={{ rows: 6 }} />
+          </div>
+        ) : providerDetailQuery.isError ? (
+          <Result
+            status="error"
+            title="Provider 详情加载失败"
+            subTitle={providerDetailQuery.error instanceof Error ? providerDetailQuery.error.message : "未知错误"}
+            extra={<Button onClick={() => void providerDetailQuery.refetch()}>重试</Button>}
+          />
+        ) : providerDetail ? (
+          <ProviderDetailContent
+            detail={providerDetail}
+            selectedKeyIDs={selectedKeyIDs}
+            onSelectedKeyIDsChange={setSelectedKeyIDs}
+            onResetKey={(keyID) => {
+              if (selectedProviderID) {
+                resetKeyMutation.mutate({ providerID: selectedProviderID, keyID });
+              }
+            }}
+            resettingKey={resetKeyMutation.isPending}
+            onResetAllKeys={() => {
+              if (selectedProviderID) {
+                resetAllKeysMutation.mutate(selectedProviderID);
+              }
+            }}
+            resettingAllKeys={resetAllKeysMutation.isPending}
+            onEditKeyMetadata={openKeyMetadataModal}
+            onToggleKeyDisabled={(key, disabled) => {
+              if (!selectedProviderID) {
+                return;
+              }
+              updateKeyMetadataMutation.mutate({
+                providerID: selectedProviderID,
+                keyID: key.key_id,
+                metadata: { disabled },
+              });
+            }}
+            updatingKeyMetadata={updateKeyMetadataMutation.isPending}
+            onTestKey={(keyID) => {
+              if (!selectedProviderID) {
+                return;
+              }
+              testKeyMutation.mutate({ providerID: selectedProviderID, keyID });
+            }}
+            testingKeyID={testingKeyID}
+            onOpenAppendKeys={() => openKeyModal("append")}
+            onOpenReplaceKeys={() => openKeyModal("replace")}
+            onDeleteSelectedKeys={() => {
+              if (!selectedProviderID || selectedKeyIDs.length === 0) {
+                return;
+              }
+              deleteKeysMutation.mutate({ providerID: selectedProviderID, keyIDs: selectedKeyIDs });
+            }}
+            deletingKeys={deleteKeysMutation.isPending}
+            onOpenEditModels={() => openModelModal(providerDetail.models)}
+            onFetchModels={() => {
+              if (selectedProviderID) {
+                fetchModelsMutation.mutate(selectedProviderID);
+              }
+            }}
+            fetchingModels={fetchModelsMutation.isPending}
+          />
+        ) : (
+          <Empty description="未找到 provider 详情" />
+        )}
+      </Modal>
+
+      {renderModals()}
     </>
   );
 
-  function setSelectedProvider(providerID: string | null) {
+  function openDetailModal(providerID: string) {
     setSelectedProviderID(providerID);
     const next = new URLSearchParams(searchParams);
-    if (providerID) {
-      next.set("provider", providerID);
-    } else {
-      next.delete("provider");
-    }
+    next.set("provider", providerID);
+    setSearchParams(next, { replace: true });
+  }
+
+  function closeDetailModal() {
+    setSelectedProviderID(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("provider");
     setSearchParams(next, { replace: true });
   }
 
