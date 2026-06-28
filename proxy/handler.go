@@ -1026,6 +1026,11 @@ func applyUsageToRecord(record *stats.CallRecord, usage stats.Usage) {
 	record.PromptTokens = usage.PromptTokens
 	record.CompletionTokens = usage.CompletionTokens
 	record.TotalTokens = usage.TotalTokens
+	// 用上游返回的实际模型 ID 覆盖客户端请求中的模型名，
+	// 确保调用统计反映真实使用的模型（例如 gpt-4 → gpt-4-turbo-2024-04-09）。
+	if usage.Model != "" {
+		record.Model = usage.Model
+	}
 }
 
 func extractRequestMeta(body []byte) requestMeta {

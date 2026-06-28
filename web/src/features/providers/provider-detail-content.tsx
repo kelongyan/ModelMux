@@ -138,7 +138,7 @@ export function ProviderDetailContent({
         key: "state",
         width: 80,
         render: (state: AdminKeyStatus["state"], record) => {
-          const stateEl = renderKeyState(state);
+          const stateEl = renderKeyState(state, record.invalid_reason);
           // Tooltip 显示低频信息：失效原因、冷却、最近 401
           const tooltipLines: string[] = [];
           if (state === "invalid" && record.invalid_reason) {

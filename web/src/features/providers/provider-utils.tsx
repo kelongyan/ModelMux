@@ -27,7 +27,7 @@ export function renderProviderState(provider: AdminProviderSummary): JSX.Element
   return <StateText color="blue">待命</StateText>;
 }
 
-export function renderKeyState(state: AdminKeyStatus["state"]): JSX.Element {
+export function renderKeyState(state: AdminKeyStatus["state"], invalidReason?: string): JSX.Element {
   switch (state) {
     case "active":
       return <StateText color="green">可用</StateText>;
@@ -36,6 +36,13 @@ export function renderKeyState(state: AdminKeyStatus["state"]): JSX.Element {
     case "disabled":
       return <StateText color="gray">停用</StateText>;
     default:
+      // invalid 状态按原因区分显示
+      if (invalidReason === "quota_exhausted") {
+        return <StateText color="red">余额不足</StateText>;
+      }
+      if (invalidReason === "unauthorized") {
+        return <StateText color="red">认证失败</StateText>;
+      }
       return <StateText color="red">失效</StateText>;
   }
 }

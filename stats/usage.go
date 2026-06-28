@@ -11,6 +11,7 @@ type Usage struct {
 	CompletionTokens *int64
 	TotalTokens      *int64
 	Source           string
+	Model            string // upstream-returned model ID (may differ from the requested model)
 }
 
 func deriveTotalTokens(prompt, completion, total *int64) *int64 {
@@ -48,9 +49,93 @@ func ExtractUsage(body []byte) Usage {
 	}
 
 	if usage := extractUsageFromJSON(body); usage.Source == UsageSourceUpstream {
+		if usage.Model == "" {
+			usage.Model = extractTopLevelModel(body)
+		}
 		return usage
 	}
-	return extractUsageFromSSE(body)
+	usage := extractUsageFromSSE(body)
+	if usage.Source == UsageSourceUpstream && usage.Model == "" {
+		usage.Model = extractModelFromSSE(body)
+	}
+	return usage
+}
+
+// extractTopLevelModel 从 JSON 响应体中提取 model 字段。
+// 兼容顶层 model (Chat Completions / Anthropic) 和 response.model (Responses API) 两种路径。
+func extractTopLevelModel(body []byte) string {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(body, &root); err != nil {
+		return ""
+	}
+	// 顶层 model
+	if raw, ok := root["model"]; ok {
+		var model string
+		if err := json.Unmarshal(raw, &model); err == nil {
+			model = strings.TrimSpace(model)
+			if model != "" {
+				return model
+			}
+		}
+	}
+	// response.model (Responses API)
+	if rawResponse, ok := root["response"]; ok {
+		var responseObj map[string]json.RawMessage
+		if err := json.Unmarshal(rawResponse, &responseObj); err == nil {
+			if raw, ok := responseObj["model"]; ok {
+				var model string
+				if err := json.Unmarshal(raw, &model); err == nil {
+					return strings.TrimSpace(model)
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// extractModelFromSSE 从 SSE 流中提取第一个包含 model 字段的 data 事件里的 model 值。
+// 兼容顶层 model (Chat Completions / Anthropic) 和 response.model (Responses API) 两种路径。
+func extractModelFromSSE(body []byte) string {
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var root map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(payload), &root); err != nil {
+			continue
+		}
+		// 顶层 model (Chat Completions / Anthropic message_start)
+		if raw, ok := root["model"]; ok {
+			var model string
+			if err := json.Unmarshal(raw, &model); err == nil {
+				model = strings.TrimSpace(model)
+				if model != "" {
+					return model
+				}
+			}
+		}
+		// response.model (Responses API response.completed)
+		if rawResponse, ok := root["response"]; ok {
+			var responseObj map[string]json.RawMessage
+			if err := json.Unmarshal(rawResponse, &responseObj); err == nil {
+				if raw, ok := responseObj["model"]; ok {
+					var model string
+					if err := json.Unmarshal(raw, &model); err == nil {
+						model = strings.TrimSpace(model)
+						if model != "" {
+							return model
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // extractUsageFromJSON 从单个 JSON 对象中按多个常见路径查找 usage。
