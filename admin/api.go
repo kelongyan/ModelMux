@@ -1860,10 +1860,24 @@ func safeUpstreamClient(allowedIPs []net.IP, timeout time.Duration) *http.Client
 			if err != nil {
 				return nil, err
 			}
-			if allowed[host] {
+			// addr 中的 host 是原始主机名（如 api.example.com），
+			// 而 allowed 存的是已校验 IP，需重新解析后逐一核对防止 DNS 重绑定。
+			if ip := net.ParseIP(host); ip != nil {
+				if !allowed[ip.String()] {
+					return nil, fmt.Errorf("dial %s: IP not in allowlist", addr)
+				}
 				return dialer.DialContext(ctx, network, addr)
 			}
-			return nil, fmt.Errorf("dial %s: IP not in allowlist", addr)
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("dial %s: DNS lookup failed: %w", host, err)
+			}
+			for _, ipAddr := range ips {
+				if !allowed[ipAddr.IP.String()] {
+					return nil, fmt.Errorf("dial %s: resolved IP %s not in allowlist", host, ipAddr.IP)
+				}
+			}
+			return dialer.DialContext(ctx, network, addr)
 		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,
