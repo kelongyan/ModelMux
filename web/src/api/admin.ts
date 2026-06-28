@@ -6,6 +6,7 @@ import type {
   AdminKeysPreviewPayload,
   AdminKeysPreviewResponse,
   AdminKeysResetAllResponse,
+  AdminKeysTestAllResponse,
   AdminDashboardResponse,
   AdminDeleteKeysPayload,
   AdminEventsResponse,
@@ -166,6 +167,16 @@ export function resetAllProviderKeys(providerID: string): Promise<AdminKeysReset
 export function testProviderKey(providerID: string, keyID: string): Promise<AdminKeyTestResponse> {
   return requestJSON<AdminKeyTestResponse>(
     `/admin/api/v1/providers/${pathSegment(providerID)}/keys/${pathSegment(keyID)}/test`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+// testAllProviderKeys 并发测试指定 provider 下所有启用的 key。
+export function testAllProviderKeys(providerID: string): Promise<AdminKeysTestAllResponse> {
+  return requestJSON<AdminKeysTestAllResponse>(
+    `/admin/api/v1/providers/${pathSegment(providerID)}/keys:test-all`,
     {
       method: "POST",
     },

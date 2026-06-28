@@ -1,4 +1,4 @@
-import { CopyOutlined, DownOutlined, EllipsisOutlined, UpOutlined } from "@ant-design/icons";
+import { CopyOutlined, DownOutlined, EllipsisOutlined, ExperimentOutlined, UpOutlined } from "@ant-design/icons";
 import { Button, Card, Dropdown, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { MenuProps, TableColumnsType } from "antd";
 import { useMemo, useState } from "react";
@@ -23,6 +23,8 @@ type ProviderDetailContentProps = {
   updatingKeyMetadata: boolean;
   onTestKey: (keyID: string) => void;
   testingKeyID: string | null;
+  onTestAllKeys: () => void;
+  testingAllKeys: boolean;
   onOpenAppendKeys: () => void;
   onOpenReplaceKeys: () => void;
   onDeleteSelectedKeys: () => void;
@@ -45,6 +47,8 @@ export function ProviderDetailContent({
   updatingKeyMetadata,
   onTestKey,
   testingKeyID,
+  onTestAllKeys,
+  testingAllKeys,
   onOpenAppendKeys,
   onOpenReplaceKeys,
   onDeleteSelectedKeys,
@@ -325,6 +329,9 @@ export function ProviderDetailContent({
                 重置全部
               </Button>
             </Popconfirm>
+            <Button size="small" icon={<ExperimentOutlined />} loading={testingAllKeys} onClick={onTestAllKeys}>
+              批量测试
+            </Button>
             <Popconfirm
               title={`确认删除选中的 ${selectedKeyIDs.length} 个 key？`}
               description="至少需要保留一个 key。"

@@ -17,6 +17,7 @@ import {
   replaceProviderModels,
   resetProviderKey,
   resetAllProviderKeys,
+  testAllProviderKeys,
   testProviderKey,
   updateProvider,
   updateProviderKeyMetadata,
@@ -27,6 +28,7 @@ import {
   KeyEditorModal,
   KeyMetadataModal,
   KeyPreviewModal,
+  KeyTestAllResultModal,
   ModelEditorModal,
   ModelSyncModal,
   ProviderEditorModal,
@@ -47,7 +49,7 @@ import type {
   ProviderModalState,
 } from "../features/providers/provider-types";
 import { splitLinesText } from "../features/providers/provider-utils";
-import type { AdminKeyMetadataPayload, AdminKeyStatus, AdminProviderSummary } from "../types/admin";
+import type { AdminKeyMetadataPayload, AdminKeyStatus, AdminKeyTestAllResult, AdminProviderSummary } from "../types/admin";
 
 export function ProvidersPage(): JSX.Element {
   const queryClient = useQueryClient();
@@ -75,6 +77,11 @@ export function ProvidersPage(): JSX.Element {
   const [selectedSyncModelIDs, setSelectedSyncModelIDs] = useState<string[]>([]);
   const [modelSyncSearch, setModelSyncSearch] = useState("");
   const [testingKeyID, setTestingKeyID] = useState<string | null>(null);
+  const [testAllModal, setTestAllModal] = useState<{ open: boolean; results: AdminKeyTestAllResult[]; allOK: boolean }>({
+    open: false,
+    results: [],
+    allOK: false,
+  });
 
   const [providerForm] = Form.useForm<ProviderFormValues>();
   const [keyForm] = Form.useForm<KeyFormValues>();
@@ -281,6 +288,14 @@ export function ProvidersPage(): JSX.Element {
     },
   });
 
+  const testAllKeysMutation = useMutation({
+    mutationFn: testAllProviderKeys,
+    onSuccess: (data) => {
+      setTestAllModal({ open: true, results: data.results, allOK: data.ok });
+    },
+    onError: (error: Error) => messageApi.error(`批量测试失败：${error.message}`),
+  });
+
   const replaceModelsMutation = useMutation({
     mutationFn: async (payload: { providerID: string; models: string[] }) =>
       replaceProviderModels(payload.providerID, { models: payload.models }),
@@ -430,6 +445,12 @@ export function ProvidersPage(): JSX.Element {
               testKeyMutation.mutate({ providerID: selectedProviderID, keyID });
             }}
             testingKeyID={testingKeyID}
+            onTestAllKeys={() => {
+              if (selectedProviderID) {
+                testAllKeysMutation.mutate(selectedProviderID);
+              }
+            }}
+            testingAllKeys={testAllKeysMutation.isPending}
             onOpenAppendKeys={() => openKeyModal("append")}
             onOpenReplaceKeys={() => openKeyModal("replace")}
             onDeleteSelectedKeys={() => {
@@ -453,6 +474,13 @@ export function ProvidersPage(): JSX.Element {
       </Modal>
 
       {renderModals()}
+
+      <KeyTestAllResultModal
+        open={testAllModal.open}
+        results={testAllModal.results}
+        allOK={testAllModal.allOK}
+        onClose={() => setTestAllModal({ open: false, results: [], allOK: false })}
+      />
     </>
   );
 

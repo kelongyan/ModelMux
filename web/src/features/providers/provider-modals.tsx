@@ -1,7 +1,7 @@
 import { Alert, Button, Checkbox, Form, Input, Modal, Space, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import type { FormInstance } from "antd/es/form";
-import type { AdminKeysPreviewResponse } from "../../types/admin";
+import type { AdminKeysPreviewResponse, AdminKeyTestAllResult } from "../../types/admin";
 import { buildModelSaveList, type ModelSaveMode, summarizeModelSync } from "./model-sync";
 
 function pasteFromClipboard(form: FormInstance, fieldName: string): void {
@@ -438,6 +438,110 @@ function ModelIDTagSection({ title, items }: { title: string; items: string[] })
         ))}
       </div>
     </Space>
+  );
+}
+
+type KeyTestAllResultModalProps = {
+  open: boolean;
+  results: AdminKeyTestAllResult[];
+  allOK: boolean;
+  onClose: () => void;
+};
+
+export function KeyTestAllResultModal({ open, results, allOK, onClose }: KeyTestAllResultModalProps): JSX.Element {
+  const passedCount = results.filter((r) => r.ok).length;
+  const failedCount = results.length - passedCount;
+
+  const columns: TableColumnsType<AdminKeyTestAllResult> = [
+    {
+      title: "Key 标识",
+      dataIndex: "masked_key",
+      key: "masked_key",
+      width: 200,
+      render: (maskedKey: string, record) => (
+        <div>
+          <strong>{maskedKey}</strong>
+          <div className="table-subtext provider-key-id">{record.key_id}</div>
+        </div>
+      ),
+    },
+    {
+      title: "状态",
+      key: "status",
+      width: 100,
+      render: (_: unknown, record) => {
+        if (record.error === "key is disabled") {
+          return <Tag>停用</Tag>;
+        }
+        return record.ok ? <Tag color="success">正常</Tag> : <Tag color="error">异常</Tag>;
+      },
+    },
+    {
+      title: "HTTP",
+      dataIndex: "status_code",
+      key: "status_code",
+      width: 80,
+      render: (value?: number) => (value ? String(value) : "-"),
+    },
+    {
+      title: "延迟",
+      dataIndex: "latency_ms",
+      key: "latency_ms",
+      width: 80,
+      render: (value?: number) => (value ? `${(value / 1000).toFixed(1)}s` : "-"),
+    },
+    {
+      title: "详情",
+      dataIndex: "error",
+      key: "error",
+      ellipsis: true,
+      render: (value: string | undefined, record) => {
+        if (!value && record.ok) {
+          return <span className="stats-text-muted">-</span>;
+        }
+        return <span className="stats-text-error" title={value}>{value ?? "-"}</span>;
+      },
+    },
+  ];
+
+  return (
+    <Modal
+      open={open}
+      title="批量测试结果"
+      onCancel={onClose}
+      footer={<Button onClick={onClose}>关闭</Button>}
+      width="min(760px, 92vw)"
+      destroyOnClose
+    >
+      <div className="detail-stats-row" style={{ marginBottom: 16 }}>
+        <div className="detail-stat">
+          <span>总计</span>
+          <strong>{results.length}</strong>
+        </div>
+        <div className="detail-stat">
+          <span>正常</span>
+          <strong style={{ color: "#3d8b50" }}>{passedCount}</strong>
+        </div>
+        <div className="detail-stat">
+          <span>异常</span>
+          <strong style={{ color: failedCount > 0 ? "#a83535" : undefined }}>{failedCount}</strong>
+        </div>
+      </div>
+      <Alert
+        type={allOK ? "success" : "warning"}
+        showIcon
+        message={allOK ? "全部 Key 测试通过" : `有 ${failedCount} 个 Key 存在异常`}
+        style={{ marginBottom: 16 }}
+      />
+      <Table
+        columns={columns}
+        dataSource={results}
+        rowKey="key_id"
+        pagination={false}
+        size="small"
+        scroll={{ x: 600 }}
+      />
+    </Modal>
   );
 }
 

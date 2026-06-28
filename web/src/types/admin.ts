@@ -163,6 +163,21 @@ export type AdminKeyTestResponse = {
   retry_after_seconds?: number;
 };
 
+export type AdminKeyTestAllResult = {
+  key_id: string;
+  masked_key: string;
+  ok: boolean;
+  status_code?: number;
+  latency_ms?: number;
+  scope?: string;
+  error?: string;
+};
+
+export type AdminKeysTestAllResponse = {
+  ok: boolean;
+  results: AdminKeyTestAllResult[];
+};
+
 export type AdminKeysResetAllResponse = {
   ok: boolean;
   reset_count: number;
