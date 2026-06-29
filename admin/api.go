@@ -165,6 +165,24 @@ type apiKeysResetAllResponse struct {
 	ResetCount int  `json:"reset_count"`
 }
 
+type apiProvidersExportResponse struct {
+	Version         int                       `json:"version"`
+	ExportedAt      time.Time                 `json:"exported_at"`
+	ActiveProvider  string                    `json:"active_provider"`
+	Providers       []config.ProviderConfig   `json:"providers"`
+}
+
+type apiProvidersImportPayload struct {
+	Version   int                      `json:"version"`
+	Providers []config.ProviderConfig  `json:"providers"`
+}
+
+type apiProvidersImportResponse struct {
+	OK          bool     `json:"ok"`
+	Imported    int      `json:"imported"`
+	SkippedIDs  []string `json:"skipped_ids,omitempty"`
+}
+
 type apiDeleteKeysPayload struct {
 	KeyIDs []string `json:"key_ids"`
 }
@@ -256,6 +274,8 @@ func (h *Handler) registerAPIRoutes(mux *http.ServeMux) {
 	auth := h.requireAuth
 	mux.HandleFunc("/admin/api/v1/dashboard", auth(h.dashboard))
 	mux.HandleFunc("/admin/api/v1/providers", auth(h.providersIndex))
+	mux.HandleFunc("/admin/api/v1/providers/export", auth(h.providersExport))
+	mux.HandleFunc("/admin/api/v1/providers/import", auth(h.providersImport))
 	mux.HandleFunc("/admin/api/v1/providers/", auth(h.providersDetail))
 	mux.HandleFunc("/admin/api/v1/settings", auth(h.settings))
 	mux.HandleFunc("/admin/api/v1/events", auth(h.eventsIndex))
@@ -326,6 +346,136 @@ func (h *Handler) listProviders(w http.ResponseWriter, r *http.Request) {
 		Providers:      h.buildProviderSummaries(),
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// providersExport 导出所有 provider 配置（含 key、模型、元数据）为 JSON 附件，便于跨机器迁移。
+func (h *Handler) providersExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if !h.requireConfigManager(w) {
+		return
+	}
+
+	cfg, err := h.cfgManager.Snapshot()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+		return
+	}
+
+	providers := cfg.ProviderConfigs()
+	if providers == nil {
+		providers = []config.ProviderConfig{}
+	}
+
+	resp := apiProvidersExportResponse{
+		Version:        1,
+		ExportedAt:     time.Now().UTC(),
+		ActiveProvider: cfg.ActiveProvider,
+		Providers:      providers,
+	}
+
+	payload, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	h.recordEvent("info", logx.CategoryAdmin, "admin.providers_exported", "providers exported", map[string]any{
+		"count": len(providers),
+	})
+	downloadAttachment(w, "modelmux-providers-export.json", payload)
+}
+
+// providersImport 从上传的 JSON 批量导入 provider，跳过已存在的 ID，导入后自动热重载。
+func (h *Handler) providersImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if !h.requireConfigManager(w) {
+		return
+	}
+
+	var payload apiProvidersImportPayload
+	if !decodeJSONBody(w, r, &payload) {
+		return
+	}
+
+	if payload.Version != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unsupported version, only version 1 is supported"})
+		return
+	}
+	if len(payload.Providers) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no providers to import"})
+		return
+	}
+
+	// 预校验每个待导入 provider 的基本合法性。
+	for i, p := range payload.Providers {
+		if p.ID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("providers[%d].id is required", i)})
+			return
+		}
+		if strings.ContainsAny(p.ID, "/?#") {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("providers[%d].id contains unsupported characters", i)})
+			return
+		}
+		if p.TargetURL == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("providers[%d].target_url is required", i)})
+			return
+		}
+		if _, err := url.Parse(p.TargetURL); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("providers[%d].target_url is invalid: %v", i, err)})
+			return
+		}
+		if len(p.Keys) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": fmt.Sprintf("providers[%d].keys must contain at least one key", i)})
+			return
+		}
+	}
+
+	var imported int
+	var skippedIDs []string
+	_, err := h.cfgManager.Update(func(cfg *config.Config) error {
+		imported = 0
+		skippedIDs = nil
+		for _, p := range payload.Providers {
+			if _, exists := findProviderConfig(cfg.Providers, p.ID); exists {
+				skippedIDs = append(skippedIDs, p.ID)
+				continue
+			}
+			p.Keys = normalizeKeys(p.Keys)
+			if len(p.Keys) == 0 {
+				skippedIDs = append(skippedIDs, p.ID)
+				continue
+			}
+			cfg.Providers = append(cfg.Providers, p)
+			imported++
+		}
+		if imported == 0 && len(skippedIDs) == 0 {
+			return fmt.Errorf("no valid providers to import")
+		}
+		return nil
+	})
+	if err != nil {
+		h.recordEvent("error", logx.CategoryAdmin, "admin.providers_import_failed", "providers import failed", map[string]any{
+			"error": err.Error(),
+		})
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+
+	h.recordEvent("info", logx.CategoryAdmin, "admin.providers_imported", "providers imported", map[string]any{
+		"imported":    imported,
+		"skipped_ids": skippedIDs,
+	})
+	writeJSON(w, http.StatusOK, apiProvidersImportResponse{
+		OK:         true,
+		Imported:   imported,
+		SkippedIDs: skippedIDs,
+	})
 }
 
 // providersDetail 处理 provider 明细与写操作。
@@ -1609,7 +1759,7 @@ func (h *Handler) parseProviderAction(path string) (string, string, string, bool
 			return parts[0], "activate", "", true
 		}
 		if parts[1] == "keys:append" || parts[1] == "keys:replace" || parts[1] == "keys:delete" ||
-			parts[1] == "keys:preview" || parts[1] == "keys:reset-all" {
+			parts[1] == "keys:preview" || parts[1] == "keys:reset-all" || parts[1] == "keys:test-all" {
 			return parts[0], parts[1], "", true
 		}
 		if parts[1] == "models:replace" || parts[1] == "models:fetch" {

@@ -16,6 +16,7 @@ import type {
   AdminProviderCreatePayload,
   AdminProviderDetailResponse,
   AdminProvidersResponse,
+  AdminProvidersImportResponse,
   AdminProviderUpdatePayload,
   AdminReloadResponse,
   AdminSettingsPayload,
@@ -314,4 +315,28 @@ export async function downloadStateBackup(): Promise<void> {
     method: "POST",
   });
   saveDownloadBlob(file.blob, file.filename);
+}
+
+// downloadProvidersExport 导出所有 provider 配置为 JSON 文件。
+export async function downloadProvidersExport(): Promise<void> {
+  const file = await requestDownload("/admin/api/v1/providers/export", {
+    method: "POST",
+  });
+  saveDownloadBlob(file.blob, file.filename);
+}
+
+// importProviders 从 JSON 文件批量导入 provider。
+export function importProviders(file: File): Promise<AdminProvidersImportResponse> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      requestJSON<AdminProvidersImportResponse>("/admin/api/v1/providers/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: reader.result as string,
+      }).then(resolve, reject);
+    };
+    reader.onerror = () => reject(new Error("读取文件失败"));
+    reader.readAsText(file);
+  });
 }

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, Empty, Form, Modal, Result, Skeleton, Space, Typography, message } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import {
@@ -9,9 +9,11 @@ import {
   createProvider,
   deleteProvider,
   deleteProviderKeys,
+  downloadProvidersExport,
   fetchProviderDetail,
   fetchProviderModels,
   fetchProviders,
+  importProviders,
   previewProviderKeys,
   replaceProviderKeys,
   replaceProviderModels,
@@ -76,6 +78,7 @@ export function ProvidersPage(): JSX.Element {
   });
   const [selectedSyncModelIDs, setSelectedSyncModelIDs] = useState<string[]>([]);
   const [modelSyncSearch, setModelSyncSearch] = useState("");
+  const importFileRef = useRef<HTMLInputElement>(null);
   const [testingKeyID, setTestingKeyID] = useState<string | null>(null);
   const [testAllModal, setTestAllModal] = useState<{ open: boolean; results: AdminKeyTestAllResult[]; allOK: boolean }>({
     open: false,
@@ -334,6 +337,36 @@ export function ProvidersPage(): JSX.Element {
     onError: (error: Error) => messageApi.error(`拉取模型失败：${error.message}`),
   });
 
+  const exportMutation = useMutation({
+    mutationFn: downloadProvidersExport,
+    onSuccess: () => messageApi.success("导出完成"),
+    onError: (error: Error) => messageApi.error(`导出失败：${error.message}`),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: importProviders,
+    onSuccess: async (result) => {
+      const parts: string[] = [];
+      if (result.imported > 0) {
+        parts.push(`导入 ${result.imported} 个`);
+      }
+      if (result.skipped_ids && result.skipped_ids.length > 0) {
+        parts.push(`跳过 ${result.skipped_ids.length} 个已存在`);
+      }
+      messageApi.success(parts.length > 0 ? parts.join("，") : "导入完成");
+      if (importFileRef.current) {
+        importFileRef.current.value = "";
+      }
+      await invalidateAdminQueries();
+    },
+    onError: (error: Error) => {
+      if (importFileRef.current) {
+        importFileRef.current.value = "";
+      }
+      messageApi.error(`导入失败：${error.message}`);
+    },
+  });
+
   const selectedProvider = providersQuery.data?.providers.find((provider) => provider.id === selectedProviderID);
   const providerDetail = providerDetailQuery.data;
   const detailLoading = providerDetailQuery.isLoading && selectedProviderID !== null;
@@ -371,6 +404,27 @@ export function ProvidersPage(): JSX.Element {
             </div>
             <Space wrap>
               <Button onClick={() => void providersQuery.refetch()}>刷新</Button>
+              <Button loading={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
+                导出
+              </Button>
+              <Button
+                loading={importMutation.isPending}
+                onClick={() => importFileRef.current?.click()}
+              >
+                导入
+              </Button>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    importMutation.mutate(file);
+                  }
+                }}
+              />
               <Button type="primary" onClick={openProviderCreate}>
                 新增 Provider
               </Button>

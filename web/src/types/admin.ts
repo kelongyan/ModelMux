@@ -390,3 +390,10 @@ export type AdminStatsTimelineResponse = {
   granularity: "1h" | "1d";
   timeline: AdminTimelinePoint[];
 };
+
+// AdminProvidersImportResponse 对应批量导入 provider 的响应。
+export type AdminProvidersImportResponse = {
+  ok: boolean;
+  imported: number;
+  skipped_ids?: string[];
+};

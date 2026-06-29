@@ -3,13 +3,12 @@ import { Button, Card, Empty, Popconfirm, Result, Skeleton, Space, Typography, m
 import { startTransition } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { activateProvider, deleteProvider, fetchDashboard, fetchSettings, triggerReload } from "../api/admin";
+import { activateProvider, deleteProvider, fetchDashboard, triggerReload } from "../api/admin";
 import { queryKeys } from "../api/query-keys";
-import { ProgressBar } from "../components/charts/progress-bar";
 import { formatClockShort } from "../components/format-time";
 import { HealthDot } from "../components/health-dot";
 import { useVisibilityRefetchInterval } from "../components/use-visibility-polling";
-import type { AdminDashboardResponse, AdminProviderCircuit, AdminProviderSummary, AdminStatsHealth } from "../types/admin";
+import type { AdminDashboardResponse, AdminProviderSummary } from "../types/admin";
 
 export function DashboardPage(): JSX.Element {
   const queryClient = useQueryClient();
@@ -21,12 +20,6 @@ export function DashboardPage(): JSX.Element {
     queryKey: queryKeys.dashboard,
     queryFn: fetchDashboard,
     refetchInterval: pollInterval,
-  });
-
-  const settingsQuery = useQuery({
-    queryKey: queryKeys.settings,
-    queryFn: fetchSettings,
-    staleTime: 60000,
   });
 
   const reloadMutation = useMutation({
@@ -107,7 +100,6 @@ export function DashboardPage(): JSX.Element {
 
   const dashboard = dashboardQuery.data;
   const lastUpdated = formatClockShort(dashboardQuery.dataUpdatedAt);
-  const circuitThreshold = settingsQuery.data?.settings.provider_circuit_failure_threshold ?? 3;
 
   return (
     <>
@@ -152,28 +144,6 @@ export function DashboardPage(): JSX.Element {
                   ? "还没有配置 provider，先去提供商页面新增上游。"
                   : `共 ${dashboard.provider_count} 个 Provider · 可用 ${dashboard.active_keys} 个 Key · 冷却 ${dashboard.cooling_keys} · 失效 ${dashboard.invalid_keys}`}
               </span>
-              <div className="dashboard-health-strip">
-                <div className="dashboard-health-signal">
-                  <span>熔断器</span>
-                  <ProgressBar
-                    value={dashboard.provider_circuit?.consecutive_failures ?? 0}
-                    max={circuitThreshold}
-                    color={circuitProgressColor(dashboard.provider_circuit)}
-                    label={formatCircuitState(dashboard.provider_circuit)}
-                    detail={`连续失败: ${dashboard.provider_circuit?.consecutive_failures ?? 0} / ${circuitThreshold}`}
-                  />
-                </div>
-                <div className="dashboard-health-signal">
-                  <span>Stats 队列</span>
-                  <ProgressBar
-                    value={dashboard.stats?.queue_depth ?? 0}
-                    max={dashboard.stats?.queue_capacity ?? 1000}
-                    color="var(--mm-primary)"
-                    label={formatStatsHealth(dashboard.stats)}
-                    detail={dashboard.stats?.enabled ? `${dashboard.stats.queue_depth} / ${dashboard.stats.queue_capacity} · 丢 ${dashboard.stats.dropped_records}` : undefined}
-                  />
-                </div>
-              </div>
             </div>
           </div>
         </Card>
@@ -274,12 +244,6 @@ function ProviderRow({ provider, activating, deleting, onActivate, onDelete, onO
   );
 }
 
-function circuitProgressColor(circuit: AdminProviderCircuit | undefined): string {
-  if (!circuit || circuit.state === "closed") return "var(--mm-success)";
-  if (circuit.state === "half_open") return "var(--mm-warning)";
-  return "var(--mm-error)";
-}
-
 function providerStateLabel(provider: AdminProviderSummary, tone: "active" | "cooling" | "invalid" | "idle"): string {
   if (provider.active) return "当前活跃";
   if (tone === "invalid") return "不可用";
@@ -315,19 +279,4 @@ function computeCardTone(provider: AdminProviderSummary): "active" | "cooling" |
   if (provider.active_keys === 0) return "cooling";
   if (provider.cooling_keys > 0 || provider.invalid_keys > 0) return provider.active ? "cooling" : "idle";
   return provider.active ? "active" : "idle";
-}
-
-function formatCircuitState(circuit: AdminProviderCircuit | undefined): string {
-  if (!circuit) return "未挂载";
-  switch (circuit.state) {
-    case "open": return `${circuit.consecutive_failures} 次失败`;
-    case "half_open": return "探测中";
-    case "closed": return "正常";
-    default: return circuit.state || "未知";
-  }
-}
-
-function formatStatsHealth(stats: AdminStatsHealth | undefined): string {
-  if (!stats?.enabled) return "未启用";
-  return `${stats.queue_depth}/${stats.queue_capacity} · 丢 ${stats.dropped_records}`;
 }
