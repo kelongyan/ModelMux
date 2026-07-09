@@ -1,4 +1,4 @@
-import { Alert, Button, Checkbox, Form, Input, Modal, Space, Table, Tag, Typography } from "antd";
+import { Alert, Button, Checkbox, Form, Input, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import type { FormInstance } from "antd/es/form";
 import type { AdminKeysPreviewResponse, AdminKeyTestAllResult } from "../../types/admin";
@@ -82,6 +82,26 @@ export function ProviderEditorModal({
           ]}
         >
           <Input placeholder="https://your-provider.example.com" />
+        </Form.Item>
+        <Form.Item
+          label="上游协议"
+          name="protocol"
+          extra="决定是否注入 OpenAI 专有的 stream_options.include_usage；Anthropic/Gemini 原生协议请勿选 openai。"
+        >
+          <Select
+            options={[
+              { value: "openai", label: "OpenAI 兼容 (默认)" },
+              { value: "anthropic", label: "Anthropic 原生 (/v1/messages)" },
+              { value: "gemini", label: "Gemini" },
+            ]}
+          />
+        </Form.Item>
+        <Form.Item
+          name="strip_tools"
+          valuePropName="checked"
+          extra="开启后会剥离请求中的 tools/functions 定义；若历史消息已包含 tool_calls 则自动跳过以避免上游 400。"
+        >
+          <Checkbox>剥离工具定义 (strip_tools)</Checkbox>
         </Form.Item>
         {state.mode === "create" ? (
           <Form.Item

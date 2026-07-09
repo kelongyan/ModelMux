@@ -13,7 +13,7 @@
   flex-direction: column;
   gap: 12px;
   padding: 28px 32px;
-  border-radius: 16px;
+  border-radius: var(--mm-radius-lg);
   background: var(--mm-surface-solid);
   border: 1px solid var(--mm-primary-border);
   box-shadow: var(--mm-shadow-soft);

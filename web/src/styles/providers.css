@@ -45,7 +45,7 @@
 
 .provider-key-id {
   margin-top: 3px;
-  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.76rem;
   line-height: 1.45;
   white-space: nowrap;
@@ -79,7 +79,7 @@
 }
 
 .key-stats-compact {
-  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.8rem;
   color: var(--mm-text-secondary);
   cursor: default;
@@ -128,7 +128,7 @@
   flex-direction: column;
   align-items: center;
   padding: 8px 6px;
-  border-radius: 8px;
+  border-radius: var(--mm-radius-sm);
   background: var(--mm-surface-muted);
   border: 1px solid var(--mm-border-muted);
   transition:
@@ -199,7 +199,7 @@
   align-items: center;
   gap: 20px;
   padding: 14px 18px;
-  border-radius: 12px;
+  border-radius: var(--mm-radius);
   border: 1px solid transparent;
   background: transparent;
   transition:
@@ -437,7 +437,7 @@
 .model-sync-metric {
   min-width: 0;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--mm-radius-sm);
   border: 1px solid var(--mm-border-muted);
   background: var(--mm-surface-muted);
 }
@@ -479,7 +479,7 @@
 }
 
 .model-sync-id {
-  font-family: "Cascadia Code", "Fira Code", "SF Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
   color: var(--mm-text-secondary);
   word-break: break-all;
@@ -553,7 +553,7 @@
 }
 
 .model-tag {
-  font-family: "Cascadia Code", "Fira Code", "SF Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.78rem;
   border-radius: 6px;
   border: 1px solid var(--mm-border-muted);

@@ -8,9 +8,11 @@ ModelMux is a local Go reverse proxy that fronts multiple model-API providers be
 
 ## Commands
 
-Default shell on this machine is **PowerShell** (Windows). The Makefile is usable on Windows too — only `make clean` relies on POSIX `rm`; `make build`, `make test`, `make run`, and the `build-{linux,windows,mac}` cross-compile targets just shell out to `go`.
+Default shell is **Git Bash** (Windows). Use Bash syntax for all commands — PowerShell-specific cmdlets like `Test-Path`, `Get-ChildItem`, `Select-Object` will fail. Windows paths in Bash use `/c/Users/...` format, not `C:\Users\...`.
 
-```powershell
+The Makefile works in Git Bash too — only `make clean` relies on POSIX `rm`; `make build`, `make test`, `make run`, and the `build-{linux,windows,mac}` cross-compile targets just shell out to `go`.
+
+```bash
 # Build (produces modelmux.exe)
 go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 
@@ -25,13 +27,14 @@ go test -race ./...
 go test ./pool/ -run TestRoundRobin -v
 
 # Frontend build (output goes to web/dist, which is embedded by web/embed.go)
-cd web; npm install; npm run build
+cd web && npm install && npm run build
 
 # Frontend dev with hot reload (proxies to running modelmux on :18081)
-cd web; npm run dev
+cd web && npm run dev
 
 # One-shot start: builds binary if missing, launches in background, opens console
-.\start.ps1
+# (Note: start.ps1 is PowerShell script, run with `powershell.exe .\start.ps1` from Bash)
+powershell.exe -File ./start.ps1
 ```
 
 The Go binary `embed`s `web/dist`, so a fresh checkout requires `npm run build` once before `go build` succeeds — `web/dist` is git-tracked but stale builds will silently ship old UI.

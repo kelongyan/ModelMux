@@ -1,6 +1,36 @@
+/* === FrexSansGB — 中文字体（GB2312 子集 · 静态多字重 · 自托管） === */
+@font-face {
+  font-family: "FrexSansGB";
+  src: url("../assets/fonts/FrexSansGB-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "FrexSansGB";
+  src: url("../assets/fonts/FrexSansGB-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "FrexSansGB";
+  src: url("../assets/fonts/FrexSansGB-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "FrexSansGB";
+  src: url("../assets/fonts/FrexSansGB-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
-  font-family: "Libre Baskerville", "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
+  font-family: "Inter Variable", "FrexSansGB", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.62;
   font-weight: 400;
@@ -8,167 +38,195 @@
   background: var(--mm-bg);
   color: var(--mm-text);
 
-  /* === Anthropic Warm Color System === */
+  /* === Aurora Console — Light Token Layer === */
 
   /* Canvas & Background */
-  --mm-bg: #eae6de;
-  --mm-body-bg: #eae6de;
+  --mm-bg: #F6F7FB;
+  --mm-body-bg: #F6F7FB;
+
+  /* Glass surfaces */
+  --mm-glass-bg: #FFFFFF;
+  --mm-glass-bg-strong: #FFFFFF;
+  --mm-glass-bg-subtle: rgba(255, 255, 255, 0.7);
+  --mm-glass-border: rgba(15, 23, 42, 0.10);
+  --mm-glass-border-strong: rgba(15, 23, 42, 0.16);
+  --mm-glass-highlight: rgba(255, 255, 255, 0.9);
 
   /* Surfaces — progressive elevation */
-  --mm-glass-bg: #ddd8ce;
-  --mm-glass-bg-strong: #e3ded4;
-  --mm-glass-bg-subtle: rgba(221, 216, 206, 0.55);
-  --mm-glass-border: rgba(180, 175, 168, 0.5);
-  --mm-glass-border-strong: rgba(165, 160, 153, 0.7);
-  --mm-glass-highlight: rgba(255, 255, 252, 0.4);
+  --mm-surface-muted: #EEF1F6;     /* L1: 内嵌区域 */
+  --mm-surface-soft: #F2F5FA;      /* L2 */
+  --mm-surface: #FFFFFF;           /* L3: 标准卡片 */
+  --mm-surface-strong: #FFFFFF;    /* L4 */
+  --mm-surface-solid: #FFFFFF;     /* L5 */
+  --mm-surface-active: #EEF0FF;    /* 极光软高亮 */
 
-  --mm-surface-muted: #ddd8ce;     /* L1: 最暗 — 内嵌区域 */
-  --mm-surface-soft: #e3ded4;      /* L2 */
-  --mm-surface: #ebe6dc;           /* L3: 标准卡片 */
-  --mm-surface-strong: #f0ebe2;    /* L4 */
-  --mm-surface-solid: #f5f2ea;     /* L5: 最亮 — 卡片背景 */
-  --mm-surface-active: #F0DDC5;
+  /* Text — 4-level hierarchy */
+  --mm-text: #0F172A;
+  --mm-text-secondary: #1E293B;
+  --mm-text-muted: #64748B;
+  --mm-text-subtle: #94A3B8;
+  --mm-text-inverted: #FFFFFF;
 
-  /* Text */
-  --mm-text: #111010;
-  --mm-text-secondary: #2d2a26;
-  --mm-text-muted: #6a665f;
-  --mm-text-subtle: #8e8a83;
-  --mm-text-inverted: #f5f2ea;
+  /* Borders & Dividers */
+  --mm-border: rgba(15, 23, 42, 0.12);
+  --mm-border-soft: rgba(15, 23, 42, 0.08);
+  --mm-border-muted: #E2E8F0;
+  --mm-divider: #E2E8F0;
 
-  /* Borders */
-  --mm-border: rgba(180, 175, 168, 0.8);
-  --mm-border-soft: rgba(180, 175, 168, 0.6);
-  --mm-border-muted: #c8c2b8;
-  --mm-divider: #c8c2b8;
-
-  /* Primary — Warm Terracotta */
-  --mm-primary: #b85f45;
-  --mm-primary-text: #a5523a;
-  --mm-primary-strong: #7a3a0f;
-  --mm-primary-soft: #F5E6D3;
-  --mm-primary-softer: #faf5ef;
-  --mm-primary-border: #e8cdb5;
-  --mm-primary-border-strong: #d4a88c;
+  /* Primary — Aurora Violet */
+  --mm-primary: #6A58E0;
+  --mm-primary-text: #5A48D0;
+  --mm-primary-strong: #4A38C0;
+  --mm-primary-soft: #EEF0FF;
+  --mm-primary-softer: #F5F6FF;
+  --mm-primary-border: #C8CCF5;
+  --mm-primary-border-strong: #B0B6F0;
 
   /* Semantic */
-  --mm-success: #5aab6a;
-  --mm-success-text: #3d8b50;
-  --mm-success-soft: #edf6ef;
-  --mm-warning: #d4a017;
-  --mm-warning-text: #b0861a;
-  --mm-warning-soft: #faf3e0;
-  --mm-error: #c44848;
-  --mm-error-text: #a83535;
-  --mm-error-soft: #f9eded;
+  --mm-success: #2DA44E;
+  --mm-success-text: #1E8E3E;
+  --mm-success-soft: #E7F6EC;
+  --mm-warning: #C77700;
+  --mm-warning-text: #A86500;
+  --mm-warning-soft: #FCF3E3;
+  --mm-error: #CF222E;
+  --mm-error-text: #B91C28;
+  --mm-error-soft: #FCEBEC;
 
-  /* Shadows — warm-toned, never pure black */
-  --mm-shadow: 0 4px 24px rgba(193, 165, 140, 0.12);
-  --mm-shadow-hover: 0 8px 32px rgba(193, 165, 140, 0.18);
-  --mm-shadow-soft: 0 2px 12px rgba(193, 165, 140, 0.08);
-  --mm-shadow-panel: 4px 0 20px rgba(193, 165, 140, 0.1);
-  --mm-shadow-inset: inset 0 1px 0 rgba(255, 255, 250, 0.5);
+  /* Shadows — cool-toned */
+  --mm-shadow: 0 4px 24px rgba(15, 23, 42, 0.08);
+  --mm-shadow-hover: 0 10px 32px rgba(15, 23, 42, 0.12);
+  --mm-shadow-soft: 0 2px 12px rgba(15, 23, 42, 0.06);
+  --mm-shadow-panel: 4px 0 20px rgba(15, 23, 42, 0.06);
+  --mm-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 
   /* Selection */
-  --mm-selection: rgba(200, 111, 85, 0.2);
+  --mm-selection: rgba(106, 88, 224, 0.18);
+
+  /* === Aurora Brand & Signal (cross-theme) === */
+  --mm-accent: #7C6CF0;
+  --mm-accent-strong: #6A58E0;
+  --mm-aurora: linear-gradient(120deg, #7C6CF0, #5B8DEF 45%, #39C5CF);
+  --mm-aurora-soft: linear-gradient(120deg, rgba(124, 108, 240, 0.14), rgba(57, 197, 207, 0.12));
+  --mm-signal: #FFB454;
+  --mm-signal-strong: #F59E2E;
+  --mm-signal-soft: rgba(255, 180, 84, 0.14);
+
+  /* Radii */
+  --mm-radius-sm: 6px;
+  --mm-radius: 10px;
+  --mm-radius-lg: 14px;
+  --mm-radius-pill: 999px;
+
+  /* Spacing scale (4px base) */
+  --mm-sp-1: 4px;
+  --mm-sp-2: 8px;
+  --mm-sp-3: 12px;
+  --mm-sp-4: 16px;
+  --mm-sp-5: 20px;
+  --mm-sp-6: 24px;
+  --mm-sp-7: 32px;
+  --mm-sp-8: 40px;
+  --mm-sp-9: 56px;
+  --mm-sp-10: 72px;
 
   /* Typography */
-  --font-display: "Times New Roman", Georgia, "Noto Serif SC", serif;
-  --font-body: "Libre Baskerville", "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
-  --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "Space Grotesk Variable", "FrexSansGB", "Noto Sans SC", system-ui, sans-serif;
+  --font-body: "Inter Variable", "FrexSansGB", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* === Animation System === */
 
   /* Easing Curves */
-  --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --ease-in-out: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.64, 0.04, 0.35, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Duration Scale */
-  --duration-fast: 100ms;
+  --duration-fast: 120ms;
   --duration-normal: 200ms;
-  --duration-slow: 300ms;
-  --duration-enter: 400ms;
+  --duration-slow: 320ms;
+  --duration-enter: 420ms;
   --duration-exit: 250ms;
   --duration-complex: 500ms;
 }
 
-/* === Dark Theme — 5-layer surface system === */
+/* === Dark Theme — Aurora Console deep-space ink === */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  /* Canvas — deepest background */
-  --mm-bg: #131312;
-  --mm-body-bg: #131312;
+  /* Canvas — deep space ink */
+  --mm-bg: #0B0D12;
+  --mm-body-bg: #0B0D12;
 
   /* Glass surfaces */
-  --mm-glass-bg: #1f1e1c;
-  --mm-glass-bg-strong: #262522;
-  --mm-glass-bg-subtle: rgba(26, 25, 22, 0.55);
-  --mm-glass-border: rgba(140, 138, 132, 0.18);
-  --mm-glass-border-strong: rgba(140, 138, 132, 0.25);
-  --mm-glass-highlight: rgba(255, 255, 250, 0.03);
+  --mm-glass-bg: #141821;
+  --mm-glass-bg-strong: #1A202C;
+  --mm-glass-bg-subtle: rgba(20, 24, 33, 0.6);
+  --mm-glass-border: rgba(124, 108, 240, 0.12);
+  --mm-glass-border-strong: rgba(124, 108, 240, 0.20);
+  --mm-glass-highlight: rgba(255, 255, 255, 0.04);
 
   /* Surfaces — progressive elevation */
-  --mm-surface-muted: #1a1917;     /* L1: 内嵌区域 */
-  --mm-surface-soft: #1f1e1c;      /* L2: 软背景 */
-  --mm-surface: #262522;           /* L3: 标准卡片 */
-  --mm-surface-strong: #2d2c28;    /* L4: 强调表面 */
-  --mm-surface-solid: #33312d;     /* L5: 最亮表面/头部 */
-  --mm-surface-active: rgba(196, 101, 74, 0.13);
+  --mm-surface-muted: #141821;     /* L1: 内嵌区域 */
+  --mm-surface-soft: #181D27;      /* L2 */
+  --mm-surface: #1E2430;           /* L3: 标准卡片 */
+  --mm-surface-strong: #262D3B;    /* L4 */
+  --mm-surface-solid: #2E3645;     /* L5 */
+  --mm-surface-active: rgba(124, 108, 240, 0.14);
 
   /* Text — 4-level hierarchy */
-  --mm-text: #f5f1e8;
-  --mm-text-secondary: #d8d3c8;
-  --mm-text-muted: #aba6a0;
-  --mm-text-subtle: #8a8680;
-  --mm-text-inverted: #131312;
+  --mm-text: #E6E9F0;
+  --mm-text-secondary: #AEB4C2;
+  --mm-text-muted: #7C8294;
+  --mm-text-subtle: #5A6072;
+  --mm-text-inverted: #0B0D12;
 
-  /* Borders & Dividers — visible but subtle */
-  --mm-border: rgba(140, 138, 132, 0.35);
-  --mm-border-soft: rgba(140, 138, 132, 0.25);
-  --mm-border-muted: #2a2926;
-  --mm-divider: #2a2926;
+  /* Borders & Dividers */
+  --mm-border: rgba(255, 255, 255, 0.08);
+  --mm-border-soft: rgba(255, 255, 255, 0.05);
+  --mm-border-muted: #2A3140;
+  --mm-divider: #2A3140;
 
-  /* Primary — Warm Terracotta */
-  --mm-primary: #c4654a;
-  --mm-primary-text: #d88568;
-  --mm-primary-strong: #e0a088;
-  --mm-primary-soft: rgba(196, 101, 74, 0.14);
-  --mm-primary-softer: rgba(180, 91, 65, 0.07);
-  --mm-primary-border: rgba(196, 101, 74, 0.25);
-  --mm-primary-border-strong: rgba(196, 101, 74, 0.40);
+  /* Primary — Aurora Violet */
+  --mm-primary: #7C6CF0;
+  --mm-primary-text: #9B8EF5;
+  --mm-primary-strong: #B3A8F8;
+  --mm-primary-soft: rgba(124, 108, 240, 0.14);
+  --mm-primary-softer: rgba(124, 108, 240, 0.07);
+  --mm-primary-border: rgba(124, 108, 240, 0.30);
+  --mm-primary-border-strong: rgba(124, 108, 240, 0.45);
 
   /* Semantic */
-  --mm-success: #5aab6a;
-  --mm-success-text: #7ed18e;
-  --mm-success-soft: rgba(90, 171, 106, 0.12);
-  --mm-warning: #d4a017;
-  --mm-warning-text: #e8b830;
-  --mm-warning-soft: rgba(212, 160, 23, 0.12);
-  --mm-error: #c44848;
-  --mm-error-text: #d97070;
-  --mm-error-soft: rgba(196, 72, 72, 0.12);
+  --mm-success: #3FB950;
+  --mm-success-text: #56D364;
+  --mm-success-soft: rgba(63, 185, 80, 0.14);
+  --mm-warning: #F5A623;
+  --mm-warning-text: #F7B955;
+  --mm-warning-soft: rgba(245, 166, 35, 0.14);
+  --mm-error: #F85149;
+  --mm-error-text: #FF7B72;
+  --mm-error-soft: rgba(248, 81, 73, 0.14);
 
-  /* Shadows — pure dark */
-  --mm-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
-  --mm-shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.35);
-  --mm-shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.18);
-  --mm-shadow-panel: 4px 0 20px rgba(0, 0, 0, 0.30);
-  --mm-shadow-inset: inset 0 1px 0 rgba(255, 255, 250, 0.03);
+  /* Shadows — cool deep */
+  --mm-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  --mm-shadow-hover: 0 10px 36px rgba(0, 0, 0, 0.55);
+  --mm-shadow-soft: 0 2px 12px rgba(0, 0, 0, 0.35);
+  --mm-shadow-panel: 4px 0 20px rgba(0, 0, 0, 0.40);
+  --mm-shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   /* Selection */
-  --mm-selection: rgba(212, 117, 90, 0.28);
+  --mm-selection: rgba(124, 108, 240, 0.30);
 
-  /* Extended tokens (previously orphaned) */
-  --mm-text-primary: #e89578;
-  --mm-surface-dark: #141412;
-  --mm-border-dark: #242321;
-  --mm-shadow-float: 0 4px 16px rgba(0, 0, 0, 0.35);
+  /* Extended tokens */
+  --mm-text-primary: #9B8EF5;
+  --mm-surface-dark: #0B0D12;
+  --mm-border-dark: #2A3140;
+  --mm-shadow-float: 0 4px 16px rgba(0, 0, 0, 0.50);
 
-  /* === Animation System (inherits from light) === */
+  /* Animation tokens inherit from :root */
 }
 
 * {

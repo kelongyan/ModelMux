@@ -34,6 +34,8 @@ export type AdminProviderSummary = {
   cooling_keys: number;
   invalid_keys: number;
   models: string[];
+  protocol?: string;
+  strip_tools?: boolean;
 };
 
 export type AdminProviderCircuit = {
@@ -83,6 +85,7 @@ export type AdminProviderDetailResponse = {
   keys: AdminKeyStatus[];
   models: string[];
   strip_tools: boolean;
+  protocol: string;
 };
 
 // AdminDashboardResponse 对应 dashboard 聚合接口的响应结构。
@@ -188,11 +191,15 @@ export type AdminProviderCreatePayload = {
   id: string;
   target_url: string;
   keys: string[];
+  protocol?: string;
+  strip_tools?: boolean;
 };
 
 // AdminProviderUpdatePayload 对应 provider 基础信息编辑结构。
 export type AdminProviderUpdatePayload = {
   target_url: string;
+  protocol?: string;
+  strip_tools?: boolean;
 };
 
 // AdminKeysPayload 对应 provider key 追加与替换动作。

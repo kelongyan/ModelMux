@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ModelMux · UI 重构样机 — 极光控制台 (Aurora Console)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* =========================================================
+   AURORA CONSOLE — Design Tokens (Light + Dark)
+   主推方向：深空观测台。冷静深色基底承载指标，极光渐变
+   (violet→cyan) 作科技主调，暖琥珀 (signal) 作人文信号色。
+   ========================================================= */
+:root[data-theme="dark"]{
+  --bg:#0B0D12; --bg-2:#0E1118;
+  --s1:#141821; --s2:#181D27; --s3:#1E2430; --s4:#262D3B; --s5:#2E3645;
+  --border:rgba(255,255,255,.08); --border-strong:rgba(255,255,255,.14);
+  --text:#E6E9F0; --text-2:#AEB4C2; --text-muted:#7C8294; --text-subtle:#5A6072;
+  --accent:#7C6CF0; --accent-2:#9B8CFF; --accent-strong:#6A58E0; --accent-soft:rgba(124,108,240,.14); --accent-glow:rgba(124,108,240,.45);
+  --signal:#FFB454; --signal-2:#FFC978; --signal-soft:rgba(255,180,84,.14); --signal-glow:rgba(255,180,84,.30);
+  --success:#3FB950; --success-t:#56D364; --success-s:rgba(63,185,80,.14);
+  --warning:#F5A623; --warning-s:rgba(245,166,35,.14);
+  --error:#F85149; --error-t:#FF7B72; --error-s:rgba(248,81,73,.14);
+  --info:#39C5CF; --info-s:rgba(57,197,207,.14);
+  --aurora:linear-gradient(120deg,#7C6CF0 0%,#5B8DEF 45%,#39C5CF 100%);
+  --aurora-soft:linear-gradient(120deg,rgba(124,108,240,.16),rgba(57,197,207,.12));
+  --shadow:0 4px 24px rgba(0,0,0,.45);
+  --shadow-hover:0 10px 36px rgba(0,0,0,.55);
+  --shadow-glow:0 0 0 1px rgba(124,108,240,.35),0 8px 30px rgba(124,108,240,.22);
+  --grid-line:rgba(255,255,255,.05);
+}
+:root[data-theme="light"]{
+  --bg:#F6F7FB; --bg-2:#FFFFFF;
+  --s1:#EEF1F6; --s2:#E7EBF2; --s3:#FFFFFF; --s4:#FFFFFF; --s5:#F2F4F8;
+  --border:rgba(15,23,42,.10); --border-strong:rgba(15,23,42,.16);
+  --text:#0F1729; --text-2:#3B4456; --text-muted:#6B7385; --text-subtle:#99A0B0;
+  --accent:#6A58E0; --accent-2:#7C6CF0; --accent-strong:#5847C7; --accent-soft:rgba(106,88,224,.12); --accent-glow:rgba(106,88,224,.30);
+  --signal:#E8920F; --signal-2:#FFB454; --signal-soft:rgba(232,146,15,.12); --signal-glow:rgba(232,146,15,.22);
+  --success:#2DA44E; --success-t:#2DA44E; --success-s:rgba(45,164,78,.12);
+  --warning:#C77700; --warning-s:rgba(199,119,0,.12);
+  --error:#CF222E; --error-t:#CF222E; --error-s:rgba(207,34,46,.10);
+  --info:#0B8C94; --info-s:rgba(11,140,148,.10);
+  --aurora:linear-gradient(120deg,#6A58E0 0%,#5B8DEF 45%,#0B8C94 100%);
+  --aurora-soft:linear-gradient(120deg,rgba(106,88,224,.10),rgba(11,140,148,.08));
+  --shadow:0 4px 20px rgba(15,23,42,.08);
+  --shadow-hover:0 10px 30px rgba(15,23,42,.12);
+  --shadow-glow:0 0 0 1px rgba(106,88,224,.30),0 8px 24px rgba(106,88,224,.14);
+  --grid-line:rgba(15,23,42,.05);
+}
+/* ---- Scale ---- */
+:root{
+  --font-display:"Space Grotesk","Noto Sans SC",system-ui,sans-serif;
+  --font-body:"Inter","Noto Sans SC",system-ui,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px;
+  --sp-7:32px; --sp-8:40px; --sp-9:56px; --sp-10:72px;
+  --r-sm:6px; --r:10px; --r-lg:14px; --r-pill:999px;
+  --e-out:cubic-bezier(.22,1,.36,1); --e-spring:cubic-bezier(.34,1.56,.64,1); --e-smooth:cubic-bezier(.4,0,.2,1);
+  --d-fast:120ms; --d-norm:200ms; --d-slow:320ms; --d-enter:420ms;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px}
+body{
+  font-family:var(--font-body); background:var(--bg); color:var(--text);
+  line-height:1.6; -webkit-font-smoothing:antialiased;
+  transition:background var(--d-slow) var(--e-smooth),color var(--d-slow) var(--e-smooth);
+  background-image:radial-gradient(900px 500px at 88% -8%,var(--aurora-soft),transparent 60%);
+  background-attachment:fixed;
+}
+::selection{background:var(--accent-soft)}
+a{color:inherit;text-decoration:none}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1180px;margin:0 auto;padding:0 var(--sp-6)}
+
+/* ---- Top bar ---- */
+.topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:var(--sp-5);
+  padding:14px var(--sp-6);background:color-mix(in srgb,var(--bg) 82%,transparent);
+  backdrop-filter:blur(14px);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:700;font-size:1.05rem;letter-spacing:-.01em}
+.logo{width:30px;height:30px;border-radius:9px;background:var(--aurora);position:relative;box-shadow:0 0 18px var(--accent-glow);flex:0 0 auto}
+.logo::after{content:"";position:absolute;inset:6px;border-radius:5px;background:var(--bg);opacity:.86}
+.logo::before{content:"";position:absolute;inset:11px;border-radius:3px;background:var(--aurora)}
+.nav{display:flex;gap:4px;margin-left:var(--sp-5)}
+.nav a{padding:7px 13px;border-radius:var(--r-sm);color:var(--text-muted);font-size:.85rem;font-weight:500;transition:.18s}
+.nav a:hover{color:var(--text);background:var(--s2)}
+.nav a.active{color:var(--text);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-body);font-weight:600;font-size:.85rem;
+  padding:9px 16px;border-radius:var(--r-sm);border:1px solid var(--border-strong);background:var(--s3);color:var(--text);
+  cursor:pointer;transition:transform var(--d-fast) var(--e-spring),background var(--d-norm) var(--e-out),box-shadow var(--d-norm) var(--e-out),border-color var(--d-norm)}
+.btn:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:var(--shadow-glow)}
+.btn:active{transform:scale(.96)}
+.btn.primary{background:var(--aurora);border:none;color:#fff;box-shadow:0 6px 20px var(--accent-glow)}
+.btn.primary:hover{box-shadow:0 8px 26px var(--accent-glow);transform:translateY(-1px)}
+.btn.ghost{background:transparent}
+
+/* ---- Hero / concept ---- */
+.hero{padding:var(--sp-10) 0 var(--sp-9)}
+.eyebrow{font-family:var(--font-mono);font-size:.75rem;letter-spacing:.18em;text-transform:uppercase;color:var(--signal);margin-bottom:var(--sp-4)}
+h1{font-family:var(--font-display);font-weight:700;font-size:2.6rem;line-height:1.08;letter-spacing:-.03em}
+.lede{margin-top:var(--sp-5);max-width:640px;color:var(--text-2);font-size:1.05rem}
+.tag-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:var(--sp-6)}
+.chip{font-family:var(--font-mono);font-size:.72rem;padding:5px 11px;border-radius:var(--r-pill);border:1px solid var(--border-strong);color:var(--text-2);background:var(--s2)}
+
+/* ---- Direction cards ---- */
+.dirs{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-5);margin-top:var(--sp-8)}
+.dir{border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-6);background:var(--s2);position:relative;overflow:hidden;transition:.25s}
+.dir:hover{transform:translateY(-3px);border-color:var(--border-strong);box-shadow:var(--shadow)}
+.dir.reco{border-color:var(--accent);box-shadow:var(--shadow-glow)}
+.dir .swatch{height:54px;border-radius:var(--r);margin-bottom:var(--sp-4)}
+.dir h3{font-family:var(--font-display);font-size:1.1rem;font-weight:600;margin-bottom:6px}
+.dir p{color:var(--text-muted);font-size:.85rem}
+.reco-badge{position:absolute;top:14px;right:14px;font-family:var(--font-mono);font-size:.65rem;letter-spacing:.1em;
+  background:var(--aurora);color:#fff;padding:3px 9px;border-radius:var(--r-pill)}
+
+/* ---- Section ---- */
+section{padding:var(--sp-9) 0;border-top:1px solid var(--border)}
+.sec-head{margin-bottom:var(--sp-7)}
+.sec-head .k{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-2)}
+.sec-head h2{font-family:var(--font-display);font-size:1.7rem;font-weight:600;letter-spacing:-.02em;margin-top:6px}
+.sec-head p{color:var(--text-muted);margin-top:8px;max-width:680px}
+
+/* ---- Foundation grids ---- */
+.grid{display:grid;gap:var(--sp-5)}
+.cols-2{grid-template-columns:1fr 1fr}
+.cols-3{grid-template-columns:repeat(3,1fr)}
+.cols-4{grid-template-columns:repeat(4,1fr)}
+.panel{background:var(--s3);border:1px solid var(--border);border-radius:var(--r-lg);padding:var(--sp-6)}
+.panel h4{font-family:var(--font-display);font-size:.95rem;font-weight:600;margin-bottom:var(--sp-4);color:var(--text)}
+.swatch-row{display:flex;flex-direction:column;gap:8px}
+.sw{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:var(--r-sm);background:var(--s2)}
+.sw .box{width:34px;height:34px;border-radius:7px;border:1px solid var(--border)}
+.sw .meta{display:flex;flex-direction:column;line-height:1.25}
+.sw .nm{font-size:.8rem;font-weight:600}
+.sw .vl{font-family:var(--font-mono);font-size:.72rem;color:var(--text-muted)}
+.type-demo .line{margin-bottom:var(--sp-4)}
+.type-demo .t{font-family:var(--font-display);color:var(--text)}
+.type-demo .lbl{font-family:var(--font-mono);font-size:.68rem;color:var(--text-subtle);letter-spacing:.05em}
+.radius-demo{display:flex;gap:var(--sp-4);align-items:flex-end}
+.rad{display:flex;flex-direction:column;align-items:center;gap:8px;font-family:var(--font-mono);font-size:.7rem;color:var(--text-muted)}
+.rad .box{width:60px;height:60px;background:var(--accent-soft);border:1px solid var(--accent)}
+.spacing-demo .bar{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.spacing-demo .blk{background:var(--aurora);border-radius:3px;height:18px}
+.spacing-demo .lbl{font-family:var(--font-mono);font-size:.7rem;color:var(--text-muted)}
+
+/* ---- Dashboard screen ---- */
+.screen{background:var(--s2);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+.screen-bar{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--s3)}
+.screen-bar .dots{display:flex;gap:6px}
+.screen-bar .dots i{width:10px;height:10px;border-radius:50%;background:var(--s5)}
+.screen-bar .url{font-family:var(--font-mono);font-size:.72rem;color:var(--text-muted)}
+.screen-body{padding:var(--sp-6)}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-4);margin-bottom:var(--sp-6)}
+.kpi{background:var(--s3);border:1px solid var(--border);border-radius:var(--r);padding:var(--sp-5);position:relative;overflow:hidden}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
+.kpi.warm::before{background:var(--signal)}
+.kpi .k{font-size:.74rem;color:var(--text-muted);font-weight:500;letter-spacing:.02em}
+.kpi .v{font-family:var(--font-mono);font-size:1.7rem;font-weight:700;margin-top:6px;letter-spacing:-.02em}
+.kpi .d{font-size:.74rem;margin-top:4px;color:var(--success-t)}
+.kpi .d.down{color:var(--error-t)}
+.chart-card{background:var(--s3);border:1px solid var(--border);border-radius:var(--r);padding:var(--sp-5);margin-bottom:var(--sp-6)}
+.chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-4)}
+.chart-head h3{font-family:var(--font-display);font-size:1rem;font-weight:600}
+.seg{display:flex;gap:2px;background:var(--s1);border-radius:var(--r-sm);padding:3px}
+.seg button{border:none;background:transparent;color:var(--text-muted);font-family:var(--font-body);font-size:.74rem;font-weight:600;padding:5px 11px;border-radius:5px;cursor:pointer}
+.seg button.on{background:var(--accent-soft);color:var(--accent-2)}
+.two{display:grid;grid-template-columns:1.4fr 1fr;gap:var(--sp-5)}
+.ev{background:var(--s3);border:1px solid var(--border);border-radius:var(--r);padding:var(--sp-5)}
+.ev h3{font-family:var(--font-display);font-size:.95rem;font-weight:600;margin-bottom:var(--sp-3)}
+.ev-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+.ev-row:last-child{border:none}
+.dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.dot.ok{background:var(--success);box-shadow:0 0 8px var(--success-s)}
+.dot.warn{background:var(--warning)}
+.dot.err{background:var(--error);box-shadow:0 0 8px var(--error-s)}
+.ev-row .msg{font-size:.82rem;flex:1}
+.ev-row .tm{font-family:var(--font-mono);font-size:.7rem;color:var(--text-subtle)}
+
+/* ---- Providers table ---- */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);font-weight:600;padding:11px 14px;border-bottom:1px solid var(--border)}
+.tbl td{padding:13px 14px;border-bottom:1px solid var(--border);font-size:.85rem}
+.tbl tbody tr{transition:background var(--d-norm) var(--e-out)}
+.tbl tbody tr:hover{background:var(--accent-soft)}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:var(--r-pill);font-family:var(--font-mono)}
+.badge.active{background:var(--success-s);color:var(--success-t)}
+.badge.cool{background:var(--warning-s);color:var(--warning)}
+.badge.inv{background:var(--error-s);color:var(--error-t)}
+.kp{display:flex;gap:3px;align-items:center}
+.kp i{width:9px;height:9px;border-radius:2px;background:var(--success)}
+.kp i.c{background:var(--warning)}
+.kp i.i{background:var(--error)}
+
+/* ---- Motion demos ---- */
+.demo-row{display:flex;gap:var(--sp-4);flex-wrap:wrap;align-items:center}
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:.82rem;color:var(--text-2)}
+.toggle .tk{width:42px;height:24px;border-radius:var(--r-pill);background:var(--s5);position:relative;transition:.2s}
+.toggle .tk::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--text-muted);transition:.25s var(--e-spring)}
+.toggle.on .tk{background:var(--accent)}
+.toggle.on .tk::after{left:21px;background:#fff}
+.skeleton{height:14px;border-radius:5px;background:linear-gradient(110deg,var(--s1) 30%,var(--s3) 50%,var(--s1) 70%);background-size:200% 100%;animation:shimmer 1.6s ease-in-out infinite}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.kpi-flash{animation:vf .6s var(--e-spring)}
+@keyframes vf{0%{transform:scale(1)}30%{transform:scale(1.06);color:var(--signal)}100%{transform:scale(1)}}
+.glow-pulse{animation:gp 1.4s var(--e-out) infinite}
+@keyframes gp{0%,100%{box-shadow:0 0 0 0 var(--accent-glow)}50%{box-shadow:0 0 0 8px transparent}}
+.reveal{opacity:0;transform:translateY(10px);animation:rv var(--d-enter) var(--e-out) forwards}
+@keyframes rv{to{opacity:1;transform:none}}
+footer{padding:var(--sp-9) 0 var(--sp-10);color:var(--text-subtle);font-size:.8rem;text-align:center;border-top:1px solid var(--border)}
+.hide{display:none!important}
+@media(max-width:900px){.dirs,.cols-3,.cols-4,.kpis,.two{grid-template-columns:1fr}.cols-2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="logo"></span>ModelMux</div>
+  <nav class="nav">
+    <a href="#concept" class="active">方案</a>
+    <a href="#foundation">设计令牌</a>
+    <a href="#dashboard">Dashboard</a>
+    <a href="#providers">Providers</a>
+    <a href="#motion">动效</a>
+  </nav>
+  <div class="spacer"></div>
+  <button class="btn ghost" id="themeBtn" onclick="toggleTheme()">◐ 切换主题</button>
+</div>
+
+<div class="wrap">
+
+  <!-- CONCEPT -->
+  <section id="concept" class="hero" style="border:none">
+    <div class="eyebrow">UI Redesign · Proposal v1</div>
+    <h1>极光控制台<br>Aurora Console</h1>
+    <p class="lede">把管理后台从"暖色编辑部"重构为<strong>深空观测台</strong>：冷静深色基底承载海量指标，极光渐变（violet→cyan）作科技主调，一束暖琥珀信号色点亮关键操作与告警 —— 科技感与人文温度并存，彻底脱离 Anthropic 的米色衬线气质。</p>
+    <div class="tag-row">
+      <span class="chip">字体: Space Grotesk / Inter / JetBrains Mono</span>
+      <span class="chip">主色: 极光紫蓝渐变</span>
+      <span class="chip">信号色: 暖琥珀</span>
+      <span class="chip">半径: 10px 精准圆角</span>
+      <span class="chip">动效: 弹性 + 极光漂移</span>
+    </div>
+
+    <div class="dirs">
+      <div class="dir reco">
+        <span class="reco-badge">主推</span>
+        <div class="swatch" style="background:linear-gradient(120deg,#7C6CF0,#39C5CF)"></div>
+        <h3>A · 极光控制台</h3>
+        <p>深色观测台，极光渐变 + 暖琥珀信号色。科技基底 + 人文高光，最契合你的偏好。</p>
+      </div>
+      <div class="dir">
+        <div class="swatch" style="background:linear-gradient(120deg,#0B8C94,#39C5CF)"></div>
+        <h3>B · 青蓝实验室</h3>
+        <p>单色青蓝体系，极简精准，偏"冷科技"。人文温度较弱，适合纯工程审美。</p>
+      </div>
+      <div class="dir">
+        <div class="swatch" style="background:linear-gradient(120deg,#E8920F,#F5A623)"></div>
+        <h3>C · 暖阳熔炉</h3>
+        <p>深色 + 饱和暖铜/熔金主色，温度优先。依然暗色，但更"热"，适合强品牌感。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOUNDATION -->
+  <section id="foundation">
+    <div class="sec-head">
+      <div class="k">Foundation</div>
+      <h2>设计令牌 (Design Tokens)</h2>
+      <p>所有界面由以下令牌驱动。当前预览为暗色，点击右上"切换主题"查看亮色变体。</p>
+    </div>
+
+    <div class="grid cols-2">
+      <div class="panel">
+        <h4>配色 · 品牌与信号</h4>
+        <div class="swatch-row">
+          <div class="sw"><span class="box" style="background:var(--accent)"></span><span class="meta"><span class="nm">Accent / 极光紫</span><span class="vl" id="c-accent"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--signal)"></span><span class="meta"><span class="nm">Signal / 暖琥珀</span><span class="vl" id="c-signal"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--info)"></span><span class="meta"><span class="nm">Info / 青</span><span class="vl" id="c-info"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--success)"></span><span class="meta"><span class="nm">Success</span><span class="vl" id="c-success"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--warning)"></span><span class="meta"><span class="nm">Warning</span><span class="vl" id="c-warning"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--error)"></span><span class="meta"><span class="nm">Error</span><span class="vl" id="c-error"></span></span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h4>配色 · 表面层级 (5 级)</h4>
+        <div class="swatch-row">
+          <div class="sw"><span class="box" style="background:var(--bg)"></span><span class="meta"><span class="nm">Canvas 画布</span><span class="vl" id="s-bg"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--s1)"></span><span class="meta"><span class="nm">L1 内嵌</span><span class="vl" id="s-1"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--s2)"></span><span class="meta"><span class="nm">L2 软背景</span><span class="vl" id="s-2"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--s3)"></span><span class="meta"><span class="nm">L3 标准卡片</span><span class="vl" id="s-3"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--s4)"></span><span class="meta"><span class="nm">L4 强调表面</span><span class="vl" id="s-4"></span></span></div>
+          <div class="sw"><span class="box" style="background:var(--s5)"></span><span class="meta"><span class="nm">L5 头部</span><span class="vl" id="s-5"></span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:var(--sp-5)">
+      <div class="panel type-demo">
+        <h4>字体与字阶</h4>
+        <div class="line"><div class="lbl">Display / 页面标题 28·600</div><div class="t" style="font-size:1.75rem;font-weight:600;letter-spacing:-.02em">ModelMux 控制台</div></div>
+        <div class="line"><div class="lbl">Section / 区块 20·600</div><div class="t" style="font-size:1.25rem;font-weight:600">请求与吞吐</div></div>
+        <div class="line"><div class="lbl">Body / 正文 14·400</div><div class="t" style="font-size:.875rem;color:var(--text-2)">实时观测各 provider 的 key 健康度与流量分布。</div></div>
+        <div class="line"><div class="lbl">Mono / 数值 700 tabular</div><div class="mono" style="font-size:1.4rem;font-weight:700">12,480 · 99.2%</div></div>
+        <div class="line"><div class="lbl">说明: 衬线标题 → 几何无衬线，彻底去"编辑部"味</div></div>
+      </div>
+
+      <div class="panel">
+        <h4>圆角 & 间距</h4>
+        <div class="radius-demo" style="margin-bottom:var(--sp-5)">
+          <div class="rad"><span class="box" style="border-radius:6px"></span>6 sm</div>
+          <div class="rad"><span class="box" style="border-radius:10px"></span>10</div>
+          <div class="rad"><span class="box" style="border-radius:14px"></span>14 lg</div>
+          <div class="rad"><span class="box" style="border-radius:999px"></span>pill</div>
+        </div>
+        <div class="spacing-demo">
+          <div class="bar"><span class="blk" style="width:8px"></span><span class="lbl">4 / 8</span></div>
+          <div class="bar"><span class="blk" style="width:16px"></span><span class="lbl">12 / 16</span></div>
+          <div class="bar"><span class="blk" style="width:24px"></span><span class="lbl">20 / 24</span></div>
+          <div class="bar"><span class="blk" style="width:40px"></span><span class="lbl">32 / 40</span></div>
+          <div class="bar"><span class="blk" style="width:56px"></span><span class="lbl">56 / 72</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section id="dashboard">
+    <div class="sec-head">
+      <div class="k">Screen · 01</div>
+      <h2>Dashboard · 观测台首页</h2>
+      <p>KPI 卡用等宽字体强调数值；折线区用极光渐变描边；右侧事件流实时滚动。</p>
+    </div>
+    <div class="screen reveal">
+      <div class="screen-bar">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="url">modelmux.local/console/#/dashboard</span>
+        <div style="flex:1"></div>
+        <span class="badge active"><span class="dot ok"></span>运行中</span>
+      </div>
+      <div class="screen-body">
+        <div class="kpis">
+          <div class="kpi"><div class="k">总请求 (24h)</div><div class="v" id="k1">128,402</div><div class="d">▲ 12.4%</div></div>
+          <div class="kpi"><div class="k">成功率</div><div class="v">99.21%</div><div class="d">▲ 0.3%</div></div>
+          <div class="kpi warm"><div class="k">平均延迟</div><div class="v">842<span style="font-size:1rem;color:var(--text-muted)">ms</span></div><div class="d down">▲ 38ms</div></div>
+          <div class="kpi"><div class="k">活跃 Key</div><div class="v">38/42</div><div class="d">4 冷却中</div></div>
+        </div>
+
+        <div class="two">
+          <div class="chart-card">
+            <div class="chart-head">
+              <h3>请求吞吐 (req/min)</h3>
+              <div class="seg"><button class="on">1h</button><button>24h</button><button>7d</button></div>
+            </div>
+            <svg viewBox="0 0 520 180" width="100%" height="180" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="ag" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7C6CF0"/><stop offset="1" stop-color="#39C5CF"/></linearGradient>
+                <linearGradient id="af" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(124,108,240,.35)"/><stop offset="1" stop-color="rgba(124,108,240,0)"/></linearGradient>
+              </defs>
+              <g stroke="var(--grid-line)" stroke-width="1">
+                <line x1="0" y1="45" x2="520" y2="45"/><line x1="0" y1="90" x2="520" y2="90"/><line x1="0" y1="135" x2="520" y2="135"/>
+              </g>
+              <path d="M0,140 L52,120 L104,128 L156,92 L208,100 L260,64 L312,80 L364,48 L416,60 L468,30 L520,42 L520,180 L0,180 Z" fill="url(#af)"/>
+              <path d="M0,140 L52,120 L104,128 L156,92 L208,100 L260,64 L312,80 L364,48 L416,60 L468,30 L520,42" fill="none" stroke="url(#ag)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="ev">
+            <h3>实时事件</h3>
+            <div class="ev-row"><span class="dot ok"></span><span class="msg">provider openai 切换 key</span><span class="tm">12:01:04</span></div>
+            <div class="ev-row"><span class="dot warn"></span><span class="msg">key ****3f2 进入冷却</span><span class="tm">12:00:51</span></div>
+            <div class="ev-row"><span class="dot ok"></span><span class="msg">provider 熔断恢复 half-open</span><span class="tm">11:59:38</span></div>
+            <div class="ev-row"><span class="dot err"></span><span class="msg">key ****9a1 配额耗尽</span><span class="tm">11:58:12</span></div>
+            <div class="ev-row"><span class="dot ok"></span><span class="msg">配置热重载成功</span><span class="tm">11:55:00</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROVIDERS -->
+  <section id="providers">
+    <div class="sec-head">
+      <div class="k">Screen · 02</div>
+      <h2>Providers · Key 池管理</h2>
+      <p>表格行 hover 用极光软高亮；状态徽章与 key 池小方块沿用语义色 + 信号色。</p>
+    </div>
+    <div class="screen reveal">
+      <div class="screen-bar">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <span class="url">modelmux.local/console/#/providers</span>
+        <div style="flex:1"></div>
+        <button class="btn primary" style="padding:6px 14px">+ 新增 Provider</button>
+      </div>
+      <div class="screen-body">
+        <table class="tbl">
+          <thead><tr><th>Provider</th><th>Target</th><th>Keys</th><th>健康</th><th>状态</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><strong>openai</strong></td><td class="mono" style="color:var(--text-muted)">api.openai.com</td><td><div class="kp"><i></i><i></i><i></i><i></i><i class="c"></i><i class="i"></i></div></td><td>94%</td><td><span class="badge active"><span class="dot ok"></span>active</span></td><td><a style="color:var(--accent-2);font-size:.8rem">管理 →</a></td></tr>
+            <tr><td><strong>anthropic</strong></td><td class="mono" style="color:var(--text-muted)">api.anthropic.com</td><td><div class="kp"><i></i><i></i><i></i><i></i><i></i></div></td><td>100%</td><td><span class="badge active"><span class="dot ok"></span>active</span></td><td><a style="color:var(--accent-2);font-size:.8rem">管理 →</a></td></tr>
+            <tr><td><strong>local-llm</strong></td><td class="mono" style="color:var(--text-muted)">10.0.0.12:8000</td><td><div class="kp"><i></i><i class="c"></i><i class="c"></i></div></td><td>62%</td><td><span class="badge cool"><span class="dot warn"></span>cooling</span></td><td><a style="color:var(--accent-2);font-size:.8rem">管理 →</a></td></tr>
+            <tr><td><strong>azure-gpt</strong></td><td class="mono" style="color:var(--text-muted)">res.openai.azure.com</td><td><div class="kp"><i class="i"></i><i class="i"></i></div></td><td>0%</td><td><span class="badge inv"><span class="dot err"></span>invalid</span></td><td><a style="color:var(--accent-2);font-size:.8rem">管理 →</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- MOTION -->
+  <section id="motion">
+    <div class="sec-head">
+      <div class="k">Motion & Components</div>
+      <h2>动效与组件规范</h2>
+      <p>弹性入场 + 极光漂移 + 数值闪动 + 骨架微光 + 信号脉冲；尊重 prefers-reduced-motion。</p>
+    </div>
+    <div class="grid cols-2">
+      <div class="panel">
+        <h4>按钮</h4>
+        <div class="demo-row" style="margin-bottom:var(--sp-5)">
+          <button class="btn primary">主操作</button>
+          <button class="btn">次操作</button>
+          <button class="btn ghost">幽灵</button>
+        </div>
+        <h4>开关</h4>
+        <div class="demo-row" style="margin-top:var(--sp-3)">
+          <span class="toggle on" onclick="this.classList.toggle('on')"><span class="tk"></span>启用统计</span>
+          <span class="toggle" onclick="this.classList.toggle('on')"><span class="tk"></span>自动摘除</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h4>数值闪动 & 信号脉冲</h4>
+        <div class="demo-row" style="margin-bottom:var(--sp-5)">
+          <span class="kpi-flash mono" style="font-size:1.6rem;font-weight:700" id="flash">99.21%</span>
+          <span class="badge active glow-pulse"><span class="dot ok"></span>live</span>
+        </div>
+        <h4>骨架屏微光</h4>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:var(--sp-3)">
+          <div class="skeleton" style="width:100%"></div>
+          <div class="skeleton" style="width:80%"></div>
+          <div class="skeleton" style="width:60%"></div>
+        </div>
+        <button class="btn ghost" style="margin-top:var(--sp-5)" onclick="document.getElementById('flash').classList.remove('kpi-flash');void document.getElementById('flash').offsetWidth;document.getElementById('flash').classList.add('kpi-flash')">▶ 重放闪动</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    ModelMux · Aurora Console 设计样机 v1 · 用于评审。确认方向后我将按此令牌体系重构 web/src/styles 与组件。
+  </footer>
+</div>
+
+<script>
+function toggleTheme(){
+  const r=document.documentElement;
+  r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  paintTokens();
+}
+function paintTokens(){
+  const cs=getComputedStyle(document.documentElement);
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  set('c-accent',cs.getPropertyValue('--accent').trim());
+  set('c-signal',cs.getPropertyValue('--signal').trim());
+  set('c-info',cs.getPropertyValue('--info').trim());
+  set('c-success',cs.getPropertyValue('--success').trim());
+  set('c-warning',cs.getPropertyValue('--warning').trim());
+  set('c-error',cs.getPropertyValue('--error').trim());
+  set('s-bg',cs.getPropertyValue('--bg').trim());
+  set('s-1',cs.getPropertyValue('--s1').trim());
+  set('s-2',cs.getPropertyValue('--s2').trim());
+  set('s-3',cs.getPropertyValue('--s3').trim());
+  set('s-4',cs.getPropertyValue('--s4').trim());
+  set('s-5',cs.getPropertyValue('--s5').trim());
+}
+paintTokens();
+// KPI count-up
+window.addEventListener('load',()=>{
+  const el=document.getElementById('k1');const target=128402;let cur=0;
+  const step=Math.ceil(target/40);
+  const t=setInterval(()=>{cur+=step;if(cur>=target){cur=target;clearInterval(t);}el.textContent=cur.toLocaleString();},22);
+});
+// smooth nav
+document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click',e=>{
+  e.preventDefault();
+  document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('active'));
+  a.classList.add('active');
+  const t=document.querySelector(a.getAttribute('href'));
+  if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+}));
+</script>
+</body>
+</html>

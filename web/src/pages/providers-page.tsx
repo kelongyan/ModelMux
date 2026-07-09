@@ -152,8 +152,8 @@ export function ProvidersPage(): JSX.Element {
   });
 
   const updateProviderMutation = useMutation({
-    mutationFn: async (payload: { id: string; target_url: string }) =>
-      updateProvider(payload.id, { target_url: payload.target_url }),
+    mutationFn: async (payload: { id: string; target_url: string; protocol: string; strip_tools: boolean }) =>
+      updateProvider(payload.id, { target_url: payload.target_url, protocol: payload.protocol, strip_tools: payload.strip_tools }),
     onSuccess: async (_, variables) => {
       messageApi.success("已更新 provider");
       setProviderModal({ open: false, mode: "create" });
@@ -553,12 +553,18 @@ export function ProvidersPage(): JSX.Element {
   }
 
   function openProviderCreate() {
-    providerForm.setFieldsValue({ id: "", target_url: "", keys_text: "" });
+    providerForm.setFieldsValue({ id: "", target_url: "", keys_text: "", protocol: "openai", strip_tools: false });
     setProviderModal({ open: true, mode: "create" });
   }
 
   function openProviderEdit(provider: AdminProviderSummary) {
-    providerForm.setFieldsValue({ id: provider.id, target_url: provider.target_url, keys_text: "" });
+    providerForm.setFieldsValue({
+      id: provider.id,
+      target_url: provider.target_url,
+      keys_text: "",
+      protocol: provider.protocol || "openai",
+      strip_tools: provider.strip_tools ?? false,
+    });
     setProviderModal({ open: true, mode: "edit", provider });
   }
 
@@ -663,6 +669,8 @@ export function ProvidersPage(): JSX.Element {
         id: values.id.trim(),
         target_url: values.target_url.trim(),
         keys,
+        protocol: values.protocol,
+        strip_tools: values.strip_tools,
       });
       return;
     }
@@ -672,7 +680,12 @@ export function ProvidersPage(): JSX.Element {
       messageApi.error("缺少 provider id");
       return;
     }
-    await updateProviderMutation.mutateAsync({ id: providerID, target_url: values.target_url.trim() });
+    await updateProviderMutation.mutateAsync({
+      id: providerID,
+      target_url: values.target_url.trim(),
+      protocol: values.protocol,
+      strip_tools: values.strip_tools,
+    });
   }
 
   async function submitKeyForm(values: KeyFormValues) {

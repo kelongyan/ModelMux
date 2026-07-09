@@ -8,51 +8,51 @@ export function createAppTheme(mode: AppThemeMode): ThemeConfig {
   return {
     algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
     token: {
-      /* === Anthropic Warm Color Palette === */
-      colorPrimary: dark ? "#c4654a" : "#b85f45",
-      colorInfo: dark ? "#c4654a" : "#b85f45",
-      colorSuccess: "#5aab6a",
-      colorWarning: "#d4a017",
-      colorError: "#c44848",
-      colorText: dark ? "#f5f1e8" : "#111010",
-      colorTextSecondary: dark ? "#d8d3c8" : "#2d2a26",
-      colorBorder: dark ? "#2a2926" : "#c8c2b8",
-      colorBorderSecondary: dark ? "#2a2926" : "#c8c2b8",
-      colorBgBase: dark ? "#131312" : "#eae6de",
-      colorBgLayout: dark ? "#131312" : "#eae6de",
-      colorBgContainer: dark ? "#33312d" : "#f5f2ea",
+      /* === Aurora Console Palette (single source of truth: base.css) === */
+      colorPrimary: dark ? "#7C6CF0" : "#6A58E0",
+      colorInfo: dark ? "#7C6CF0" : "#6A58E0",
+      colorSuccess: dark ? "#3FB950" : "#2DA44E",
+      colorWarning: dark ? "#F5A623" : "#C77700",
+      colorError: dark ? "#F85149" : "#CF222E",
+      colorText: dark ? "#E6E9F0" : "#0F172A",
+      colorTextSecondary: dark ? "#AEB4C2" : "#1E293B",
+      colorBorder: dark ? "#2A3140" : "#E2E8F0",
+      colorBorderSecondary: dark ? "#2A3140" : "#E2E8F0",
+      colorBgBase: dark ? "#0B0D12" : "#F6F7FB",
+      colorBgLayout: dark ? "#0B0D12" : "#F6F7FB",
+      colorBgContainer: dark ? "#1E2430" : "#FFFFFF",
 
-      /* === Anthropic Rounded Corners === */
-      borderRadius: 12,
-      borderRadiusLG: 16,
-      borderRadiusSM: 8,
-      borderRadiusXS: 6,
+      /* === Aurora radii === */
+      borderRadius: 10,
+      borderRadiusLG: 14,
+      borderRadiusSM: 6,
+      borderRadiusXS: 4,
 
       /* === Controls === */
-      controlHeight: 42,
-      controlHeightSM: 34,
-      controlHeightLG: 48,
+      controlHeight: 40,
+      controlHeightSM: 32,
+      controlHeightLG: 46,
 
       /* === Typography === */
       fontSize: 15,
       fontSizeSM: 13,
-      lineHeight: 1.62,
-      padding: 18,
-      paddingSM: 14,
-      paddingXS: 10,
-      margin: 18,
-      marginSM: 14,
-      marginXS: 10,
+      lineHeight: 1.6,
+      padding: 16,
+      paddingSM: 12,
+      paddingXS: 8,
+      margin: 16,
+      marginSM: 12,
+      marginXS: 8,
       fontFamily:
-        '"Libre Baskerville", "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif',
+        '"Inter Variable", "FrexSansGB", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif',
       fontFamilyCode:
-        '"Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
+        '"JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
     },
     components: {
       Button: {
         primaryShadow: dark
-          ? "none"
-          : "0 4px 16px rgba(200, 111, 85, 0.25)",
+          ? "0 4px 16px rgba(124, 108, 240, 0.45)"
+          : "0 4px 16px rgba(106, 88, 224, 0.30)",
         paddingInline: 18,
       },
       Tag: {

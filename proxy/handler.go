@@ -89,6 +89,7 @@ type runtimeConfig struct {
 	transport               *http.Transport
 	circuit                 *providerCircuit
 	requestTimeout          time.Duration
+	protocol                string
 	stripTools              bool
 	coolingSeconds          int
 	maxRetries              int
@@ -471,6 +472,7 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 			halfOpenMax:      effectiveInt(cfg.ProviderCircuitHalfOpenMax, config.DefaultProviderCircuitHalfOpenMax),
 		}),
 		requestTimeout:          time.Duration(requestTimeoutSeconds) * time.Second,
+		protocol:                provider.Protocol,
 		stripTools:              provider.StripTools,
 		coolingSeconds:          effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
 		maxRetries:              effectiveInt(cfg.MaxRetries, config.DefaultMaxRetries),
@@ -1408,7 +1410,7 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	outURL.Path = singleJoiningSlash(rt.targetURL.Path, r.URL.Path)
 	outURL.RawQuery = r.URL.RawQuery
 
-	outBody := rewriteRequestBody(body, rt.stripTools, meta)
+	outBody := rewriteRequestBody(body, rt.stripTools, rt.protocol, meta)
 
 	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, outURL.String(), bytes.NewReader(outBody))
 	if err != nil {
@@ -1425,7 +1427,7 @@ func buildRequest(rt *runtimeConfig, r *http.Request, key *pool.Key, body []byte
 	return outReq, nil
 }
 
-func rewriteRequestBody(body []byte, stripTools bool, meta requestMeta) []byte {
+func rewriteRequestBody(body []byte, stripTools bool, protocol string, meta requestMeta) []byte {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return body
 	}
@@ -1442,15 +1444,28 @@ func rewriteRequestBody(body []byte, stripTools bool, meta requestMeta) []byte {
 
 	changed := false
 	if stripTools {
-		for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"} {
-			if _, ok := payload[field]; ok {
-				delete(payload, field)
-				changed = true
+		// 一致性保护：若历史消息里已带 tool_calls 或 role:"tool" 消息，
+		// 却删掉顶层 tools 定义，会让严格的 OpenAI 兼容上游直接 400。
+		// 这种情况下跳过 strip，保留 tools 定义，避免请求非法。
+		if messagesReferenceTools(payload["messages"]) {
+			slog.Warn("strip_tools skipped: messages already reference tool calls",
+				logx.Fields(logx.CategoryProxy, logx.EventRequestStart,
+					"reason", "tool_calls_present",
+				)...)
+		} else {
+			for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "functions", "function_call"} {
+				if _, ok := payload[field]; ok {
+					delete(payload, field)
+					changed = true
+				}
 			}
 		}
 	}
-	if ensureStreamIncludeUsage(payload) {
-		changed = true
+	// include_usage 是 OpenAI 专有字段，仅对 openai 协议注入，避免污染 Anthropic/Gemini 上游。
+	if protocol == "" || protocol == config.ProtocolOpenAI {
+		if ensureStreamIncludeUsage(payload) {
+			changed = true
+		}
 	}
 	if !changed {
 		return body
@@ -1461,6 +1476,37 @@ func rewriteRequestBody(body []byte, stripTools bool, meta requestMeta) []byte {
 		return body
 	}
 	return out
+}
+
+// messagesReferenceTools 判断 messages 数组中是否存在 assistant 的 tool_calls
+// 或 role:"tool" 消息。若存在则说明这是一次进行中的工具调用对话，
+// 删除顶层 tools 定义会破坏请求合法性。
+func messagesReferenceTools(rawMessages json.RawMessage) bool {
+	if len(bytes.TrimSpace(rawMessages)) == 0 {
+		return false
+	}
+	var messages []map[string]json.RawMessage
+	if err := json.Unmarshal(rawMessages, &messages); err != nil {
+		return false
+	}
+	for _, msg := range messages {
+		if raw, ok := msg["tool_calls"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
+			return true
+		}
+		if raw, ok := msg["tool_call_id"]; ok && len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
+			return true
+		}
+		if raw, ok := msg["role"]; ok {
+			var role string
+			if err := json.Unmarshal(raw, &role); err == nil {
+				switch role {
+				case "tool", "function":
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func ensureStreamIncludeUsage(payload map[string]json.RawMessage) bool {

@@ -243,6 +243,11 @@ export function ProviderDetailContent({
         </a>
         <Button type="text" size="small" icon={<CopyOutlined />} onClick={copyTargetUrl} />
       </div>
+      <div className="detail-target-url" style={{ gap: 8 }}>
+        <span className="detail-target-label">协议 / 工具</span>
+        <Tag>{detail.protocol || "openai"}</Tag>
+        {detail.strip_tools ? <Tag color="orange">strip_tools</Tag> : null}
+      </div>
 
       {/* 模型记录 */}
       <Card className="surface-card" bordered={false} size="small">

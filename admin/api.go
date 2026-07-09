@@ -73,6 +73,8 @@ type apiProviderSummary struct {
 	CoolingKeys        int      `json:"cooling_keys"`
 	InvalidKeys        int      `json:"invalid_keys"`
 	Models             []string `json:"models"`
+	Protocol           string   `json:"protocol"`
+	StripTools         bool     `json:"strip_tools"`
 }
 
 type apiProviderDetail struct {
@@ -88,6 +90,7 @@ type apiProviderDetail struct {
 	Keys               []apiProviderKeyDetail `json:"keys"`
 	Models             []string               `json:"models"`
 	StripTools         bool                   `json:"strip_tools"`
+	Protocol           string                 `json:"protocol"`
 }
 
 type apiProviderKeyDetail struct {
@@ -107,13 +110,17 @@ type apiProviderKeyDetail struct {
 }
 
 type apiProviderCreatePayload struct {
-	ID        string   `json:"id"`
-	TargetURL string   `json:"target_url"`
-	Keys      []string `json:"keys"`
+	ID         string   `json:"id"`
+	TargetURL  string   `json:"target_url"`
+	Keys       []string `json:"keys"`
+	Protocol   string   `json:"protocol"`
+	StripTools bool     `json:"strip_tools"`
 }
 
 type apiProviderUpdatePayload struct {
-	TargetURL string `json:"target_url"`
+	TargetURL  string  `json:"target_url"`
+	Protocol   *string `json:"protocol"`
+	StripTools *bool   `json:"strip_tools"`
 }
 
 type apiKeysPayload struct {
@@ -569,6 +576,7 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 		Keys:               keyDetails,
 		Models:             safeModels(providerCfg.Models),
 		StripTools:         providerCfg.StripTools,
+		Protocol:           providerCfg.Protocol,
 	})
 }
 
@@ -637,10 +645,16 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 		if _, exists := findProviderConfig(cfg.Providers, req.ID); exists {
 			return fmt.Errorf("provider %q already exists", req.ID)
 		}
+		protocol := strings.ToLower(strings.TrimSpace(req.Protocol))
+		if protocol == "" {
+			protocol = config.DefaultProtocol
+		}
 		cfg.Providers = append(cfg.Providers, config.ProviderConfig{
-			ID:        req.ID,
-			TargetURL: req.TargetURL,
-			Keys:      keys,
+			ID:         req.ID,
+			TargetURL:  req.TargetURL,
+			Keys:       keys,
+			Protocol:   protocol,
+			StripTools: req.StripTools,
 		})
 		return nil
 	})
@@ -688,6 +702,16 @@ func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request, id stri
 			return fmt.Errorf("provider not found")
 		}
 		cfg.Providers[idx].TargetURL = req.TargetURL
+		if req.Protocol != nil {
+			protocol := strings.ToLower(strings.TrimSpace(*req.Protocol))
+			if protocol == "" {
+				protocol = config.DefaultProtocol
+			}
+			cfg.Providers[idx].Protocol = protocol
+		}
+		if req.StripTools != nil {
+			cfg.Providers[idx].StripTools = *req.StripTools
+		}
 		return nil
 	})
 	if err != nil {
@@ -1727,6 +1751,8 @@ func buildProviderSummary(providerCfg config.ProviderConfig, active bool, status
 		TotalKeys:    len(statuses),
 		DisabledKeys: providerCfg.DisabledKeyCount(),
 		Models:       safeModels(providerCfg.Models),
+		Protocol:     providerCfg.Protocol,
+		StripTools:   providerCfg.StripTools,
 	}
 	for _, keyStatus := range statuses {
 		switch keyStatus.State {

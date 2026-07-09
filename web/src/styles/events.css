@@ -15,7 +15,7 @@
 .events-summary-tile {
   min-width: 0;
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: var(--mm-radius-lg);
   border: 1px solid var(--mm-border-muted);
   background: var(--mm-surface-muted);
 }
@@ -105,7 +105,7 @@
 
 .events-table-time {
   color: var(--mm-text-muted);
-  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 0.82rem;
   line-height: 1.5;
@@ -221,7 +221,7 @@
   width: 16px;
   height: 16px;
   color: var(--mm-text-muted);
-  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.95rem;
   font-weight: 800;
   line-height: 1;
@@ -263,7 +263,7 @@
 
 .event-detail-item dt {
   color: var(--mm-text-subtle);
-  font-family: "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.92rem;
   line-height: 1.6;
 }

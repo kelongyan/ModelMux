@@ -19,9 +19,9 @@ type Tone = "blue" | "green" | "purple" | "red";
 
 const toneAccent: Record<Tone, string> = {
   blue: "var(--mm-primary)",
-  green: "#5db872",
-  purple: "#B87333",
-  red: "#c64545",
+  green: "var(--mm-success)",
+  purple: "#39C5CF",
+  red: "var(--mm-signal)",
 };
 
 export function StatsSummaryCard({

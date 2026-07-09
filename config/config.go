@@ -66,6 +66,15 @@ const (
 	DefaultStatsRetentionDays = 30
 	// DefaultStatsMaxRecentRecords 是默认加载到内存的最近调用记录数量。
 	DefaultStatsMaxRecentRecords = 10000
+
+	// ProtocolOpenAI 是默认上游协议，注入 OpenAI 专有的 stream_options.include_usage。
+	ProtocolOpenAI = "openai"
+	// ProtocolAnthropic 表示上游为 Anthropic 原生 /v1/messages 协议，不注入 OpenAI 专有字段。
+	ProtocolAnthropic = "anthropic"
+	// ProtocolGemini 表示上游为 Gemini 协议，不注入 OpenAI 专有字段。
+	ProtocolGemini = "gemini"
+	// DefaultProtocol 是 provider 未显式声明协议时的默认值。
+	DefaultProtocol = ProtocolOpenAI
 )
 
 type ProviderConfig struct {
@@ -75,6 +84,7 @@ type ProviderConfig struct {
 	KeyMetadata map[string]KeyMetadata `json:"key_metadata,omitempty"`
 	Models      []string               `json:"models,omitempty"`
 	StripTools  bool                   `json:"strip_tools,omitempty"`
+	Protocol    string                 `json:"protocol,omitempty"`
 }
 
 type KeyMetadata struct {
@@ -214,6 +224,9 @@ func (c *Config) validate() error {
 				return fmt.Errorf("providers[%d].keys[%d] is empty", i, j)
 			}
 		}
+		if err := validateProtocol(provider.Protocol); err != nil {
+			return fmt.Errorf("providers[%d].protocol: %w", i, err)
+		}
 	}
 	if activeProvider == "" {
 		return fmt.Errorf("active_provider is required")
@@ -237,6 +250,16 @@ func validateTargetURL(rawURL string) error {
 		return fmt.Errorf("scheme must be http or https, got %q", target.Scheme)
 	}
 	return nil
+}
+
+// validateProtocol 校验 provider 协议取值合法；空值等价于默认 openai，在补齐默认值前放行。
+func validateProtocol(protocol string) error {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "", ProtocolOpenAI, ProtocolAnthropic, ProtocolGemini:
+		return nil
+	default:
+		return fmt.Errorf("must be one of: %s, %s, %s", ProtocolOpenAI, ProtocolAnthropic, ProtocolGemini)
+	}
 }
 
 // ValidateAfterDefaults 校验依赖默认值补齐后的配置项。
@@ -504,6 +527,13 @@ func (c *Config) normalizeProviders() {
 	if len(providers) > 0 {
 		c.Providers = providers
 		c.ActiveProvider = active
+	}
+	for i := range c.Providers {
+		protocol := strings.ToLower(strings.TrimSpace(c.Providers[i].Protocol))
+		if protocol == "" {
+			protocol = DefaultProtocol
+		}
+		c.Providers[i].Protocol = protocol
 	}
 	if provider, ok := c.ActiveProviderConfig(); ok {
 		c.TargetURL = provider.TargetURL

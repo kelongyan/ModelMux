@@ -75,7 +75,7 @@
 /* ── call log table ── */
 
 .stats-model-name {
-  font-family: "SF Mono", "Cascadia Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 0.84rem;
   color: var(--mm-text-secondary);
 }
