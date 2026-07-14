@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Spin, Typography, message } from "antd";
-import { lazy, Suspense, useCallback, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchDashboard, triggerReload } from "./api/admin";
@@ -25,7 +25,6 @@ export function App(): JSX.Element {
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const routeKey = useMemo(() => location.pathname, [location.pathname]);
 
   const dashboardQuery = useQuery({
     queryKey: queryKeys.dashboard,
@@ -57,7 +56,7 @@ export function App(): JSX.Element {
       {contextHolder}
       <Suspense fallback={<RouteFallback />}>
         <PageTransition animationKey={location.pathname}>
-          <Routes key={routeKey}>
+          <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<ErrorBoundary><DashboardPage /></ErrorBoundary>} />
             <Route path="/providers" element={<ErrorBoundary><ProvidersPage /></ErrorBoundary>} />

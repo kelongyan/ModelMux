@@ -28,9 +28,15 @@
     width: 100%;
     min-width: 100%;
     flex-basis: auto;
-    padding: 22px 18px;
+    height: auto;
+    position: relative;
+    padding: 18px 16px 14px;
     border-right: none;
     border-bottom: 1px solid var(--mm-border-soft);
+  }
+
+  .console-sidebar-foot {
+    display: none;
   }
 
   .console-nav {
@@ -40,6 +46,21 @@
 
   .console-nav-link {
     flex: 1 1 calc(50% - 8px);
+  }
+
+  .console-nav-link::before {
+    top: auto;
+    bottom: 0;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    height: 0;
+    transform: none;
+  }
+
+  .console-nav-link.is-active::before {
+    height: 2px;
+    opacity: 1;
   }
 
   .console-header,

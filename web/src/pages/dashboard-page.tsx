@@ -132,7 +132,7 @@ export function DashboardPage(): JSX.Element {
           {/* Active provider + health */}
           <div className="dashboard-hero-row">
             <div className="dashboard-active-panel">
-              <span className="dashboard-panel-label">当前活跃 Provider</span>
+              <span className="dashboard-panel-label">Active Mission · 当前活跃 Provider</span>
               <div className="dashboard-active-provider-row">
                 <HealthDot state={computeOverviewState(dashboard)} pulse={dashboard.active_keys > 0} />
                 <strong className="dashboard-active-provider-name" title={dashboard.active_provider}>
@@ -144,6 +144,24 @@ export function DashboardPage(): JSX.Element {
                   ? "还没有配置 provider，先去提供商页面新增上游。"
                   : `共 ${dashboard.provider_count} 个 Provider · 可用 ${dashboard.active_keys} 个 Key · 冷却 ${dashboard.cooling_keys} · 失效 ${dashboard.invalid_keys}`}
               </span>
+            </div>
+            <div className="dashboard-health-strip">
+              <div className="dashboard-health-signal dashboard-health-signal--ok">
+                <span>可用 Key</span>
+                <strong>{dashboard.active_keys}</strong>
+              </div>
+              <div className={`dashboard-health-signal ${dashboard.cooling_keys > 0 ? "dashboard-health-signal--warn" : ""}`}>
+                <span>冷却 Key</span>
+                <strong>{dashboard.cooling_keys}</strong>
+              </div>
+              <div className={`dashboard-health-signal ${dashboard.invalid_keys > 0 ? "dashboard-health-signal--err" : ""}`}>
+                <span>失效 Key</span>
+                <strong>{dashboard.invalid_keys}</strong>
+              </div>
+              <div className="dashboard-health-signal">
+                <span>Provider</span>
+                <strong>{dashboard.provider_count}</strong>
+              </div>
             </div>
           </div>
         </Card>

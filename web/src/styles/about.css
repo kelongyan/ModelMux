@@ -139,6 +139,14 @@
   font-family: var(--font-mono);
   font-size: 0.8rem;
   letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-row:hover {
+  background: color-mix(in srgb, var(--mm-surface-active) 55%, transparent);
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-radius: 8px;
 }
 
 .about-val--truncate {

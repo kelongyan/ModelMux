@@ -225,6 +225,13 @@
   --mm-surface-dark: #0B0D12;
   --mm-border-dark: #2A3140;
   --mm-shadow-float: 0 4px 16px rgba(0, 0, 0, 0.50);
+  --mm-grid-line: rgba(255, 255, 255, 0.028);
+  --mm-glow: 0 0 0 1px rgba(124, 108, 240, 0.35), 0 8px 30px rgba(124, 108, 240, 0.22);
+  --mm-glow-soft: 0 0 0 1px rgba(124, 108, 240, 0.22), 0 4px 18px rgba(124, 108, 240, 0.14);
+  --mm-live: #3FB950;
+  --mm-live-soft: rgba(63, 185, 80, 0.16);
+  --mm-cyan: #39C5CF;
+  --mm-cyan-soft: rgba(57, 197, 207, 0.14);
 
   /* Animation tokens inherit from :root */
 }

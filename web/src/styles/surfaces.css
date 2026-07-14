@@ -244,3 +244,35 @@
 .ant-tag:hover {
   transform: scale(1.02);
 }
+
+/* ── Modal / Drawer / Segmented observatory polish ── */
+.ant-modal-content,
+.ant-drawer-content {
+  border: 1px solid var(--mm-border-muted) !important;
+  box-shadow: var(--mm-shadow-hover) !important;
+}
+
+.ant-modal-header,
+.ant-drawer-header {
+  border-bottom-color: var(--mm-border-soft) !important;
+}
+
+.ant-segmented {
+  background: var(--mm-surface-muted) !important;
+  border: 1px solid var(--mm-border-soft) !important;
+  padding: 3px !important;
+}
+
+.ant-segmented-item-selected {
+  box-shadow: var(--mm-shadow-soft) !important;
+}
+
+.ant-card {
+  color: var(--mm-text);
+}
+
+/* Mono utility for ops values */
+.mm-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

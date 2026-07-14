@@ -1,9 +1,11 @@
 /* ── settings page layout ── */
 
 .settings-group {
-  padding-bottom: 16px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--mm-border-muted);
+  padding: 14px 16px 16px;
+  margin-bottom: 14px;
+  border: 1px solid var(--mm-border-muted);
+  border-radius: var(--mm-radius);
+  background: color-mix(in srgb, var(--mm-surface-muted) 55%, transparent);
 }
 
 .settings-group--last {
@@ -101,7 +103,8 @@
 
 /* save summary */
 .settings-summary-card {
-  background: var(--mm-surface-muted) !important;
+  background: var(--mm-aurora-soft) !important;
+  border: 1px solid var(--mm-primary-border) !important;
 }
 
 .settings-summary-label {

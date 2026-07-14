@@ -4,32 +4,43 @@
 }
 
 .page-transition-content {
-  animation: page-enter var(--duration-enter, 400ms) var(--ease-out, cubic-bezier(0.25, 0.46, 0.45, 0.94)) both;
-  will-change: opacity, transform, filter;
+  animation: page-enter 420ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  will-change: opacity, transform;
 }
 
+/* Soft observatory enter: gentle fade + tiny rise, no blur/overshoot */
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(20px) scale(0.98);
-    filter: blur(4px) saturate(0.8);
-  }
-  60% {
-    opacity: 1;
-    transform: translateY(-2px) scale(1.005);
-    filter: blur(0) saturate(1);
+    transform: translate3d(0, 8px, 0);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0) saturate(1);
+    transform: translate3d(0, 0, 0);
   }
 }
+
+/* Stagger nested reveal cards slightly after page shell appears */
+.page-transition-content .reveal-card {
+  animation-duration: 480ms;
+  animation-timing-function: var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.page-transition-content .reveal-delay-0 { animation-delay: 40ms; }
+.page-transition-content .reveal-delay-1 { animation-delay: 90ms; }
+.page-transition-content .reveal-delay-2 { animation-delay: 140ms; }
+.page-transition-content .reveal-delay-3 { animation-delay: 190ms; }
+.page-transition-content .reveal-delay-4 { animation-delay: 240ms; }
+.page-transition-content .reveal-delay-5 { animation-delay: 290ms; }
 
 @media (prefers-reduced-motion: reduce) {
   .page-transition-content {
     animation: none;
     transform: none;
-    filter: none;
+  }
+
+  .page-transition-content .reveal-card {
+    animation: none;
+    transform: none;
   }
 }

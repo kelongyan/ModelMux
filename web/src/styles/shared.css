@@ -97,7 +97,11 @@
 }
 
 .health-dot--pulse {
-  animation: hdpulse 2s var(--ease-smooth, cubic-bezier(0.4, 0, 0.2, 1)) infinite;
+  animation: hdpulse 1.8s var(--ease-smooth, cubic-bezier(0.4, 0, 0.2, 1)) infinite;
+}
+
+.health-dot--active.health-dot--pulse {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mm-success) 28%, transparent);
 }
 
 @keyframes hdpulse {

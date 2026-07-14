@@ -3,13 +3,15 @@
 }
 
 .provider-table .ant-table-thead > tr > th {
-  background: var(--mm-primary-softer) !important;
-  color: var(--mm-primary-text);
-  font-size: 0.9rem;
+  background: var(--mm-surface-soft) !important;
+  color: var(--mm-text-muted);
+  font-size: 0.74rem;
   font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   line-height: 1.35 !important;
-  padding-top: 9px !important;
-  padding-bottom: 9px !important;
+  padding-top: 11px !important;
+  padding-bottom: 11px !important;
   white-space: nowrap;
 }
 
@@ -334,10 +336,15 @@
 }
 
 .provider-row-active-label {
-  font-size: 0.78rem;
-  color: var(--mm-text-subtle);
-  font-weight: 600;
-  padding: 0 8px;
+  font-size: 0.72rem;
+  color: var(--mm-success-text);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--mm-success-soft);
+  border: 1px solid color-mix(in srgb, var(--mm-success) 28%, transparent);
 }
 
 /* add row */
