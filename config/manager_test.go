@@ -332,6 +332,66 @@ func TestManagerUpdateTreatsStripToolsChangeAsProviderChange(t *testing.T) {
 	}
 }
 
+func TestManagerUpdateTreatsCodexCompactionCompatChangeAsProviderChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	initial := mustNormalizedConfig(t, &Config{
+		ActiveProvider: "p1",
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	if err := writeFileAtomic(path, initial); err != nil {
+		t.Fatalf("writeFileAtomic() error = %v", err)
+	}
+
+	reloads := 0
+	manager := NewManager(path, func(path string) error {
+		reloads++
+		cfg, err := Read(path)
+		if err != nil {
+			return err
+		}
+		SetCurrent(cfg)
+		return nil
+	})
+
+	disabled := false
+	result, err := manager.Update(func(cfg *Config) error {
+		cfg.Providers[0].CodexCompactionCompat = &disabled
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if reloads != 1 {
+		t.Fatalf("reloads = %d, want 1", reloads)
+	}
+	if result == nil || len(result.ChangedFields) != 1 || result.ChangedFields[0] != "providers" {
+		t.Fatalf("result.ChangedFields = %#v, want [providers]", result)
+	}
+
+	loaded, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read(path) error = %v", err)
+	}
+	if loaded.Providers[0].CodexCompactionCompatibilityEnabled() {
+		t.Fatal("CodexCompactionCompatibilityEnabled() = true, want false")
+	}
+}
+
+func TestProviderCodexCompactionCompatibilityDefaultsEnabled(t *testing.T) {
+	provider := ProviderConfig{}
+	if !provider.CodexCompactionCompatibilityEnabled() {
+		t.Fatal("compatibility should be enabled when the setting is omitted")
+	}
+
+	disabled := false
+	provider.CodexCompactionCompat = &disabled
+	if provider.CodexCompactionCompatibilityEnabled() {
+		t.Fatal("compatibility should be disabled when explicitly set to false")
+	}
+}
+
 // mustNormalizedConfig 把测试配置补齐为和正式运行一致的归一化状态。
 func mustNormalizedConfig(t *testing.T, cfg *Config) *Config {
 	t.Helper()

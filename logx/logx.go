@@ -24,6 +24,7 @@ const (
 	EventConfigWatchFailed       = "config.watch_failed"
 	EventConfigWatchStarted      = "config.watch_started"
 	EventClientCanceled          = "proxy.client_canceled"
+	EventCompactionNormalized    = "proxy.compaction_normalized"
 	EventConfigReloaded          = "config.reloaded"
 	EventConfigReloadFailed      = "config.reload_failed"
 	EventHandlerCreateFailed     = "lifecycle.handler_create_failed"

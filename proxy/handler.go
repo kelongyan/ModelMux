@@ -39,6 +39,7 @@ const (
 	quotaErrorInspectBytes        int64 = 64 * 1024
 	responseUsageInspectBytes     int64 = 256 * 1024
 	responseUsageInspectHeadBytes int64 = 64 * 1024
+	codexCompactionCompatMaxBytes int64 = 8 * 1024 * 1024
 	upstreamErrorExcerptBytes     int   = 2048
 	upstreamRetryDrainBytes       int64 = 64 * 1024
 	upstreamMaxIdleConns          int   = 256
@@ -91,6 +92,7 @@ type runtimeConfig struct {
 	requestTimeout          time.Duration
 	protocol                string
 	stripTools              bool
+	codexCompactionCompat   bool
 	coolingSeconds          int
 	maxRetries              int
 	maxTransientRetries     int
@@ -474,6 +476,7 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 		requestTimeout:          time.Duration(requestTimeoutSeconds) * time.Second,
 		protocol:                provider.Protocol,
 		stripTools:              provider.StripTools,
+		codexCompactionCompat:   provider.CodexCompactionCompatibilityEnabled(),
 		coolingSeconds:          effectiveInt(cfg.CoolingSeconds, config.DefaultCoolingSeconds),
 		maxRetries:              effectiveInt(cfg.MaxRetries, config.DefaultMaxRetries),
 		maxTransientRetries:     effectiveInt(cfg.MaxTransientRetries, config.DefaultMaxTransientRetries),
@@ -949,6 +952,39 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 	defer resp.Body.Close()
 
 	key.RecordLatency(time.Since(upstreamStart))
+	if shouldNormalizeCodexCompaction(r, rt, resp) {
+		buffered, err := io.ReadAll(io.LimitReader(resp.Body, codexCompactionCompatMaxBytes+1))
+		if err != nil {
+			writeProxyError(w, http.StatusBadGateway, "failed to read upstream compaction response")
+			return http.StatusBadGateway, 0, retryScopeNone, unknownUsage, "", err
+		}
+		if int64(len(buffered)) > codexCompactionCompatMaxBytes {
+			responseBody = io.MultiReader(bytes.NewReader(buffered), resp.Body)
+		} else {
+			if normalized, changed := normalizeCodexCompactionResponse(buffered); changed {
+				buffered = normalized
+				resp.ContentLength = int64(len(buffered))
+				resp.Header.Set("Content-Length", strconv.Itoa(len(buffered)))
+				resp.Header.Del("Content-Encoding")
+				resp.Header.Del("ETag")
+				resp.Header.Del("Content-MD5")
+				h.emitEvent(r.Context(), logx.Event{
+					Level:      "info",
+					Category:   logx.CategoryProxy,
+					Event:      logx.EventCompactionNormalized,
+					Message:    "normalized Codex compaction response",
+					ProviderID: rt.providerID,
+					KeyID:      state.KeyID(key.Value),
+					KeyHint:    logx.MaskSecret(key.Value),
+					Method:     r.Method,
+					Path:       r.URL.Path,
+					Model:      meta.model,
+					Status:     resp.StatusCode,
+				})
+			}
+			responseBody = bytes.NewReader(buffered)
+		}
+	}
 
 	capturedBody := newCaptureReader(responseBody, responseUsageInspectHeadBytes, responseUsageInspectBytes)
 	copyHeaders(w.Header(), resp.Header)
@@ -974,6 +1010,80 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, rt *runtimeCon
 	}
 	captured := capturedBody.Bytes()
 	return resp.StatusCode, 0, retryScopeNone, stats.ExtractUsage(captured), errorExcerptForStatus(resp.StatusCode, captured), nil
+}
+
+func shouldNormalizeCodexCompaction(r *http.Request, rt *runtimeConfig, resp *http.Response) bool {
+	if r == nil || rt == nil || resp == nil || !rt.codexCompactionCompat {
+		return false
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return false
+	}
+	return strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/responses/compact")
+}
+
+// normalizeCodexCompactionResponse 把部分兼容上游返回的 compaction_summary
+// 收敛为 Codex remote compaction v2 要求的单个 compaction 项。
+func normalizeCodexCompactionResponse(body []byte) ([]byte, bool) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body, false
+	}
+
+	var output []json.RawMessage
+	rawOutput, ok := payload["output"]
+	if !ok || json.Unmarshal(rawOutput, &output) != nil {
+		return body, false
+	}
+
+	var candidate map[string]json.RawMessage
+	compactionCount := 0
+	summaryCount := 0
+	for _, rawItem := range output {
+		var item map[string]json.RawMessage
+		if err := json.Unmarshal(rawItem, &item); err != nil {
+			continue
+		}
+		var itemType string
+		if err := json.Unmarshal(item["type"], &itemType); err != nil {
+			continue
+		}
+		if itemType == "compaction" {
+			candidate = item
+			compactionCount++
+			continue
+		}
+		if itemType != "compaction_summary" {
+			continue
+		}
+		var encryptedContent string
+		if err := json.Unmarshal(item["encrypted_content"], &encryptedContent); err != nil || encryptedContent == "" {
+			continue
+		}
+		candidate = item
+		summaryCount++
+	}
+	if compactionCount > 1 || (compactionCount == 0 && summaryCount != 1) || (compactionCount == 1 && len(output) == 1) {
+		return body, false
+	}
+
+	if compactionCount == 0 {
+		candidate["type"] = json.RawMessage(`"compaction"`)
+	}
+	normalizedItem, err := json.Marshal(candidate)
+	if err != nil {
+		return body, false
+	}
+	normalizedOutput, err := json.Marshal([]json.RawMessage{normalizedItem})
+	if err != nil {
+		return body, false
+	}
+	payload["output"] = normalizedOutput
+	normalizedBody, err := json.Marshal(payload)
+	if err != nil {
+		return body, false
+	}
+	return normalizedBody, true
 }
 
 // readResponsePrefix 读取响应体前缀用于错误分类，并返回可重放完整响应体的 reader。

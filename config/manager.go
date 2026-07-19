@@ -217,7 +217,9 @@ func equalProviders(a, b []ProviderConfig) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].ID != b[i].ID || a[i].TargetURL != b[i].TargetURL || a[i].StripTools != b[i].StripTools || a[i].Protocol != b[i].Protocol {
+		if a[i].ID != b[i].ID || a[i].TargetURL != b[i].TargetURL || a[i].StripTools != b[i].StripTools ||
+			a[i].Protocol != b[i].Protocol ||
+			a[i].CodexCompactionCompatibilityEnabled() != b[i].CodexCompactionCompatibilityEnabled() {
 			return false
 		}
 		if len(a[i].Keys) != len(b[i].Keys) {

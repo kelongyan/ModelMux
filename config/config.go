@@ -78,13 +78,20 @@ const (
 )
 
 type ProviderConfig struct {
-	ID          string                 `json:"id"`
-	TargetURL   string                 `json:"target_url"`
-	Keys        []string               `json:"keys"`
-	KeyMetadata map[string]KeyMetadata `json:"key_metadata,omitempty"`
-	Models      []string               `json:"models,omitempty"`
-	StripTools  bool                   `json:"strip_tools,omitempty"`
-	Protocol    string                 `json:"protocol,omitempty"`
+	ID                    string                 `json:"id"`
+	TargetURL             string                 `json:"target_url"`
+	Keys                  []string               `json:"keys"`
+	KeyMetadata           map[string]KeyMetadata `json:"key_metadata,omitempty"`
+	Models                []string               `json:"models,omitempty"`
+	StripTools            bool                   `json:"strip_tools,omitempty"`
+	Protocol              string                 `json:"protocol,omitempty"`
+	CodexCompactionCompat *bool                  `json:"codex_compaction_compat,omitempty"`
+}
+
+// CodexCompactionCompatibilityEnabled 返回是否自动兼容 Codex remote compaction。
+// 未配置时默认启用；只有显式配置 false 才关闭。
+func (p ProviderConfig) CodexCompactionCompatibilityEnabled() bool {
+	return p.CodexCompactionCompat == nil || *p.CodexCompactionCompat
 }
 
 type KeyMetadata struct {
@@ -416,6 +423,10 @@ func (p ProviderConfig) copy() ProviderConfig {
 	p.Keys = append([]string(nil), p.Keys...)
 	p.KeyMetadata = copyKeyMetadata(p.KeyMetadata)
 	p.Models = append([]string(nil), p.Models...)
+	if p.CodexCompactionCompat != nil {
+		enabled := *p.CodexCompactionCompat
+		p.CodexCompactionCompat = &enabled
+	}
 	return p
 }
 

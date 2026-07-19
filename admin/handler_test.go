@@ -201,8 +201,12 @@ func TestCreateProviderAddsProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(path) error = %v", err)
 	}
-	if _, ok := findProviderConfig(loaded.ProviderConfigs(), "p2"); !ok {
+	provider, ok := findProviderConfig(loaded.ProviderConfigs(), "p2")
+	if !ok {
 		t.Fatal("provider p2 should exist after create")
+	}
+	if provider.CodexCompactionCompat != nil || !provider.CodexCompactionCompatibilityEnabled() {
+		t.Fatal("provider p2 should use default automatic compaction compatibility")
 	}
 }
 
@@ -239,7 +243,7 @@ func TestActivateProviderUpdatesConfigAndPools(t *testing.T) {
 	}
 }
 
-func TestUpdateProviderTargetURL(t *testing.T) {
+func TestUpdateProviderTargetURLAndCodexCompactionCompat(t *testing.T) {
 	h, _, path := newTestHandler(t, &config.Config{
 		ActiveProvider: "p1",
 		Providers: []config.ProviderConfig{
@@ -249,7 +253,11 @@ func TestUpdateProviderTargetURL(t *testing.T) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 
-	buf, err := json.Marshal(apiProviderUpdatePayload{TargetURL: "https://updated.example.com"})
+	compat := false
+	buf, err := json.Marshal(apiProviderUpdatePayload{
+		TargetURL:             "https://updated.example.com",
+		CodexCompactionCompat: &compat,
+	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
@@ -272,6 +280,9 @@ func TestUpdateProviderTargetURL(t *testing.T) {
 	}
 	if provider.TargetURL != "https://updated.example.com" {
 		t.Fatalf("TargetURL = %q, want updated", provider.TargetURL)
+	}
+	if provider.CodexCompactionCompatibilityEnabled() {
+		t.Fatal("CodexCompactionCompatibilityEnabled() = true, want false")
 	}
 }
 
@@ -596,6 +607,9 @@ func TestProviderDetailIncludesKeyMetadataAndDisabledKeys(t *testing.T) {
 	}
 	if body.DisabledKeys != 1 {
 		t.Fatalf("DisabledKeys = %d, want 1", body.DisabledKeys)
+	}
+	if !body.CodexCompactionCompat {
+		t.Fatal("CodexCompactionCompat = false, want true")
 	}
 	if len(body.Keys) != 2 {
 		t.Fatalf("len(Keys) = %d, want 2 including disabled key", len(body.Keys))

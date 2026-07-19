@@ -63,34 +63,36 @@ type apiSettingsPayload struct {
 }
 
 type apiProviderSummary struct {
-	ID                 string   `json:"id"`
-	Active             bool     `json:"active"`
-	TargetURL          string   `json:"target_url"`
-	TotalKeys          int      `json:"total_keys"`
-	DisabledKeys       int      `json:"disabled_keys"`
-	QuotaExhaustedKeys int      `json:"quota_exhausted_keys"`
-	ActiveKeys         int      `json:"active_keys"`
-	CoolingKeys        int      `json:"cooling_keys"`
-	InvalidKeys        int      `json:"invalid_keys"`
-	Models             []string `json:"models"`
-	Protocol           string   `json:"protocol"`
-	StripTools         bool     `json:"strip_tools"`
+	ID                    string   `json:"id"`
+	Active                bool     `json:"active"`
+	TargetURL             string   `json:"target_url"`
+	TotalKeys             int      `json:"total_keys"`
+	DisabledKeys          int      `json:"disabled_keys"`
+	QuotaExhaustedKeys    int      `json:"quota_exhausted_keys"`
+	ActiveKeys            int      `json:"active_keys"`
+	CoolingKeys           int      `json:"cooling_keys"`
+	InvalidKeys           int      `json:"invalid_keys"`
+	Models                []string `json:"models"`
+	Protocol              string   `json:"protocol"`
+	StripTools            bool     `json:"strip_tools"`
+	CodexCompactionCompat bool     `json:"codex_compaction_compat"`
 }
 
 type apiProviderDetail struct {
-	ID                 string                 `json:"id"`
-	Active             bool                   `json:"active"`
-	TargetURL          string                 `json:"target_url"`
-	TotalKeys          int                    `json:"total_keys"`
-	DisabledKeys       int                    `json:"disabled_keys"`
-	QuotaExhaustedKeys int                    `json:"quota_exhausted_keys"`
-	ActiveKeys         int                    `json:"active_keys"`
-	CoolingKeys        int                    `json:"cooling_keys"`
-	InvalidKeys        int                    `json:"invalid_keys"`
-	Keys               []apiProviderKeyDetail `json:"keys"`
-	Models             []string               `json:"models"`
-	StripTools         bool                   `json:"strip_tools"`
-	Protocol           string                 `json:"protocol"`
+	ID                    string                 `json:"id"`
+	Active                bool                   `json:"active"`
+	TargetURL             string                 `json:"target_url"`
+	TotalKeys             int                    `json:"total_keys"`
+	DisabledKeys          int                    `json:"disabled_keys"`
+	QuotaExhaustedKeys    int                    `json:"quota_exhausted_keys"`
+	ActiveKeys            int                    `json:"active_keys"`
+	CoolingKeys           int                    `json:"cooling_keys"`
+	InvalidKeys           int                    `json:"invalid_keys"`
+	Keys                  []apiProviderKeyDetail `json:"keys"`
+	Models                []string               `json:"models"`
+	StripTools            bool                   `json:"strip_tools"`
+	Protocol              string                 `json:"protocol"`
+	CodexCompactionCompat bool                   `json:"codex_compaction_compat"`
 }
 
 type apiProviderKeyDetail struct {
@@ -110,17 +112,19 @@ type apiProviderKeyDetail struct {
 }
 
 type apiProviderCreatePayload struct {
-	ID         string   `json:"id"`
-	TargetURL  string   `json:"target_url"`
-	Keys       []string `json:"keys"`
-	Protocol   string   `json:"protocol"`
-	StripTools bool     `json:"strip_tools"`
+	ID                    string   `json:"id"`
+	TargetURL             string   `json:"target_url"`
+	Keys                  []string `json:"keys"`
+	Protocol              string   `json:"protocol"`
+	StripTools            bool     `json:"strip_tools"`
+	CodexCompactionCompat *bool    `json:"codex_compaction_compat,omitempty"`
 }
 
 type apiProviderUpdatePayload struct {
-	TargetURL  string  `json:"target_url"`
-	Protocol   *string `json:"protocol"`
-	StripTools *bool   `json:"strip_tools"`
+	TargetURL             string  `json:"target_url"`
+	Protocol              *string `json:"protocol"`
+	StripTools            *bool   `json:"strip_tools"`
+	CodexCompactionCompat *bool   `json:"codex_compaction_compat"`
 }
 
 type apiKeysPayload struct {
@@ -173,21 +177,21 @@ type apiKeysResetAllResponse struct {
 }
 
 type apiProvidersExportResponse struct {
-	Version         int                       `json:"version"`
-	ExportedAt      time.Time                 `json:"exported_at"`
-	ActiveProvider  string                    `json:"active_provider"`
-	Providers       []config.ProviderConfig   `json:"providers"`
+	Version        int                     `json:"version"`
+	ExportedAt     time.Time               `json:"exported_at"`
+	ActiveProvider string                  `json:"active_provider"`
+	Providers      []config.ProviderConfig `json:"providers"`
 }
 
 type apiProvidersImportPayload struct {
-	Version   int                      `json:"version"`
-	Providers []config.ProviderConfig  `json:"providers"`
+	Version   int                     `json:"version"`
+	Providers []config.ProviderConfig `json:"providers"`
 }
 
 type apiProvidersImportResponse struct {
-	OK          bool     `json:"ok"`
-	Imported    int      `json:"imported"`
-	SkippedIDs  []string `json:"skipped_ids,omitempty"`
+	OK         bool     `json:"ok"`
+	Imported   int      `json:"imported"`
+	SkippedIDs []string `json:"skipped_ids,omitempty"`
 }
 
 type apiDeleteKeysPayload struct {
@@ -564,19 +568,20 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 	keyDetails := buildProviderKeyDetails(providerCfg, keyStatuses)
 	summary := buildProviderSummary(providerCfg, id == h.pools.ActiveID(), keyStatuses)
 	writeJSON(w, http.StatusOK, apiProviderDetail{
-		ID:                 summary.ID,
-		Active:             summary.Active,
-		TargetURL:          summary.TargetURL,
-		TotalKeys:          summary.TotalKeys,
-		DisabledKeys:       summary.DisabledKeys,
-		QuotaExhaustedKeys: summary.QuotaExhaustedKeys,
-		ActiveKeys:         summary.ActiveKeys,
-		CoolingKeys:        summary.CoolingKeys,
-		InvalidKeys:        summary.InvalidKeys,
-		Keys:               keyDetails,
-		Models:             safeModels(providerCfg.Models),
-		StripTools:         providerCfg.StripTools,
-		Protocol:           providerCfg.Protocol,
+		ID:                    summary.ID,
+		Active:                summary.Active,
+		TargetURL:             summary.TargetURL,
+		TotalKeys:             summary.TotalKeys,
+		DisabledKeys:          summary.DisabledKeys,
+		QuotaExhaustedKeys:    summary.QuotaExhaustedKeys,
+		ActiveKeys:            summary.ActiveKeys,
+		CoolingKeys:           summary.CoolingKeys,
+		InvalidKeys:           summary.InvalidKeys,
+		Keys:                  keyDetails,
+		Models:                safeModels(providerCfg.Models),
+		StripTools:            providerCfg.StripTools,
+		Protocol:              providerCfg.Protocol,
+		CodexCompactionCompat: providerCfg.CodexCompactionCompatibilityEnabled(),
 	})
 }
 
@@ -650,11 +655,12 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 			protocol = config.DefaultProtocol
 		}
 		cfg.Providers = append(cfg.Providers, config.ProviderConfig{
-			ID:         req.ID,
-			TargetURL:  req.TargetURL,
-			Keys:       keys,
-			Protocol:   protocol,
-			StripTools: req.StripTools,
+			ID:                    req.ID,
+			TargetURL:             req.TargetURL,
+			Keys:                  keys,
+			Protocol:              protocol,
+			StripTools:            req.StripTools,
+			CodexCompactionCompat: req.CodexCompactionCompat,
 		})
 		return nil
 	})
@@ -711,6 +717,9 @@ func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request, id stri
 		}
 		if req.StripTools != nil {
 			cfg.Providers[idx].StripTools = *req.StripTools
+		}
+		if req.CodexCompactionCompat != nil {
+			cfg.Providers[idx].CodexCompactionCompat = req.CodexCompactionCompat
 		}
 		return nil
 	})
@@ -1656,10 +1665,10 @@ func (h *Handler) diagnostics(w http.ResponseWriter, r *http.Request) {
 	if h.healthReader != nil {
 		circuitSnap := h.healthReader.ProviderCircuitSnapshot()
 		transportStats = map[string]any{
-			"circuit_state":          circuitSnap.State,
-			"circuit_failures":       circuitSnap.ConsecutiveFailures,
-			"circuit_open_until":     circuitSnap.OpenUntil,
-			"circuit_half_open":      circuitSnap.HalfOpenInFlight,
+			"circuit_state":           circuitSnap.State,
+			"circuit_failures":        circuitSnap.ConsecutiveFailures,
+			"circuit_open_until":      circuitSnap.OpenUntil,
+			"circuit_half_open":       circuitSnap.HalfOpenInFlight,
 			"circuit_cooling_seconds": circuitSnap.CurrentCoolingSeconds,
 		}
 	}
@@ -1745,14 +1754,15 @@ func (h *Handler) buildProviderSummaries() []apiProviderSummary {
 // buildProviderSummary 汇总单个 provider 的基础信息和状态统计。
 func buildProviderSummary(providerCfg config.ProviderConfig, active bool, statuses []pool.KeyStatus) apiProviderSummary {
 	summary := apiProviderSummary{
-		ID:           providerCfg.ID,
-		Active:       active,
-		TargetURL:    providerCfg.TargetURL,
-		TotalKeys:    len(statuses),
-		DisabledKeys: providerCfg.DisabledKeyCount(),
-		Models:       safeModels(providerCfg.Models),
-		Protocol:     providerCfg.Protocol,
-		StripTools:   providerCfg.StripTools,
+		ID:                    providerCfg.ID,
+		Active:                active,
+		TargetURL:             providerCfg.TargetURL,
+		TotalKeys:             len(statuses),
+		DisabledKeys:          providerCfg.DisabledKeyCount(),
+		Models:                safeModels(providerCfg.Models),
+		Protocol:              providerCfg.Protocol,
+		StripTools:            providerCfg.StripTools,
+		CodexCompactionCompat: providerCfg.CodexCompactionCompatibilityEnabled(),
 	}
 	for _, keyStatus := range statuses {
 		switch keyStatus.State {

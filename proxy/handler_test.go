@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,6 +43,10 @@ func mustHandler(t testing.TB, cfg *config.Config) (*Handler, *pool.ProviderPool
 		t.Fatalf("NewHandler() error = %v", err)
 	}
 	return h, pools
+}
+
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 func TestBuildRequestRewritesUpstreamAuthHeaders(t *testing.T) {
@@ -384,6 +389,147 @@ func TestServeHTTPRetriesUnauthorizedWithOriginalBody(t *testing.T) {
 	}
 	if attempts.Load() != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts.Load())
+	}
+}
+
+func TestServeHTTPCodexCompactionCompatNormalizesProviderResponse(t *testing.T) {
+	upstreamBody := `{"id":"resp_compact","output":[{"id":"msg_1","type":"message","content":[]},{"id":"cmp_1","type":"compaction_summary","encrypted_content":"encrypted-token"},{"id":"msg_2","type":"message","content":[]}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"stale-etag"`)
+		w.Header().Set("Content-MD5", "stale-md5")
+		_, _ = w.Write([]byte(upstreamBody))
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "compat",
+		Providers: []config.ProviderConfig{{
+			ID:        "compat",
+			TargetURL: upstream.URL,
+			Keys:      []string{"k1"},
+		}},
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "http://proxy.test/v1/responses/compact", strings.NewReader(`{"model":"gpt-5.5"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Output []struct {
+			ID               string `json:"id"`
+			Type             string `json:"type"`
+			EncryptedContent string `json:"encrypted_content"`
+		} `json:"output"`
+		Usage map[string]any `json:"usage"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if len(payload.Output) != 1 {
+		t.Fatalf("len(output) = %d, want 1; body=%s", len(payload.Output), rr.Body.String())
+	}
+	item := payload.Output[0]
+	if item.ID != "cmp_1" || item.Type != "compaction" || item.EncryptedContent != "encrypted-token" {
+		t.Fatalf("output[0] = %+v, want preserved compaction payload", item)
+	}
+	if payload.Usage["total_tokens"] != float64(15) {
+		t.Fatalf("usage = %#v, want top-level usage preserved", payload.Usage)
+	}
+	if got := rr.Header().Get("Content-Length"); got != strconv.Itoa(rr.Body.Len()) {
+		t.Fatalf("Content-Length = %q, want %d", got, rr.Body.Len())
+	}
+	if got := rr.Header().Get("ETag"); got != "" {
+		t.Fatalf("ETag = %q, want removed after body rewrite", got)
+	}
+	if got := rr.Header().Get("Content-MD5"); got != "" {
+		t.Fatalf("Content-MD5 = %q, want removed after body rewrite", got)
+	}
+}
+
+func TestServeHTTPCodexCompactionCompatIsScoped(t *testing.T) {
+	original := `{"output":[{"id":"msg_1","type":"message"},{"id":"cmp_1","type":"compaction_summary","encrypted_content":"encrypted-token"}]}`
+	tests := []struct {
+		name    string
+		path    string
+		setting *bool
+	}{
+		{name: "explicitly disabled", path: "/v1/responses/compact", setting: boolPointer(false)},
+		{name: "ordinary responses endpoint", path: "/v1/responses"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(original))
+			}))
+			defer upstream.Close()
+
+			cfg := &config.Config{
+				ActiveProvider: "provider",
+				Providers: []config.ProviderConfig{{
+					ID:                    "provider",
+					TargetURL:             upstream.URL,
+					Keys:                  []string{"k1"},
+					CodexCompactionCompat: tt.setting,
+				}},
+				RequestTimeoutSeconds: 10,
+				MaxRetries:            1,
+				CoolingSeconds:        1,
+			}
+			h, _ := mustHandler(t, cfg)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "http://proxy.test"+tt.path, strings.NewReader(`{"model":"gpt-5.5"}`)))
+			if rr.Body.String() != original {
+				t.Fatalf("body changed outside compat scope: got %s, want %s", rr.Body.String(), original)
+			}
+		})
+	}
+}
+
+func TestNormalizeCodexCompactionResponseRejectsAmbiguousPayloads(t *testing.T) {
+	alreadyCompaction := `{"output":[{"id":"cmp_1","type":"compaction","encrypted_content":"encrypted-token"}]}`
+	tests := []struct {
+		name        string
+		body        string
+		wantChanged bool
+	}{
+		{name: "already compatible", body: alreadyCompaction},
+		{name: "compaction with retained messages", body: `{"output":[{"type":"message"},{"id":"cmp_1","type":"compaction","encrypted_content":"encrypted-token"}]}`, wantChanged: true},
+		{name: "no summary", body: `{"output":[{"type":"message"}]}`},
+		{name: "multiple summaries", body: `{"output":[{"type":"compaction_summary","encrypted_content":"one"},{"type":"compaction_summary","encrypted_content":"two"}]}`},
+		{name: "missing encrypted content", body: `{"output":[{"type":"compaction_summary"}]}`},
+		{name: "empty encrypted content", body: `{"output":[{"type":"compaction_summary","encrypted_content":""}]}`},
+		{name: "malformed json", body: `{"output":`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := normalizeCodexCompactionResponse([]byte(tt.body))
+			if changed != tt.wantChanged {
+				t.Fatalf("changed = %v, want %v; body=%s", changed, tt.wantChanged, got)
+			}
+			if !tt.wantChanged && string(got) != tt.body {
+				t.Fatalf("body changed: got %s, want %s", got, tt.body)
+			}
+			if tt.wantChanged {
+				var payload struct {
+					Output []struct {
+						Type string `json:"type"`
+					} `json:"output"`
+				}
+				if err := json.Unmarshal(got, &payload); err != nil || len(payload.Output) != 1 || payload.Output[0].Type != "compaction" {
+					t.Fatalf("normalized payload = %s, want one compaction item", got)
+				}
+			}
+		})
 	}
 }
 
