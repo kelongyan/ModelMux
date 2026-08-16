@@ -1,3 +1,86 @@
+# Theme — ModelMux Aurora Console
+
+## Part 1 — Compact token summary
+
+Brand name: **Aurora Console**. Design language: "极光" (Aurora) — deep-space observatory feel, violet primary with cyan accent gradient, glass surfaces, cool-toned shadows. Bilingual UI (Chinese primary).
+
+### Colors (light / dark)
+
+| Token | Light | Dark |
+|---|---|---|
+| Canvas bg (`--mm-bg`) | `#F6F7FB` | `#0B0D12` |
+| Surface muted L1 | `#EEF1F6` | `#141821` |
+| Surface soft L2 | `#F2F5FA` | `#181D27` |
+| Surface L3 (cards) | `#FFFFFF` | `#1E2430` |
+| Surface strong L4 | `#FFFFFF` | `#262D3B` |
+| Text primary | `#0F172A` | `#E6E9F0` |
+| Text secondary | `#1E293B` | `#AEB4C2` |
+| Text muted | `#64748B` | `#7C8294` |
+| Text subtle | `#94A3B8` | `#5A6072` |
+| Border | `rgba(15,23,42,0.12)` | `rgba(255,255,255,0.08)` |
+| Divider | `#E2E8F0` | `#2A3140` |
+| **Primary (violet)** | `#6A58E0` | `#7C6CF0` |
+| Primary text | `#5A48D0` | `#9B8EF5` |
+| Primary strong | `#4A38C0` | `#B3A8F8` |
+| Primary soft bg | `#EEF0FF` | `rgba(124,108,240,0.14)` |
+| Success | `#2DA44E` | `#3FB950` |
+| Warning | `#C77700` | `#F5A623` |
+| Error | `#CF222E` | `#F85149` |
+| Accent (cross-theme) | `#7C6CF0` | same |
+| Cyan accent | `#39C5CF` | same |
+| Signal amber | `#FFB454` | same |
+| Live green | `#3FB950` | same |
+
+### Brand gradients
+
+- `--mm-aurora`: `linear-gradient(120deg, #7C6CF0, #5B8DEF 45%, #39C5CF)` — logo tile, active indicator bars, brand kicker text
+- `--mm-aurora-soft`: `linear-gradient(120deg, rgba(124,108,240,0.14), rgba(57,197,207,0.12))` — active nav background
+- Shell background wash: radial `accent 14%` top-left + `#39C5CF 11%` top-right, animated 18s drift; 24px grid lines with radial mask
+
+### Typography
+
+- Display: `"Space Grotesk Variable"` (numbers/titles, `letter-spacing: -0.04em`), fallback FrexSansGB/Noto Sans SC
+- Body: `"Inter Variable"`, fallback `FrexSansGB` (self-hosted GB2312 Chinese), PingFang SC, Microsoft YaHei, Noto Sans SC
+- Mono: `"JetBrains Mono Variable"` — metric values, timestamps, code (tabular-nums)
+- Base size 15px, line-height 1.62; kicker/label style: 0.66–0.72rem, weight 700–800, `letter-spacing: 0.1–0.14em`, uppercase
+- Section titles: `Typography.Title level={3}` with `section-title` class
+
+### Radii
+
+- sm 6px / default 10px / lg 14px / pill 999px（Tag、live pill、metric pill、chip）
+
+### Shadows
+
+- Default: `0 4px 24px rgba(15,23,42,0.08)` (dark: `rgba(0,0,0,0.45)`)
+- Hover: `0 10px 32px rgba(15,23,42,0.12)` (dark: `0 10px 36px rgba(0,0,0,0.55)`)
+- Glow (active nav): `0 0 0 1px rgba(124,108,240,0.35), 0 8px 30px rgba(124,108,240,0.22)` (light uses softer variant)
+- Panel: `4px 0 20px rgba(15,23,42,0.06)` (sidebar)
+
+### Spacing
+
+4px base scale: 4/8/12/16/20/24/32/40/56/72. Content padding `20px 24px 32px`; card padding 22px (antd Card paddingLG override); page section gap 20px (`Space size={20}`).
+
+### Animation
+
+- Easing: `--ease-out: cubic-bezier(0.22,1,0.36,1)`; `--ease-spring: cubic-bezier(0.34,1.56,0.64,1)` (toggle/icon micro-interactions); `--ease-smooth: cubic-bezier(0.4,0,0.2,1)` (nav hover)
+- Durations: fast 120ms / normal 200ms / slow 320ms / enter 420ms / exit 250ms / complex 500ms
+- Motifs: nav active left bar grows (300ms), aurora background drift 18s infinite, live dot pulse 1.8s, page transition fade/slide (`.page-transition.css`), theme switch soft-fade overlay (340ms), reveal-card staggered entrance
+- `prefers-reduced-motion: reduce` → all animations 0.01ms
+
+### Ant Design tokens (from `app-theme.ts`)
+
+- `colorPrimary` = violet, radii 10/14/6/4, controlHeight 40 (SM 32, LG 46), fontSize 15 (SM 13), lineHeight 1.6
+- Button: primary shadow violet glow, paddingInline 18, fontWeight 600
+- Table: headerBg `#F2F5FA`/`#181D27`, headerColor muted, rowHoverBg `#EEF0FF`/violet 10%
+- Input: violet active/hover border + focus ring `rgba(106,88,224,0.14)`
+- Segmented: white selected item on `#EEF1F6` track (dark: `#262D3B` on `#141821`)
+- Modal/Drawer: surface L3 bg
+
+## Part 2 — Raw source dumps
+
+### base.css (design token source of truth, full)
+
+```css
 /* === FrexSansGB — 中文字体（GB2312 子集 · 静态多字重 · 自托管） === */
 @font-face {
   font-family: "FrexSansGB";
@@ -102,11 +185,6 @@
 
   /* Selection */
   --mm-selection: rgba(106, 88, 224, 0.18);
-
-  /* Extended tokens */
-  --mm-grid-line: rgba(15, 23, 42, 0.03);
-  --mm-live: #2DA44E;
-  --mm-on-solid: #FFFFFF; /* 实心强调色上的固定前景色（两主题一致） */
 
   /* === Aurora Brand & Signal (cross-theme) === */
   --mm-accent: #7C6CF0;
@@ -237,7 +315,6 @@
   --mm-live-soft: rgba(63, 185, 80, 0.16);
   --mm-cyan: #39C5CF;
   --mm-cyan-soft: rgba(57, 197, 207, 0.14);
-  --mm-on-solid: #FFFFFF;
 
   /* Animation tokens inherit from :root */
 }
@@ -325,3 +402,126 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+```
+
+### app-theme.ts (Ant Design theme config, full)
+
+```ts
+import { theme, type ThemeConfig } from "antd";
+
+export type AppThemeMode = "light" | "dark";
+
+export function createAppTheme(mode: AppThemeMode): ThemeConfig {
+  const dark = mode === "dark";
+
+  return {
+    algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+    token: {
+      /* === Aurora Console Palette (single source of truth: base.css) === */
+      colorPrimary: dark ? "#7C6CF0" : "#6A58E0",
+      colorInfo: dark ? "#7C6CF0" : "#6A58E0",
+      colorSuccess: dark ? "#3FB950" : "#2DA44E",
+      colorWarning: dark ? "#F5A623" : "#C77700",
+      colorError: dark ? "#F85149" : "#CF222E",
+      colorText: dark ? "#E6E9F0" : "#0F172A",
+      colorTextSecondary: dark ? "#AEB4C2" : "#1E293B",
+      colorTextTertiary: dark ? "#7C8294" : "#64748B",
+      colorTextQuaternary: dark ? "#5A6072" : "#94A3B8",
+      colorBorder: dark ? "#2A3140" : "#E2E8F0",
+      colorBorderSecondary: dark ? "#2A3140" : "#E2E8F0",
+      colorBgBase: dark ? "#0B0D12" : "#F6F7FB",
+      colorBgLayout: dark ? "#0B0D12" : "#F6F7FB",
+      colorBgContainer: dark ? "#1E2430" : "#FFFFFF",
+      colorBgElevated: dark ? "#262D3B" : "#FFFFFF",
+      colorFillSecondary: dark ? "rgba(124, 108, 240, 0.10)" : "rgba(106, 88, 224, 0.06)",
+      colorFillTertiary: dark ? "rgba(255, 255, 255, 0.04)" : "rgba(15, 23, 42, 0.04)",
+      colorLink: dark ? "#9B8EF5" : "#5A48D0",
+      colorLinkHover: dark ? "#B3A8F8" : "#4A38C0",
+
+      /* === Aurora radii === */
+      borderRadius: 10,
+      borderRadiusLG: 14,
+      borderRadiusSM: 6,
+      borderRadiusXS: 4,
+
+      /* === Controls === */
+      controlHeight: 40,
+      controlHeightSM: 32,
+      controlHeightLG: 46,
+
+      /* === Typography === */
+      fontSize: 15,
+      fontSizeSM: 13,
+      lineHeight: 1.6,
+      padding: 16,
+      paddingSM: 12,
+      paddingXS: 8,
+      margin: 16,
+      marginSM: 12,
+      marginXS: 8,
+      fontFamily:
+        '"Inter Variable", "FrexSansGB", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif',
+      fontFamilyCode:
+        '"JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+      boxShadow: dark
+        ? "0 4px 24px rgba(0, 0, 0, 0.45)"
+        : "0 4px 24px rgba(15, 23, 42, 0.08)",
+      boxShadowSecondary: dark
+        ? "0 10px 36px rgba(0, 0, 0, 0.55)"
+        : "0 10px 32px rgba(15, 23, 42, 0.12)",
+    },
+    components: {
+      Button: {
+        primaryShadow: dark
+          ? "0 4px 16px rgba(124, 108, 240, 0.45)"
+          : "0 4px 16px rgba(106, 88, 224, 0.30)",
+        paddingInline: 18,
+        fontWeight: 600,
+      },
+      Tag: {
+        borderRadiusSM: 999,
+        fontSizeSM: 12,
+        lineHeightSM: 1.8,
+      },
+      Card: {
+        paddingLG: 22,
+      },
+      Table: {
+        headerBg: dark ? "#181D27" : "#F2F5FA",
+        headerColor: dark ? "#7C8294" : "#64748B",
+        rowHoverBg: dark ? "rgba(124, 108, 240, 0.10)" : "#EEF0FF",
+        borderColor: dark ? "#2A3140" : "#E2E8F0",
+      },
+      Input: {
+        activeBorderColor: dark ? "#7C6CF0" : "#6A58E0",
+        hoverBorderColor: dark ? "#9B8EF5" : "#5A48D0",
+        activeShadow: dark
+          ? "0 0 0 3px rgba(124, 108, 240, 0.18)"
+          : "0 0 0 3px rgba(106, 88, 224, 0.14)",
+      },
+      Select: {
+        optionSelectedBg: dark ? "rgba(124, 108, 240, 0.14)" : "#EEF0FF",
+      },
+      Segmented: {
+        itemSelectedBg: dark ? "#262D3B" : "#FFFFFF",
+        trackBg: dark ? "#141821" : "#EEF1F6",
+      },
+      Modal: {
+        contentBg: dark ? "#1E2430" : "#FFFFFF",
+        headerBg: dark ? "#1E2430" : "#FFFFFF",
+      },
+      Drawer: {
+        colorBgElevated: dark ? "#1E2430" : "#FFFFFF",
+      },
+      Tooltip: {
+        colorBgSpotlight: dark ? "#262D3B" : "#1E293B",
+      },
+    },
+  };
+}
+```
+
+### Theme provider notes
+
+- `web/src/app/theme-mode.tsx` — `AppThemeProvider`: mode state (light/dark), persisted in `localStorage["modelmux-theme"]`, falls back to `prefers-color-scheme`; applies `data-theme` attribute on `<html>`; soft-fade overlay animation on switch; antd `ConfigProvider` with zhCN locale.
+- CSS import order (`src/styles.css`): animations → base → layout → surfaces → dashboard → providers → events → stats → settings → shared → about → responsive.

@@ -21,3 +21,4 @@ web/vite.config.js
 web/vite.config.d.ts
 .playwright-cli/
 .playwright-mcp/
+.superdesign/tmp/

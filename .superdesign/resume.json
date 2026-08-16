@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "console-shell": {
+      "targetKind": "existing-ui",
+      "projectId": "539dba4f-5eda-4079-b6be-b420c1644b2a",
+      "baselineDraftId": "eee4c8f0-b2fa-4dc4-bb7b-6a2cc64eeff7",
+      "activeDraftId": "d8572949-39e3-4720-a015-a790344bb6bf",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "web/src/app/console-shell.tsx",
+        "web/src/app/header-status.tsx",
+        "web/src/app/navigation.ts",
+        "web/src/app/theme-toggle.tsx",
+        "web/src/components/health-dot.tsx",
+        "web/src/styles/layout.css",
+        "web/src/styles/base.css",
+        "web/src/styles/surfaces.css",
+        "web/src/styles/animations.css"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "ea505eafaa6068496310420a8b691c3f691f384057e9618a49134f122a848006",
+        "web/src/app/console-shell.tsx": "5f532505a60f893cc6191dc184d53bbbba447018e50ac74cfd8e330d6dd80d53",
+        "web/src/app/header-status.tsx": "87ba631df9f4b78aab443dcc713abd9cf7704dbda33391ce42bebdb927bf39c7",
+        "web/src/app/navigation.ts": "246a8018aef55fc0d90b36880a0b4cc5f08d1045d17a2f1011e6397fb3f39ad5",
+        "web/src/app/theme-toggle.tsx": "22c35d4207ed054e9d54fcb216a102321abc4604f734033347c9a380a0b7861d",
+        "web/src/components/health-dot.tsx": "ef08e38e262f8ad9443e056fe368f32acfc6060636e7f536b0f273936b70e195",
+        "web/src/styles/layout.css": "6ada2554ad15aee4297eff9d3b06470b315389c12aebda88e52b9e582fd91e14",
+        "web/src/styles/base.css": "3072e1895806658bc5eb433ef97c367faa7d173ef9562b9b7b52fb13eccc353b",
+        "web/src/styles/surfaces.css": "349b85f41d7c8393c412ecaf09fa9adbdebb34ec6ef215a16f8f580abdf5a857",
+        "web/src/styles/animations.css": "9258e0276e3b142b295c989a41aa8aeb7f29da12a7eb040a5bf4d67976030d84"
+      },
+      "components": [
+        {
+          "name": "ConsoleSidebar",
+          "id": "35af0126-32d3-4b08-981e-1e6276bfc5df",
+          "sourcePath": "web/src/app/console-shell.tsx"
+        },
+        {
+          "name": "HeaderStatus",
+          "id": "4f525a6a-ce6d-4bf4-b520-e79d68ceeebb",
+          "sourcePath": "web/src/app/header-status.tsx"
+        }
+      ],
+      "drafts": {
+        "eee4c8f0-b2fa-4dc4-bb7b-6a2cc64eeff7": {
+          "title": "ModelMux Aurora Console Reproduction",
+          "visualDirection": "baseline pixel-perfect reproduction of current shell",
+          "currentVersion": 1
+        },
+        "d8572949-39e3-4720-a015-a790344bb6bf": {
+          "title": "ModelMux Crisp Command Center",
+          "visualDirection": "crisp modern light ops console (flat, bold violet active pill, hairline borders)",
+          "parentDraftId": "eee4c8f0-b2fa-4dc4-bb7b-6a2cc64eeff7",
+          "currentVersion": 1
+        },
+        "258179e3-2e05-40f3-9972-5192ebf48676": {
+          "title": "ModelMux Aurora - Deep Glass Observatory",
+          "visualDirection": "dark glass observatory (deep ink canvas, translucent glass panels, neon aurora glow)",
+          "parentDraftId": "eee4c8f0-b2fa-4dc4-bb7b-6a2cc64eeff7",
+          "currentVersion": 1
+        }
+      },
+      "updatedAt": "2026-08-16T12:50:00+08:00"
+    }
+  }
+}
