@@ -289,3 +289,89 @@ func TestProviderConfigCopyDoesNotShareKeyMetadata(t *testing.T) {
 		t.Fatalf("original metadata changed to %+v", original.KeyMetadata[state.KeyID("k1")])
 	}
 }
+
+func TestValidateAcceptsValidProxyURLs(t *testing.T) {
+	cfg := &Config{
+		ProxyURL: "http://127.0.0.1:7897",
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}, ProxyURL: "socks5://127.0.0.1:7891"},
+			{ID: "p2", TargetURL: "https://two.example.com", Keys: []string{"k2"}, ProxyURL: "direct"},
+		},
+		ActiveProvider: "p1",
+	}
+
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate() error = %v, want nil", err)
+	}
+}
+
+func TestValidateRejectsInvalidProxyURLs(t *testing.T) {
+	cases := []struct {
+		name   string
+		global string
+	}{
+		{name: "bad global scheme", global: "ftp://127.0.0.1:7897"},
+		{name: "global without host", global: "http://"},
+		{name: "relative proxy url", global: "/tmp/socks"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				ProxyURL:  tc.global,
+				TargetURL: "https://example.com",
+				Keys:      []string{"k1"},
+			}
+			if err := cfg.validate(); err == nil {
+				t.Fatal("validate() error = nil, want invalid proxy_url error")
+			}
+		})
+	}
+
+	providerCfg := &Config{
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}, ProxyURL: "ftp://127.0.0.1:21"},
+		},
+		ActiveProvider: "p1",
+	}
+	if err := providerCfg.validate(); err == nil {
+		t.Fatal("validate() error = nil, want invalid providers[0].proxy_url error")
+	}
+}
+
+func TestEffectiveProxyURLPrecedence(t *testing.T) {
+	cfg := &Config{
+		ProxyURL: "http://127.0.0.1:7897",
+		Providers: []ProviderConfig{
+			{ID: "inherit", TargetURL: "https://a.example.com", Keys: []string{"k1"}},
+			{ID: "direct", TargetURL: "https://b.example.com", Keys: []string{"k2"}, ProxyURL: "direct"},
+			{ID: "dash", TargetURL: "https://c.example.com", Keys: []string{"k3"}, ProxyURL: "-"},
+			{ID: "override", TargetURL: "https://d.example.com", Keys: []string{"k4"}, ProxyURL: "socks5h://127.0.0.1:7891"},
+		},
+	}
+
+	providers := cfg.ProviderConfigs()
+	if got := cfg.EffectiveProxyURL(providers[0]); got != "http://127.0.0.1:7897" {
+		t.Fatalf("inherit proxy = %q, want global value", got)
+	}
+	if got := cfg.EffectiveProxyURL(providers[1]); got != "" {
+		t.Fatalf("direct proxy = %q, want empty for direct connection", got)
+	}
+	if got := cfg.EffectiveProxyURL(providers[2]); got != "" {
+		t.Fatalf("dash proxy = %q, want empty for direct connection", got)
+	}
+	if got := cfg.EffectiveProxyURL(providers[3]); got != "socks5h://127.0.0.1:7891" {
+		t.Fatalf("override proxy = %q, want socks5h override", got)
+	}
+}
+
+func TestEffectiveProxyURLWithoutGlobal(t *testing.T) {
+	cfg := &Config{
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	}
+
+	if got := cfg.EffectiveProxyURL(cfg.ProviderConfigs()[0]); got != "" {
+		t.Fatalf("proxy = %q, want empty when nothing configured", got)
+	}
+}

@@ -5,6 +5,7 @@ state.json.tmp
 logs/
 stats_data/
 .claude/
+.zcode/
 *.log
 *.exe
 *.exe~

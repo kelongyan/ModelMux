@@ -84,6 +84,13 @@ export function ProviderEditorModal({
           <Input placeholder="https://your-provider.example.com" />
         </Form.Item>
         <Form.Item
+          label="出站代理"
+          name="proxy_url"
+          extra="留空跟随设置页的全局出站代理；填 direct 强制直连；也可填 http/socks5 地址单独覆盖，例如 http://127.0.0.1:7897。"
+        >
+          <Input placeholder="http://127.0.0.1:7897 或 direct" allowClear />
+        </Form.Item>
+        <Form.Item
           label="上游协议"
           name="protocol"
           extra="决定是否注入 OpenAI 专有的 stream_options.include_usage；Anthropic/Gemini 原生协议请勿选 openai。"

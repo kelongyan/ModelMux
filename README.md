@@ -44,6 +44,7 @@
 | 🔄 | **Key 级状态机** | `active → cooling → invalid` 三态流转，互不干扰 |
 | ⚡ | **智能重试** | 429 冷却、401 失效、网络抖动分级处理，独立重试预算 |
 | ♨️ | **配置热重载** | `fsnotify` 监听 + 原子写盘，改配置即时生效，reload 失败自动回滚 |
+| 🌐 | **出站代理** | 全局默认 + Provider 级覆盖（支持 `direct` 直连豁免），http/https/socks5 通吃，本地 Clash Verge 一键接入 |
 | 🌊 | **流式透传** | SSE / Streaming 按 chunk 立即 flush，零缓冲延迟 |
 | 📊 | **调用统计** | 请求量、成功率、Token 用量、延迟分布，可视化图表一屏掌握 |
 | 🖥️ | **内置管理台** | React SPA 嵌入 Go 二进制，Dashboard / Provider / 统计 / 事件一屏管理 |
@@ -159,12 +160,24 @@ go build -trimpath -ldflags="-s -w" -o modelmux.exe .
   "active_provider": "primary",
   "providers": [
     { "id": "primary", "target_url": "https://provider-a.com", "keys": ["sk-a1", "sk-a2"] },
-    { "id": "backup",  "target_url": "https://provider-b.com", "keys": ["sk-b1"] }
-  ]
+    { "id": "backup",  "target_url": "https://provider-b.com", "keys": ["sk-b1"], "proxy_url": "direct" }
+  ],
+  "proxy_url": "http://127.0.0.1:7897"
 }
 ```
 
 > 💡 兼容旧版单 Provider 格式 — 无 `providers` 字段时，顶层 `target_url` + `keys` 会被视为 `default` Provider。
+
+### 出站代理
+
+配置 `proxy_url` 后，所有上游请求（转发、Key 探测、模型列表拉取）都会经由代理出站，适合让海外 Provider 走本地 Clash / Clash Verge：
+
+- **支持协议**：`http://`、`https://`、`socks5://`、`socks5h://`（支持 `user:pass@host` 凭据）
+- **Clash Verge**：默认混合端口为 `7897`（原版 Clash 为 `7890`），填 `http://127.0.0.1:7897` 即可；分流规则由 Clash 自行处理
+- **优先级**：Provider 级 `proxy_url` > 顶层全局值
+  - Provider 留空 → 继承全局
+  - Provider 填 `direct`（或 `-`）→ 强制直连，国内服务不被代理拖慢
+  - Provider 填具体 URL → 该 Provider 单独走指定代理
 
 ### 运行参数
 
@@ -173,6 +186,7 @@ go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 | `listen` | `127.0.0.1:18080` | 代理服务监听地址 |
 | `admin_listen` | `127.0.0.1:18081` | 管理服务监听地址 |
 | `active_provider` | 首个 Provider | 当前使用的 Provider ID |
+| `proxy_url` | 空（直连） | 全局出站代理地址，http/https/socks5 均可，可被 Provider 级覆盖 |
 | `cooling_seconds` | `60` | 429 未返回 Retry-After 时的冷却时长 |
 | `max_retries` | `3` | Key 级错误换 Key 重试预算 |
 | `max_transient_retries` | `1` | 网络 / Provider 临时故障重试预算 |
@@ -216,7 +230,7 @@ go build -trimpath -ldflags="-s -w" -o modelmux.exe .
 Invoke-RestMethod -Method Post http://127.0.0.1:18081/admin/reload
 ```
 
-- ✅ **热生效** — `active_provider` · `providers` · `cooling_seconds` · `max_retries` · 超时类参数 · `max_body_bytes`
+- ✅ **热生效** — `active_provider` · `providers[]` · `proxy_url` · `cooling_seconds` · `max_retries` · 超时类参数 · `max_body_bytes`
 - 🔁 **需重启** — `listen` · `admin_listen` · 日志类 · 持久化类 · 统计类
 
 ## 📡 Admin API

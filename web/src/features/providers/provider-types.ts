@@ -44,6 +44,7 @@ export type ProviderFormValues = {
   keys_text: string;
   protocol: string;
   strip_tools: boolean;
+  proxy_url?: string;
 };
 
 export type KeyFormValues = {

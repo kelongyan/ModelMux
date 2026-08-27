@@ -75,6 +75,10 @@ const (
 	ProtocolGemini = "gemini"
 	// DefaultProtocol 是 provider 未显式声明协议时的默认值。
 	DefaultProtocol = ProtocolOpenAI
+
+	// ProxyDirectKeyword 是 provider 级强制直连的出站代理豁免关键字，
+	// 用于在配置了全局 proxy_url 时让个别 provider 绕过代理。
+	ProxyDirectKeyword = "direct"
 )
 
 type ProviderConfig struct {
@@ -86,12 +90,28 @@ type ProviderConfig struct {
 	StripTools            bool                   `json:"strip_tools,omitempty"`
 	Protocol              string                 `json:"protocol,omitempty"`
 	CodexCompactionCompat *bool                  `json:"codex_compaction_compat,omitempty"`
+	ProxyURL              string                 `json:"proxy_url,omitempty"` // 空=继承全局；direct=强制直连；否则覆盖全局
 }
 
 // CodexCompactionCompatibilityEnabled 返回是否自动兼容 Codex remote compaction。
 // 未配置时默认启用；只有显式配置 false 才关闭。
 func (p ProviderConfig) CodexCompactionCompatibilityEnabled() bool {
 	return p.CodexCompactionCompat == nil || *p.CodexCompactionCompat
+}
+
+// EffectiveProxyURL 解析某个 provider 实际使用的出站代理地址。
+// 优先级：provider.proxy_url 填了具体 URL 则覆盖全局；为 "direct"/"-" 时强制直连；
+// 为空时继承顶层 proxy_url。返回空字符串表示该 provider 直连。
+// 合法性由 validate() 保证，这里只做归一化取值。
+func (c *Config) EffectiveProxyURL(provider ProviderConfig) string {
+	raw := strings.TrimSpace(provider.ProxyURL)
+	if raw != "" {
+		if raw == "-" || strings.EqualFold(raw, ProxyDirectKeyword) {
+			return ""
+		}
+		return raw
+	}
+	return strings.TrimSpace(c.ProxyURL)
 }
 
 type KeyMetadata struct {
@@ -107,6 +127,7 @@ type Config struct {
 	Keys                            []string         `json:"keys"`
 	ActiveProvider                  string           `json:"active_provider"`
 	Providers                       []ProviderConfig `json:"providers"`
+	ProxyURL                        string           `json:"proxy_url,omitempty"` // 全局默认出站代理，http/https/socks5/socks5h
 	CoolingSeconds                  int              `json:"cooling_seconds"`
 	MaxRetries                      int              `json:"max_retries"`
 	MaxTransientRetries             int              `json:"max_transient_retries"`
@@ -180,6 +201,9 @@ func (c *Config) Validate() error {
 
 // validate 校验启动必须依赖的配置项。
 func (c *Config) validate() error {
+	if err := validateProxyURL(c.ProxyURL); err != nil {
+		return fmt.Errorf("proxy_url: %w", err)
+	}
 	providers := c.Providers
 	activeProvider := c.ActiveProvider
 	if len(providers) == 0 {
@@ -234,6 +258,9 @@ func (c *Config) validate() error {
 		if err := validateProtocol(provider.Protocol); err != nil {
 			return fmt.Errorf("providers[%d].protocol: %w", i, err)
 		}
+		if err := validateProxyURL(provider.ProxyURL); err != nil {
+			return fmt.Errorf("providers[%d].proxy_url: %w", i, err)
+		}
 	}
 	if activeProvider == "" {
 		return fmt.Errorf("active_provider is required")
@@ -267,6 +294,32 @@ func validateProtocol(protocol string) error {
 	default:
 		return fmt.Errorf("must be one of: %s, %s, %s", ProtocolOpenAI, ProtocolAnthropic, ProtocolGemini)
 	}
+}
+
+// proxyAllowedSchemes 列出出站代理允许的 URL scheme；
+// socks5/socks5h 由 net/http 的 ProxyURL 原生支持，无需额外依赖。
+var proxyAllowedSchemes = map[string]struct{}{
+	"http":   {},
+	"https":  {},
+	"socks5": {},
+	"socks5h": {},
+}
+
+// validateProxyURL 校验出站代理地址。空值与 direct/- 豁免关键字合法放行，
+// 其余必须是带允许 scheme 和 host 的绝对 URL（允许 user:pass@host 凭据）。
+func validateProxyURL(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" || value == "-" || strings.EqualFold(value, ProxyDirectKeyword) {
+		return nil
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("must be an absolute URL with scheme and host")
+	}
+	if _, ok := proxyAllowedSchemes[strings.ToLower(u.Scheme)]; !ok {
+		return fmt.Errorf("scheme must be one of: http, https, socks5, socks5h, got %q", u.Scheme)
+	}
+	return nil
 }
 
 // ValidateAfterDefaults 校验依赖默认值补齐后的配置项。

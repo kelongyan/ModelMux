@@ -3061,3 +3061,126 @@ func waitForCondition(t testing.TB, timeout time.Duration, condition func() bool
 	}
 	t.Fatal("condition was not met before timeout")
 }
+
+// newFakeForwardProxy 启动一个只支持绝对 URI 转发的假正向代理（http 上游无需 CONNECT），
+// 返回 server 与经代理请求数的观测口。
+func newFakeForwardProxy(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Host == "" || r.URL.Scheme == "" {
+			t.Errorf("proxy received non-absolute-form request: %q", r.URL.String())
+			http.Error(w, "expected absolute-form URI", http.StatusBadRequest)
+			return
+		}
+		outReq := r.Clone(r.Context())
+		outReq.RequestURI = ""
+		resp, err := http.DefaultTransport.RoundTrip(outReq)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}))
+	return server, &hits
+}
+
+func TestServeHTTPRoutesThroughConfiguredProxy(t *testing.T) {
+	var upstreamAuth atomic.Value
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAuth.Store(r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer upstream.Close()
+
+	fakeProxy, proxyHits := newFakeForwardProxy(t)
+	defer fakeProxy.Close()
+
+	cfg := &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: upstream.URL, Keys: []string{"real-key"}},
+		},
+		ProxyURL:              fakeProxy.URL,
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	h, _ := mustHandler(t, cfg)
+
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if proxyHits.Load() != 1 {
+		t.Fatalf("proxy hits = %d, want 1", proxyHits.Load())
+	}
+	if got, _ := upstreamAuth.Load().(string); got != "Bearer real-key" {
+		t.Fatalf("upstream Authorization = %q, want Bearer real-key", got)
+	}
+
+	// 覆盖配置：全局代理仍在，provider 级 direct 必须绕开代理。
+	nextCfg := &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: upstream.URL, Keys: []string{"real-key"}, ProxyURL: "direct"},
+		},
+		ProxyURL:              fakeProxy.URL,
+		RequestTimeoutSeconds: 10,
+		MaxRetries:            1,
+		CoolingSeconds:        1,
+	}
+	if err := h.UpdateConfig(nextCfg); err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://proxy.test/v1/messages", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("direct status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if proxyHits.Load() != 1 {
+		t.Fatalf("proxy hits after direct override = %d, want unchanged (1)", proxyHits.Load())
+	}
+}
+
+func TestProbeKeyUsesConfiguredProxy(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	fakeProxy, proxyHits := newFakeForwardProxy(t)
+	defer fakeProxy.Close()
+
+	provider := config.ProviderConfig{ID: "p1", TargetURL: upstream.URL, Keys: []string{"k1"}}
+	cfgWithProxy := &config.Config{Providers: []config.ProviderConfig{provider}, ProxyURL: fakeProxy.URL}
+
+	result := ProbeKey(context.Background(), cfgWithProxy, provider, "k1")
+	if !result.OK {
+		t.Fatalf("ProbeKey ok = false, result = %+v", result)
+	}
+	if proxyHits.Load() != 1 {
+		t.Fatalf("proxy hits = %d, want 1", proxyHits.Load())
+	}
+
+	directProvider := provider
+	directProvider.ProxyURL = "direct"
+	result = ProbeKey(context.Background(), cfgWithProxy, directProvider, "k1")
+	if !result.OK {
+		t.Fatalf("direct ProbeKey ok = false, result = %+v", result)
+	}
+	if proxyHits.Load() != 1 {
+		t.Fatalf("proxy hits after direct probe = %d, want unchanged (1)", proxyHits.Load())
+	}
+}

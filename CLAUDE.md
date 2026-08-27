@@ -104,6 +104,7 @@ Restart-required: `listen`, `admin_listen`, all `log_*` fields.
 - `persist_state` is `*bool` — `nil` defaults to enabled. Use `cfg.StatePersistenceEnabled()`, not `cfg.PersistState != nil && *cfg.PersistState`.
 - `invalid_ttl_hours` (default 24): on startup, persisted `invalid` keys older than this TTL are restored to `active`. This is the only automatic recovery path for invalid keys — within a running process, invalid is sticky until the key list is updated.
 - `stats_enabled` is `*bool` — `nil` defaults to enabled. Use `cfg.StatsCollectionEnabled()`, not direct pointer dereference.
+- `proxy_url` (optional, hot-reloadable): outbound proxy for all upstream traffic (forwarding, key probes, model-list fetch). Top-level value is the global default; each provider may override it with its own `proxy_url` (`""` = inherit, `"direct"`/`"-"` = force direct). Resolve via `cfg.EffectiveProxyURL(provider)`; allowed schemes are http/https/socks5/socks5h, validated by `config.validateProxyURL`. When a provider is proxied, the models-fetch IP allowlist (SSRF guard) is bypassed because the dial target becomes the proxy itself.
 - `stats_dir` (default `stats_data`), `stats_retention_days` (default 30), `stats_max_recent_records` (default 10000) control the call-statistics store. The stats dir is separate from `logs/` and stores daily JSONL files — don't commit it.
 
 ## Key design decisions worth respecting

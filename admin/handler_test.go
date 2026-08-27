@@ -364,6 +364,7 @@ func TestSettingsGetAndPut(t *testing.T) {
 	resp.Settings.StreamKeepAliveSeconds = intPtr(4)
 	resp.Settings.StreamIdleTimeoutSeconds = intPtr(60)
 	resp.Settings.StreamMaxDurationSeconds = intPtr(900)
+	resp.Settings.ProxyURL = "http://127.0.0.1:7897"
 
 	buf, err := json.Marshal(resp.Settings)
 	if err != nil {
@@ -434,6 +435,65 @@ func TestSettingsGetAndPut(t *testing.T) {
 	}
 	if loaded.StatsMaxRecentRecords != 4321 {
 		t.Fatalf("StatsMaxRecentRecords = %d, want 4321", loaded.StatsMaxRecentRecords)
+	}
+	if loaded.ProxyURL != "http://127.0.0.1:7897" {
+		t.Fatalf("ProxyURL = %q, want http://127.0.0.1:7897", loaded.ProxyURL)
+	}
+}
+
+func TestUpdateProviderProxyURLOverrideSemantics(t *testing.T) {
+	h, _, path := newTestHandler(t, &config.Config{
+		ActiveProvider: "p1",
+		Providers: []config.ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	mux := http.NewServeMux()
+	h.Register(mux)
+
+	putProvider := func(payload apiProviderUpdatePayload) *httptest.ResponseRecorder {
+		t.Helper()
+		buf, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("json.Marshal() error = %v", err)
+		}
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/admin/api/v1/providers/p1", bytes.NewReader(buf))
+		req.Header.Set("Content-Type", "application/json")
+		mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("PUT /providers/p1 status = %d, body=%s", rr.Code, rr.Body.String())
+		}
+		return rr
+	}
+	loadProvider := func() config.ProviderConfig {
+		t.Helper()
+		loaded, err := config.Read(path)
+		if err != nil {
+			t.Fatalf("Read(path) error = %v", err)
+		}
+		provider, ok := findProviderConfig(loaded.ProviderConfigs(), "p1")
+		if !ok {
+			t.Fatal("provider p1 should exist")
+		}
+		return provider
+	}
+
+	putProvider(apiProviderUpdatePayload{TargetURL: "https://one.example.com"})
+	if got := loadProvider().ProxyURL; got != "" {
+		t.Fatalf("ProxyURL after nil payload = %q, want unchanged empty", got)
+	}
+
+	override := "socks5://127.0.0.1:7891"
+	putProvider(apiProviderUpdatePayload{TargetURL: "https://one.example.com", ProxyURL: &override})
+	if got := loadProvider().ProxyURL; got != override {
+		t.Fatalf("ProxyURL = %q, want %q", got, override)
+	}
+
+	cleared := ""
+	putProvider(apiProviderUpdatePayload{TargetURL: "https://one.example.com", ProxyURL: &cleared})
+	if got := loadProvider().ProxyURL; got != "" {
+		t.Fatalf("ProxyURL = %q, want cleared to inherit global", got)
 	}
 }
 

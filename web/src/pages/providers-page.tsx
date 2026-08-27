@@ -152,8 +152,13 @@ export function ProvidersPage(): JSX.Element {
   });
 
   const updateProviderMutation = useMutation({
-    mutationFn: async (payload: { id: string; target_url: string; protocol: string; strip_tools: boolean }) =>
-      updateProvider(payload.id, { target_url: payload.target_url, protocol: payload.protocol, strip_tools: payload.strip_tools }),
+    mutationFn: async (payload: { id: string; target_url: string; protocol: string; strip_tools: boolean; proxy_url?: string }) =>
+      updateProvider(payload.id, {
+        target_url: payload.target_url,
+        protocol: payload.protocol,
+        strip_tools: payload.strip_tools,
+        proxy_url: payload.proxy_url,
+      }),
     onSuccess: async (_, variables) => {
       messageApi.success("已更新 provider");
       setProviderModal({ open: false, mode: "create" });
@@ -553,7 +558,7 @@ export function ProvidersPage(): JSX.Element {
   }
 
   function openProviderCreate() {
-    providerForm.setFieldsValue({ id: "", target_url: "", keys_text: "", protocol: "openai", strip_tools: false });
+    providerForm.setFieldsValue({ id: "", target_url: "", keys_text: "", protocol: "openai", strip_tools: false, proxy_url: "" });
     setProviderModal({ open: true, mode: "create" });
   }
 
@@ -564,6 +569,7 @@ export function ProvidersPage(): JSX.Element {
       keys_text: "",
       protocol: provider.protocol || "openai",
       strip_tools: provider.strip_tools ?? false,
+      proxy_url: provider.proxy_url ?? "",
     });
     setProviderModal({ open: true, mode: "edit", provider });
   }
@@ -664,6 +670,7 @@ export function ProvidersPage(): JSX.Element {
 
   async function submitProviderForm(values: ProviderFormValues) {
     const keys = splitLinesText(values.keys_text);
+    const proxyURL = values.proxy_url?.trim() ?? "";
     if (providerModal.mode === "create") {
       await createProviderMutation.mutateAsync({
         id: values.id.trim(),
@@ -671,6 +678,7 @@ export function ProvidersPage(): JSX.Element {
         keys,
         protocol: values.protocol,
         strip_tools: values.strip_tools,
+        proxy_url: proxyURL || undefined,
       });
       return;
     }
@@ -685,6 +693,8 @@ export function ProvidersPage(): JSX.Element {
       target_url: values.target_url.trim(),
       protocol: values.protocol,
       strip_tools: values.strip_tools,
+      // 空串表示清除 provider 覆盖、回到跟随全局；后端按指针判空区分"未修改"。
+      proxy_url: proxyURL,
     });
   }
 

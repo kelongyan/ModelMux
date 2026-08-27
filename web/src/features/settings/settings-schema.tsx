@@ -6,6 +6,7 @@ import type { SaveSummary, SettingFieldMeta } from "./settings-types";
 const fieldLabels: Record<string, string> = {
   listen: "代理监听地址",
   admin_listen: "管理监听地址",
+  proxy_url: "出站代理地址",
   active_provider: "当前活跃 Provider",
   cooling_seconds: "429 冷却秒数",
   max_retries: "最大重试次数",
@@ -80,6 +81,12 @@ export function buildSettingGroups(response: AdminSettingsResponse) {
     networkFields: [
       mkField("listen", "代理监听地址", "例如 127.0.0.1:18080。", () => <Input placeholder="127.0.0.1:18080" />),
       mkField("admin_listen", "管理监听地址", "建议继续保持本地回环地址。", () => <Input placeholder="127.0.0.1:18081" />),
+      mkField(
+        "proxy_url",
+        "出站代理地址",
+        "全局默认出站代理，支持 http/https/socks5，例如 http://127.0.0.1:7897（Clash Verge 默认混合端口 7897）。留空为直连；也可在 Provider 上单独覆盖或填 direct 强制直连。",
+        () => <Input placeholder="http://127.0.0.1:7897" allowClear />,
+      ),
     ] as SettingFieldMeta[],
     logFields: [
       mkField("log_level", "日志级别", "debug 会附带更多运行细节与 source 信息。", () => (

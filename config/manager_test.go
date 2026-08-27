@@ -405,3 +405,98 @@ func mustNormalizedConfig(t *testing.T, cfg *Config) *Config {
 	}
 	return next
 }
+
+func TestManagerUpdateTreatsProxyURLChangeAsHotReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	initial := mustNormalizedConfig(t, &Config{
+		ActiveProvider: "p1",
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	if err := writeFileAtomic(path, initial); err != nil {
+		t.Fatalf("writeFileAtomic() error = %v", err)
+	}
+
+	reloads := 0
+	manager := NewManager(path, func(path string) error {
+		reloads++
+		cfg, err := Read(path)
+		if err != nil {
+			return err
+		}
+		SetCurrent(cfg)
+		return nil
+	})
+
+	result, err := manager.Update(func(cfg *Config) error {
+		cfg.ProxyURL = "http://127.0.0.1:7897"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if reloads != 1 {
+		t.Fatalf("reloads = %d, want 1", reloads)
+	}
+	if result == nil || len(result.ChangedFields) != 1 || result.ChangedFields[0] != "proxy_url" {
+		t.Fatalf("result.ChangedFields = %#v, want [proxy_url]", result)
+	}
+	if len(result.HotReloadedFields) != 1 || result.HotReloadedFields[0] != "proxy_url" {
+		t.Fatalf("result.HotReloadedFields = %#v, want [proxy_url]", result.HotReloadedFields)
+	}
+
+	loaded, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read(path) error = %v", err)
+	}
+	if loaded.ProxyURL != "http://127.0.0.1:7897" {
+		t.Fatalf("loaded.ProxyURL = %q, want http://127.0.0.1:7897", loaded.ProxyURL)
+	}
+}
+
+func TestManagerUpdateTreatsProviderProxyURLChangeAsProviderChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	initial := mustNormalizedConfig(t, &Config{
+		ActiveProvider: "p1",
+		Providers: []ProviderConfig{
+			{ID: "p1", TargetURL: "https://one.example.com", Keys: []string{"k1"}},
+		},
+	})
+	if err := writeFileAtomic(path, initial); err != nil {
+		t.Fatalf("writeFileAtomic() error = %v", err)
+	}
+
+	reloads := 0
+	manager := NewManager(path, func(path string) error {
+		reloads++
+		cfg, err := Read(path)
+		if err != nil {
+			return err
+		}
+		SetCurrent(cfg)
+		return nil
+	})
+
+	result, err := manager.Update(func(cfg *Config) error {
+		cfg.Providers[0].ProxyURL = "direct"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if reloads != 1 {
+		t.Fatalf("reloads = %d, want 1", reloads)
+	}
+	if result == nil || len(result.ChangedFields) != 1 || result.ChangedFields[0] != "providers" {
+		t.Fatalf("result.ChangedFields = %#v, want [providers]", result)
+	}
+
+	loaded, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read(path) error = %v", err)
+	}
+	if loaded.Providers[0].ProxyURL != "direct" {
+		t.Fatalf("loaded.Providers[0].ProxyURL = %q, want direct", loaded.Providers[0].ProxyURL)
+	}
+}

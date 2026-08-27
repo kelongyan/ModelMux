@@ -12,6 +12,7 @@ var (
 	HotReloadFields = []string{
 		"active_provider",
 		"providers",
+		"proxy_url",
 		"cooling_seconds",
 		"max_retries",
 		"max_transient_retries",
@@ -176,6 +177,7 @@ func diffFields(before, after *Config) []string {
 	appendIfChanged("admin_listen", before.AdminListen == after.AdminListen)
 	appendIfChanged("active_provider", before.ActiveProvider == after.ActiveProvider)
 	appendIfChanged("providers", equalProviders(before.ProviderConfigs(), after.ProviderConfigs()))
+	appendIfChanged("proxy_url", before.ProxyURL == after.ProxyURL)
 	appendIfChanged("cooling_seconds", before.CoolingSeconds == after.CoolingSeconds)
 	appendIfChanged("max_retries", before.MaxRetries == after.MaxRetries)
 	appendIfChanged("max_transient_retries", before.MaxTransientRetries == after.MaxTransientRetries)
@@ -219,6 +221,7 @@ func equalProviders(a, b []ProviderConfig) bool {
 	for i := range a {
 		if a[i].ID != b[i].ID || a[i].TargetURL != b[i].TargetURL || a[i].StripTools != b[i].StripTools ||
 			a[i].Protocol != b[i].Protocol ||
+			a[i].ProxyURL != b[i].ProxyURL ||
 			a[i].CodexCompactionCompatibilityEnabled() != b[i].CodexCompactionCompatibilityEnabled() {
 			return false
 		}

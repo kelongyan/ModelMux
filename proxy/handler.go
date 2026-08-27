@@ -441,6 +441,10 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 	requestTimeoutSeconds := effectiveInt(cfg.RequestTimeoutSeconds, config.DefaultRequestTimeoutSeconds)
 	connectTimeoutSeconds := effectiveInt(cfg.ConnectTimeoutSeconds, config.DefaultConnectTimeoutSeconds)
 	responseHeaderTimeoutSeconds := effectiveInt(cfg.ResponseHeaderTimeoutSeconds, config.DefaultResponseHeaderTimeoutSeconds)
+	proxyURL, err := parseProxyURL(cfg.EffectiveProxyURL(provider))
+	if err != nil {
+		return nil, err
+	}
 	transport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout:   time.Duration(connectTimeoutSeconds) * time.Second,
@@ -453,6 +457,9 @@ func newRuntimeConfig(cfg *config.Config, provider config.ProviderConfig, keyPoo
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   time.Duration(connectTimeoutSeconds) * time.Second,
 		ResponseHeaderTimeout: time.Duration(responseHeaderTimeoutSeconds) * time.Second,
+	}
+	if proxyURL != nil {
+		transport.Proxy = http.ProxyURL(proxyURL)
 	}
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -499,6 +506,21 @@ func parseTargetURL(rawURL string) (*url.URL, error) {
 		return nil, fmt.Errorf("invalid target_url: absolute URL with scheme and host is required")
 	}
 	return target, nil
+}
+
+// parseProxyURL 把已通过配置校验的出站代理地址解析为 *url.URL；
+// 空串返回 (nil, nil) 表示直连。非空但无法解析时返回错误兜底，
+// 正常路径下不会触发（config.validateProxyURL 已保证合法性）。
+func parseProxyURL(raw string) (*url.URL, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("invalid proxy_url %q", raw)
+	}
+	return u, nil
 }
 
 // effectiveInt 在测试或手写配置未填时补齐运行时默认整数值。

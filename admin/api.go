@@ -60,6 +60,7 @@ type apiSettingsPayload struct {
 	StatsMaxRecentRecords           int    `json:"stats_max_recent_records"`
 	HasAdminAPIKey                  bool   `json:"has_admin_api_key"`
 	AdminAPIKey                     string `json:"admin_api_key,omitempty"`
+	ProxyURL                        string `json:"proxy_url,omitempty"`
 }
 
 type apiProviderSummary struct {
@@ -76,6 +77,7 @@ type apiProviderSummary struct {
 	Protocol              string   `json:"protocol"`
 	StripTools            bool     `json:"strip_tools"`
 	CodexCompactionCompat bool     `json:"codex_compaction_compat"`
+	ProxyURL              string   `json:"proxy_url,omitempty"`
 }
 
 type apiProviderDetail struct {
@@ -93,6 +95,7 @@ type apiProviderDetail struct {
 	StripTools            bool                   `json:"strip_tools"`
 	Protocol              string                 `json:"protocol"`
 	CodexCompactionCompat bool                   `json:"codex_compaction_compat"`
+	ProxyURL              string                 `json:"proxy_url,omitempty"`
 }
 
 type apiProviderKeyDetail struct {
@@ -118,6 +121,7 @@ type apiProviderCreatePayload struct {
 	Protocol              string   `json:"protocol"`
 	StripTools            bool     `json:"strip_tools"`
 	CodexCompactionCompat *bool    `json:"codex_compaction_compat,omitempty"`
+	ProxyURL              string   `json:"proxy_url,omitempty"` // 空=继承全局；direct=强制直连；URL=覆盖
 }
 
 type apiProviderUpdatePayload struct {
@@ -125,6 +129,7 @@ type apiProviderUpdatePayload struct {
 	Protocol              *string `json:"protocol"`
 	StripTools            *bool   `json:"strip_tools"`
 	CodexCompactionCompat *bool   `json:"codex_compaction_compat"`
+	ProxyURL              *string `json:"proxy_url,omitempty"` // nil=不修改；指针为空串=清除覆盖回到继承全局
 }
 
 type apiKeysPayload struct {
@@ -582,6 +587,7 @@ func (h *Handler) providerDetail(w http.ResponseWriter, r *http.Request, id stri
 		StripTools:            providerCfg.StripTools,
 		Protocol:              providerCfg.Protocol,
 		CodexCompactionCompat: providerCfg.CodexCompactionCompatibilityEnabled(),
+		ProxyURL:              providerCfg.ProxyURL,
 	})
 }
 
@@ -661,6 +667,7 @@ func (h *Handler) createProvider(w http.ResponseWriter, r *http.Request) {
 			Protocol:              protocol,
 			StripTools:            req.StripTools,
 			CodexCompactionCompat: req.CodexCompactionCompat,
+			ProxyURL:              strings.TrimSpace(req.ProxyURL),
 		})
 		return nil
 	})
@@ -720,6 +727,9 @@ func (h *Handler) updateProvider(w http.ResponseWriter, r *http.Request, id stri
 		}
 		if req.CodexCompactionCompat != nil {
 			cfg.Providers[idx].CodexCompactionCompat = req.CodexCompactionCompat
+		}
+		if req.ProxyURL != nil {
+			cfg.Providers[idx].ProxyURL = strings.TrimSpace(*req.ProxyURL)
 		}
 		return nil
 	})
@@ -1018,11 +1028,25 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("build models url: %v", err)})
 		return
 	}
-	allowedIPs, err := validateUpstreamURL(modelsURL)
-	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "upstream URL is not allowed for security reasons"})
-		return
+
+	// 配置了出站代理时，连接目标是代理地址而非上游，IP 白名单的 DNS 校验语义不再适用，
+	// 此时信任边界为管理员显式配置的 proxy_url；直连时保留 SSRF 防护。
+	var client *http.Client
+	if proxyRaw := cfg.EffectiveProxyURL(providerCfg); proxyRaw != "" {
+		client = proxiedUpstreamClient(proxyRaw, 15*time.Second)
+		if client == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid proxy_url configuration"})
+			return
+		}
+	} else {
+		allowedIPs, err := validateUpstreamURL(modelsURL)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "upstream URL is not allowed for security reasons"})
+			return
+		}
+		client = safeUpstreamClient(allowedIPs, 15*time.Second)
 	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
@@ -1034,7 +1058,6 @@ func (h *Handler) fetchProviderModels(w http.ResponseWriter, r *http.Request, id
 	reqHTTP.Header.Set("Authorization", "Bearer "+keyValue)
 	reqHTTP.Header.Set("Accept", "application/json")
 
-	client := safeUpstreamClient(allowedIPs, 15*time.Second)
 	resp, err := client.Do(reqHTTP)
 	if err != nil {
 		h.recordEvent("warn", logx.CategoryAdmin, "admin.models_fetch_failed", "fetch upstream models failed", map[string]any{
@@ -1181,6 +1204,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 			StatsRetentionDays:              cfg.StatsRetentionDays,
 			StatsMaxRecentRecords:           cfg.StatsMaxRecentRecords,
 			HasAdminAPIKey:                  cfg.AdminAPIKey != "",
+			ProxyURL:                        cfg.ProxyURL,
 		},
 		HotReloadFields:       append([]string(nil), config.HotReloadFields...),
 		RestartRequiredFields: append([]string(nil), config.RestartRequiredFields...),
@@ -1202,6 +1226,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	result, err := h.cfgManager.Update(func(cfg *config.Config) error {
 		cfg.Listen = req.Listen
 		cfg.AdminListen = req.AdminListen
+		cfg.ProxyURL = strings.TrimSpace(req.ProxyURL)
 		cfg.CoolingSeconds = req.CoolingSeconds
 		cfg.MaxRetries = req.MaxRetries
 		if req.MaxTransientRetries != nil {
@@ -1763,6 +1788,7 @@ func buildProviderSummary(providerCfg config.ProviderConfig, active bool, status
 		Protocol:              providerCfg.Protocol,
 		StripTools:            providerCfg.StripTools,
 		CodexCompactionCompat: providerCfg.CodexCompactionCompatibilityEnabled(),
+		ProxyURL:              providerCfg.ProxyURL,
 	}
 	for _, keyStatus := range statuses {
 		switch keyStatus.State {
@@ -2073,6 +2099,27 @@ func safeUpstreamClient(allowedIPs []net.IP, timeout time.Duration) *http.Client
 		ResponseHeaderTimeout: 10 * time.Second,
 	}
 	return &http.Client{Timeout: timeout, Transport: transport}
+}
+
+// proxiedUpstreamClient 构建走指定出站代理的 http.Client，供 models 拉取等管理面出站请求使用。
+// 合法性由 config.validateProxyURL 在加载时保证，这里解析失败兜底返回 nil。
+func proxiedUpstreamClient(rawProxyURL string, timeout time.Duration) *http.Client {
+	proxyURL, err := url.Parse(strings.TrimSpace(rawProxyURL))
+	if err != nil || proxyURL.Host == "" {
+		return nil
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyURL(proxyURL),
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          10,
+			MaxIdleConnsPerHost:   2,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: timeout,
+		},
+	}
 }
 
 func isBlockedHost(host string) bool {

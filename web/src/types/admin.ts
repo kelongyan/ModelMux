@@ -36,6 +36,7 @@ export type AdminProviderSummary = {
   models: string[];
   protocol?: string;
   strip_tools?: boolean;
+  proxy_url?: string;
 };
 
 export type AdminProviderCircuit = {
@@ -86,6 +87,7 @@ export type AdminProviderDetailResponse = {
   models: string[];
   strip_tools: boolean;
   protocol: string;
+  proxy_url?: string;
 };
 
 // AdminDashboardResponse 对应 dashboard 聚合接口的响应结构。
@@ -193,6 +195,7 @@ export type AdminProviderCreatePayload = {
   keys: string[];
   protocol?: string;
   strip_tools?: boolean;
+  proxy_url?: string;
 };
 
 // AdminProviderUpdatePayload 对应 provider 基础信息编辑结构。
@@ -200,6 +203,7 @@ export type AdminProviderUpdatePayload = {
   target_url: string;
   protocol?: string;
   strip_tools?: boolean;
+  proxy_url?: string;
 };
 
 // AdminKeysPayload 对应 provider key 追加与替换动作。
@@ -248,6 +252,7 @@ export type AdminSettingsPayload = {
   stats_dir: string;
   stats_retention_days: number;
   stats_max_recent_records: number;
+  proxy_url: string;
 };
 
 // AdminSettingsResponse 对应设置页读取接口的响应结构。

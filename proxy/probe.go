@@ -5,12 +5,26 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/kelongyan/ModelMux/config"
 )
 
 const keyProbeMaxTimeout = 15 * time.Second
+
+// proxiedTransport 构建走指定代理的精简 transport，供探测等一次性出站请求使用。
+func proxiedTransport(proxyURL *url.URL) *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyURL(proxyURL),
+		MaxIdleConns:          2,
+		MaxIdleConnsPerHost:   2,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+}
 
 // probeClient 是 key 探测专用的共享 HTTP client，避免每次 ProbeKey 都创建新 transport 和连接池。
 // 超时由调用方通过 context 控制，client 本身不设置固定超时。
@@ -51,6 +65,17 @@ func ProbeKey(ctx context.Context, cfg *config.Config, provider config.ProviderC
 	outURL.Path = singleJoiningSlash(target.Path, "/models")
 	outURL.RawQuery = ""
 
+	// 探测频率低（管理台手动触发），配置了出站代理时按次构建轻量 client，
+	// 避免为每个 (provider, proxy) 组合维护常驻连接池；直连时沿用共享 probeClient。
+	client := probeClient
+	if proxyURL, err := parseProxyURL(cfg.EffectiveProxyURL(provider)); err != nil {
+		result.Error = err.Error()
+		result.LatencyMs = time.Since(start).Milliseconds()
+		return result
+	} else if proxyURL != nil {
+		client = &http.Client{Transport: proxiedTransport(proxyURL)}
+	}
+
 	timeout := time.Duration(effectiveInt(cfg.RequestTimeoutSeconds, config.DefaultRequestTimeoutSeconds)) * time.Second
 	if timeout <= 0 || timeout > keyProbeMaxTimeout {
 		timeout = keyProbeMaxTimeout
@@ -69,7 +94,7 @@ func ProbeKey(ctx context.Context, cfg *config.Config, provider config.ProviderC
 	req.Header.Set("Accept", "application/json")
 	req.Host = target.Host
 
-	resp, err := probeClient.Do(req)
+	resp, err := client.Do(req)
 	result.LatencyMs = time.Since(start).Milliseconds()
 	if err != nil {
 		scope := classifyTransportRetryScope(err)
